@@ -55,22 +55,14 @@ pub struct Length(pub U32);
 
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
-pub struct Timespec {
-    pub sec: U64,
-    pub nsec: U32,
-}
-
-#[repr(C, packed)]
-#[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub magic: Magic,
     pub inode_table_offset: Offset,
-    pub creation_time: Timespec,
-    pub inode_count: U16,
-    pub bootstrap_entry: U64,
     pub initfs_size: U64,
     pub page_size: U16,
     pub root_inode: U16,
+    pub inode_count: U16,
+    pub bootstrap_entry: U64,
 }
 
 const _: () = {

@@ -6,7 +6,7 @@ use core::str;
 use alloc::string::String;
 
 use hashbrown::HashMap;
-use redox_initfs::{InitFs, Inode, InodeDir, InodeKind, InodeStruct, types::Timespec};
+use redox_initfs::{InitFs, Inode, InodeDir, InodeKind, InodeStruct};
 
 use redox_rt::proc::FdGuard;
 use redox_scheme::{
@@ -315,8 +315,6 @@ impl SchemeSync for InitFsScheme {
     fn fstat(&mut self, id: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {
         let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?.as_node()?;
 
-        let Timespec { sec, nsec } = self.fs.image_creation_time();
-
         let inode = Self::get_inode(&self.fs, handle.inode)?;
 
         stat.st_ino = inode.id();
@@ -331,10 +329,10 @@ impl SchemeSync for InitFsScheme {
         stat.st_gid = 0;
         stat.st_size = u64::try_from(inode_len(inode)?).unwrap_or(u64::MAX);
 
-        stat.st_ctime = sec.get();
-        stat.st_ctime_nsec = nsec.get();
-        stat.st_mtime = sec.get();
-        stat.st_mtime_nsec = nsec.get();
+        stat.st_ctime = 0;
+        stat.st_ctime_nsec = 0;
+        stat.st_mtime = 0;
+        stat.st_mtime_nsec = 0;
 
         Ok(())
     }
