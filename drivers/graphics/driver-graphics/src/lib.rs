@@ -11,10 +11,10 @@ use std::os::fd::BorrowedFd;
 use std::sync::Arc;
 
 use drm_sys::{
-    drm_mode_property_enum, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON, DRM_MODE_DPMS_STANDBY,
-    DRM_MODE_DPMS_SUSPEND, DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB,
-    DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE,
-    DRM_MODE_PROP_SIGNED_RANGE, DRM_PROP_NAME_LEN,
+    drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON,
+    DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND, DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK,
+    DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT,
+    DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE, DRM_PROP_NAME_LEN,
 };
 use graphics_ipc::v2::Damage;
 use inputd::{DisplayHandle, VtEventKind};
@@ -24,6 +24,7 @@ use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP};
 
+use crate::kms::connector::KmsConnector;
 use crate::kms::objects::{KmsObjectId, KmsObjects};
 use crate::kms::properties::KmsPropertyKind;
 
@@ -37,6 +38,7 @@ pub struct StandardProperties {
 
 pub trait GraphicsAdapter: Sized + Debug {
     type Connector: Debug;
+    type Crtc: Debug;
 
     type Buffer: Buffer;
 
@@ -66,7 +68,9 @@ pub trait GraphicsAdapter: Sized + Debug {
 
     fn update_plane(
         &mut self,
+        objects: &KmsObjects<Self>,
         display_id: usize,
+        mode: Option<drm_mode_modeinfo>,
         framebuffer: Option<&Self::Buffer>,
         damage: Damage,
     );
@@ -217,8 +221,14 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                     );
 
                     for (display_id, fb) in vt_state.display_fbs.iter().enumerate() {
+                        let mode = fb.as_ref().map(|fb| {
+                            KmsConnector::<()>::modeinfo_for_size(fb.width(), fb.height())
+                        });
+
                         self.inner.adapter.update_plane(
+                            &self.inner.objects,
                             display_id,
+                            mode,
                             fb.as_deref(),
                             Damage {
                                 x: 0,
@@ -495,10 +505,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             id & 0xFF
         }
 
-        fn crtc_id(i: u32) -> u32 {
-            id_index(i) | (1 << 10)
-        }
-
         fn fb_id(i: u32) -> u32 {
             id_index(i) | (1 << 11)
         }
@@ -556,7 +562,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         .iter()
                         .map(|id| id.0)
                         .collect::<Vec<_>>();
-                    let mut crtc_ids = Vec::with_capacity(count);
+                    let crtc_ids = self
+                        .objects
+                        .crtc_ids()
+                        .iter()
+                        .map(|id| id.0)
+                        .collect::<Vec<_>>();
                     let enc_ids = self
                         .objects
                         .encoder_ids()
@@ -565,7 +576,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         .collect::<Vec<_>>();
                     let mut fb_ids = Vec::with_capacity(count);
                     for i in 0..(count as u32) {
-                        crtc_ids.push(crtc_id(i));
                         fb_ids.push(fb_id(i));
                     }
                     data.set_fb_id_ptr(&fb_ids);
@@ -579,15 +589,24 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_GET_CRTC => ipc::DrmModeCrtc::with(payload, |mut data| {
-                    let i = id_index(data.crtc_id());
-                    //TOOD: connectors
-                    data.set_fb_id(fb_id(i));
+                    let crtc = self
+                        .objects
+                        .get_crtc(KmsObjectId(data.crtc_id()))?
+                        .lock()
+                        .unwrap();
+                    // Don't touch set_connectors, that is only used by MODE_SET_CRTC
+                    data.set_fb_id(crtc.fb_id.0);
+                    // FIXME fill x and y with the data from the primary plane
                     data.set_x(0);
                     data.set_y(0);
-                    data.set_gamma_size(0);
-                    data.set_mode_valid(0);
-                    //TODO: mode
-                    data.set_mode(Default::default());
+                    data.set_gamma_size(crtc.gamma_size);
+                    if let Some(mode) = crtc.mode {
+                        data.set_mode_valid(1);
+                        data.set_mode(mode);
+                    } else {
+                        data.set_mode_valid(0);
+                        data.set_mode(Default::default());
+                    }
                     Ok(0)
                 }),
                 ipc::MODE_GET_ENCODER => ipc::DrmModeGetEncoder::with(payload, |mut data| {
@@ -785,7 +804,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 }),
                 ipc::MODE_GET_PLANE => ipc::DrmModeGetPlane::with(payload, |mut data| {
                     let i = id_index(data.plane_id());
-                    data.set_crtc_id(crtc_id(i));
+                    data.set_crtc_id(self.objects.crtc_ids()[i as usize].0);
                     data.set_fb_id(fb_id(i));
                     data.set_possible_crtcs(1 << i);
                     data.set_format_type_ptr(&[DRM_FORMAT_ARGB8888]);
@@ -794,7 +813,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 ipc::MODE_OBJ_GET_PROPERTIES => {
                     ipc::DrmModeObjGetProperties::with(payload, |mut data| {
                         // FIXME remove once all drm objects are materialized in self.objects
-                        if data.obj_id() >= 1 << 10 {
+                        if data.obj_id() >= 1 << 11 {
                             data.set_props_ptr(&[]);
                             data.set_prop_values_ptr(&[]);
                             return Ok(0);
@@ -852,8 +871,14 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         framebuffer.map(Arc::clone);
 
                     if *vt == self.active_vt {
+                        let mode = framebuffer.as_ref().map(|fb| {
+                            KmsConnector::<()>::modeinfo_for_size(fb.width(), fb.height())
+                        });
+
                         self.adapter.update_plane(
+                            &self.objects,
                             display_id,
+                            mode,
                             framebuffer.map(|fb| &**fb),
                             payload.damage,
                         );

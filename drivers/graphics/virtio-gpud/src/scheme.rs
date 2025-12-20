@@ -7,7 +7,7 @@ use driver_graphics::kms::objects::{KmsObjectId, KmsObjects};
 use driver_graphics::{
     Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme, StandardProperties,
 };
-use drm_sys::{DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON};
+use drm_sys::{drm_mode_modeinfo, DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON};
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use graphics_ipc::v2::Damage;
 
@@ -266,6 +266,7 @@ impl VirtGpuAdapter<'_> {
 
 impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     type Connector = VirtGpuConnector;
+    type Crtc = ();
 
     type Buffer = VirtGpuFramebuffer<'a>;
 
@@ -283,7 +284,9 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         });
 
         for display_id in 0..self.config.num_scanouts.get() {
-            let connector = objects.add_connector(VirtGpuConnector { display_id });
+            let crtc = objects.add_crtc(());
+
+            let connector = objects.add_connector(VirtGpuConnector { display_id }, &[crtc]);
             if self.has_edid {
                 objects.add_object_property(connector, standard_properties.edid, 0);
             }
@@ -417,11 +420,20 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
     fn update_plane(
         &mut self,
+        objects: &KmsObjects<Self>,
         display_id: usize,
+        mode: Option<drm_mode_modeinfo>,
         framebuffer: Option<&Self::Buffer>,
         damage: Damage,
     ) {
         futures::executor::block_on(async {
+            objects
+                .get_crtc(objects.crtc_ids()[display_id])
+                .unwrap()
+                .lock()
+                .unwrap()
+                .mode = mode;
+
             let Some(framebuffer) = framebuffer else {
                 let scanout_request = Dma::new(SetScanout::new(
                     display_id as u32,

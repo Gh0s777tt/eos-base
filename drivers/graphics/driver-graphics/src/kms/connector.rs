@@ -9,10 +9,19 @@ use crate::kms::objects::{KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
-    pub fn add_connector(&mut self, driver_data: T::Connector) -> KmsObjectId {
+    pub fn add_connector(
+        &mut self,
+        driver_data: T::Connector,
+        crtcs: &[KmsObjectId],
+    ) -> KmsObjectId {
+        let mut possible_crtcs = 0;
+        for &crtc in crtcs {
+            possible_crtcs = 1 << self.get_crtc(crtc).unwrap().lock().unwrap().crtc_index;
+        }
+
         let encoder_id = self.add(KmsEncoder {
             crtc_id: KmsObjectId::INVALID,
-            possible_crtcs: 0,
+            possible_crtcs: possible_crtcs,
             possible_clones: 1 << self.encoders.len(),
         });
         self.encoders.push(encoder_id);
@@ -118,7 +127,7 @@ impl<T: Debug> KmsConnector<T> {
         // FIXME update the EDID property
     }
 
-    fn modeinfo_for_size(width: u32, height: u32) -> drm_mode_modeinfo {
+    pub(crate) fn modeinfo_for_size(width: u32, height: u32) -> drm_mode_modeinfo {
         let mut modeinfo = drm_mode_modeinfo {
             // The actual visible display size
             hdisplay: width as u16,
