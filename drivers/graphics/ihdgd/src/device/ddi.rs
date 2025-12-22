@@ -274,31 +274,26 @@ impl Ddi {
 
             Ok(edid_data)
         };
-        let (source, edid_data) = match aux_read_edid(self) {
-            Ok(edid_data) => ("AUX", edid_data),
+        match aux_read_edid(self) {
+            Ok(edid_data) => return Ok(Some(("AUX", edid_data))),
             Err(err) => {
                 log::debug!("DDI {} failed to read EDID from AUX: {}", self.name, err);
-                match gmbus_read_edid(self) {
-                    Ok(edid_data) => ("GMBUS", edid_data),
-                    Err(err) => {
-                        log::debug!("DDI {} failed to read EDID from GMBUS: {}", self.name, err);
-                        match gpio_read_edid(self) {
-                            Ok(edid_data) => ("GPIO", edid_data),
-                            Err(err) => {
-                                log::debug!(
-                                    "DDI {} failed to read EDID from GPIO: {}",
-                                    self.name,
-                                    err
-                                );
-                                // Will try again but not fail the driver
-                                return Ok(None);
-                            }
-                        }
-                    }
-                }
             }
-        };
-        Ok(Some((source, edid_data)))
+        }
+        match gmbus_read_edid(self) {
+            Ok(edid_data) => return Ok(Some(("GMBUS", edid_data))),
+            Err(err) => {
+                log::debug!("DDI {} failed to read EDID from GMBUS: {}", self.name, err);
+            }
+        }
+        match gpio_read_edid(self) {
+            Ok(edid_data) => return Ok(Some(("GPIO", edid_data))),
+            Err(err) => {
+                log::debug!("DDI {} failed to read EDID from GPIO: {}", self.name, err);
+            }
+        }
+        // Will try again but not fail the driver
+        Ok(None)
     }
 
     pub fn voltage_swing_hdmi(
