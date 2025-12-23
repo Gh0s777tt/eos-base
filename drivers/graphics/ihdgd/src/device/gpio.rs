@@ -2,7 +2,6 @@ use std::convert::Infallible;
 use std::time::Duration;
 
 use common::io::{Io, MmioPtr};
-use embedded_hal::blocking::i2c;
 use embedded_hal::digital::v2 as digital;
 
 use crate::device::HalTimer;
