@@ -405,8 +405,6 @@ struct Process {
     rgid: u32,
     egid: u32,
     sgid: u32,
-    rns: u32,
-    ens: u32,
 
     status: ProcessStatus,
     disabled_setpgid: bool,
@@ -654,8 +652,6 @@ impl<'a> ProcScheme<'a> {
                     rgid: 0,
                     egid: 0,
                     sgid: 0,
-                    rns: 1,
-                    ens: 1,
                     name: ArrayString::<32>::from_str("[init]").unwrap(),
 
                     status: ProcessStatus::PossiblyRunnable,
@@ -698,8 +694,6 @@ impl<'a> ProcScheme<'a> {
             rgid,
             egid,
             sgid,
-            ens,
-            rns,
             name,
             ..
         } = *proc_guard.borrow();
@@ -732,8 +726,6 @@ impl<'a> ProcScheme<'a> {
             rgid,
             egid,
             sgid,
-            rns,
-            ens,
             name,
 
             status: ProcessStatus::PossiblyRunnable,
@@ -778,7 +770,7 @@ impl<'a> ProcScheme<'a> {
             pid: pid.0 as u32,
             euid: proc.euid,
             egid: proc.egid,
-            ens: proc.ens,
+            ens: 0,
             debug_name: arraystring_to_bytes(proc.name),
         })?;
 
@@ -860,8 +852,8 @@ impl<'a> ProcScheme<'a> {
             rgid: process.rgid,
             egid: process.egid,
             sgid: process.sgid,
-            ens: process.ens,
-            rns: process.rns,
+            ens: 1,
+            rns: 1,
         };
         *buf.get_mut(..size_of::<ProcMeta>())
             .and_then(|b| plain::from_mut_bytes(b).ok())
@@ -972,15 +964,6 @@ impl<'a> ProcScheme<'a> {
                     if u == u32::MAX { None } else { Some(u) }
                 }
                 match verb {
-                    ProcCall::Setrens => Ready(Response::new(
-                        self.on_setrens(
-                            fd_pid,
-                            cvt_u32(metadata[1] as u32),
-                            cvt_u32(metadata[2] as u32),
-                        )
-                        .map(|()| 0),
-                        op,
-                    )),
                     ProcCall::Exit => self.on_exit_start(
                         fd_pid,
                         metadata[1] as u16,
@@ -1096,6 +1079,11 @@ impl<'a> ProcScheme<'a> {
                         }
                     }
                     ProcCall::GetProcCredentials => Response::ready_err(EACCES, op),
+
+                    // setrens is no longer implemented as procmgr call
+                    // FIXME remove this ProcCall variant
+                    ProcCall::Setrens => Response::ready_err(EINVAL, op),
+
                 }
             }
             Handle::Ps(_) => Response::ready_err(EOPNOTSUPP, op),
@@ -1646,69 +1634,6 @@ impl<'a> ProcScheme<'a> {
             cur: Some(pid),
             procs: &self.processes,
         }
-    }
-    fn on_setrens(&mut self, pid: ProcessId, rns: Option<u32>, ens: Option<u32>) -> Result<()> {
-        let proc_rc = self.processes.get(&pid).ok_or(Error::new(EBADFD))?;
-        let mut process = proc_rc.borrow_mut();
-
-        let setrns = if rns.is_none() {
-            // Ignore RNS if -1 is passed
-            false
-        } else if rns == Some(0) {
-            // Allow entering capability mode
-            true
-        } else if process.rns == 0 {
-            // Do not allow leaving capability mode
-            return Err(Error::new(EPERM));
-        } else if process.euid == 0 {
-            // Allow setting RNS if root
-            true
-        } else if rns == Some(process.ens) {
-            // Allow setting RNS if used for ENS
-            true
-        } else if rns == Some(process.rns) {
-            // Allow setting RNS if used for RNS
-            true
-        } else {
-            // Not permitted otherwise
-            return Err(Error::new(EPERM));
-        };
-
-        let setens = if ens.is_none() {
-            // Ignore ENS if -1 is passed
-            false
-        } else if ens == Some(0) {
-            // Allow entering capability mode
-            true
-        } else if process.ens == 0 {
-            // Do not allow leaving capability mode
-            return Err(Error::new(EPERM));
-        } else if process.euid == 0 {
-            // Allow setting ENS if root
-            true
-        } else if ens == Some(process.ens) {
-            // Allow setting ENS if used for ENS
-            true
-        } else if ens == Some(process.rns) {
-            // Allow setting ENS if used for RNS
-            true
-        } else {
-            // Not permitted otherwise
-            return Err(Error::new(EPERM));
-        };
-
-        if setrns {
-            process.rns = rns.unwrap();
-        }
-        if setens {
-            process.ens = ens.unwrap();
-        }
-        if setrns || setens {
-            if let Err(err) = process.sync_kernel_attrs(pid, self.auth) {
-                log::warn!("Failed to sync kernel attrs in setrens: {err}");
-            }
-        }
-        Ok(())
     }
     fn work_on(
         &mut self,
@@ -2598,17 +2523,15 @@ impl<'a> ProcScheme<'a> {
             use core::fmt::Write;
             writeln!(
                 string,
-                "{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<8}{:<16}",
+                "{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<8}{:<16}",
                 pid.0,
                 process.pgid.0,
                 process.ppid.0,
                 process.sid.0,
                 process.ruid,
                 process.rgid,
-                process.rns,
                 process.euid,
                 process.egid,
-                process.ens,
                 process.threads.len(),
                 status,
                 process.name,
@@ -2660,7 +2583,7 @@ impl Process {
                 pid: my_pid.0 as u32,
                 euid: self.euid,
                 egid: self.egid,
-                ens: self.ens,
+                ens: 0,
                 debug_name: arraystring_to_bytes(self.name),
             })?;
         }
