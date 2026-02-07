@@ -49,7 +49,7 @@ enum VirtualId {
 }
 
 pub fn run(
-    write_fd: usize,
+    write_fd: FdGuard,
     auth: &FdGuard,
     kernel_schemes: &KernelSchemeMap,
     scheme_creation_cap: usize,
@@ -87,8 +87,13 @@ pub fn run(
         .expect("failed to issue procmgr root fd");
 
     log::debug!("process manager started");
-    let _ = syscall::call_wo(write_fd, &cap_fd.to_ne_bytes(), CallFlags::FD, &[]);
-    let _ = syscall::close(write_fd);
+    let _ = syscall::call_wo(
+        write_fd.as_raw_fd(),
+        &cap_fd.to_ne_bytes(),
+        CallFlags::FD,
+        &[],
+    );
+    drop(write_fd);
 
     let mut states = HashMap::<VirtualId, PendingState, DefaultHashBuilder>::new();
     let mut awoken = VecDeque::<VirtualId>::new();

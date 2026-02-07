@@ -240,12 +240,16 @@ pub(crate) fn spawn(
     auth: &FdGuard,
     this_thr_fd: &FdGuardUpper,
     pipe_fd: usize,
-    inner: impl FnOnce(usize) -> !,
+    inner: impl FnOnce(FdGuard) -> !,
 ) -> usize {
-    let read = syscall::openat(pipe_fd, "", O_CLOEXEC, 0).expect("failed to open sync read pipe");
+    let read = FdGuard::new(
+        syscall::openat(pipe_fd, "", O_CLOEXEC, 0).expect("failed to open sync read pipe"),
+    );
 
     // The write pipe will not inherit O_CLOEXEC, but is closed by the daemon later.
-    let write = syscall::dup(read, b"write").expect("failed to open sync write pipe");
+    let write = FdGuard::new(
+        syscall::dup(read.as_raw_fd(), b"write").expect("failed to open sync write pipe"),
+    );
 
     match fork_impl(&ForkArgs::Init { this_thr_fd, auth }) {
         Err(err) => {
@@ -253,11 +257,11 @@ pub(crate) fn spawn(
         }
         // Continue serving the scheme as the child.
         Ok(0) => {
-            let _ = syscall::close(read);
+            drop(read);
         }
         // Return in order to execute init, as the parent.
         Ok(_) => {
-            let _ = syscall::close(write);
+            drop(write);
 
             let mut new_fd = usize::MAX;
             let fd_bytes = unsafe {
@@ -267,7 +271,12 @@ pub(crate) fn spawn(
                 )
             };
             loop {
-                match syscall::call_ro(read, fd_bytes, CallFlags::FD | CallFlags::FD_UPPER, &[]) {
+                match syscall::call_ro(
+                    read.as_raw_fd(),
+                    fd_bytes,
+                    CallFlags::FD | CallFlags::FD_UPPER,
+                    &[],
+                ) {
                     Err(Error { errno: EINTR }) => continue,
                     _ => break,
                 }

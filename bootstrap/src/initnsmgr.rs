@@ -10,6 +10,7 @@ use hashbrown::HashMap;
 use log::{error, warn};
 use redox_path::RedoxPath;
 use redox_path::RedoxScheme;
+use redox_rt::proc::FdGuard;
 use redox_rt::protocol::{NsDup, NsPermissions};
 use redox_scheme::{
     CallerCtx, OpenResult, RequestKind, Response, SendFdRequest, SignalBehavior, Socket,
@@ -488,7 +489,7 @@ where
 }
 
 pub fn run(
-    sync_pipe: usize,
+    sync_pipe: FdGuard,
     kernel_schemes: KernelSchemeMap,
     initfs_cap: usize,
     proc_cap: usize,
@@ -514,8 +515,13 @@ pub fn run(
         .socket
         .create_this_scheme_fd(0, new_id, 0, 0)
         .expect("nsmgr: failed to create namespace fd");
-    let _ = syscall::call_wo(sync_pipe, &cap_fd.to_ne_bytes(), CallFlags::FD, &[]);
-    let _ = syscall::close(sync_pipe);
+    let _ = syscall::call_wo(
+        sync_pipe.as_raw_fd(),
+        &cap_fd.to_ne_bytes(),
+        CallFlags::FD,
+        &[],
+    );
+    drop(sync_pipe);
 
     log::info!("bootstrap: namespace scheme start!");
     loop {
