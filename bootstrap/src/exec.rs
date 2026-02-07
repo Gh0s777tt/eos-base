@@ -1,4 +1,3 @@
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 use core::str::FromStr;
@@ -61,7 +60,6 @@ pub fn main() -> ! {
     let pipe_fd = *kernel_schemes
         .get(GlobalSchemes::Pipe)
         .expect("failed to get pipe fd");
-    let infos_arc = Arc::new(kernel_schemes);
 
     let this_thr_fd = auth
         .dup(b"cur-context")
@@ -74,7 +72,7 @@ pub fn main() -> ! {
     let mut envs = {
         let fd = FdGuard::new(
             syscall::openat(
-                *infos_arc
+                *kernel_schemes
                     .get(GlobalSchemes::Sys)
                     .expect("failed to get sys fd"),
                 "env",
@@ -124,13 +122,12 @@ pub fn main() -> ! {
         (*(core::ptr::addr_of!(__initfs_header) as *const redox_initfs::types::Header)).initfs_size
     };
 
-    let infos_arc_clone = infos_arc.clone();
     let initfs_fd = spawn(
         "initfs daemon",
         &auth,
         &this_thr_fd,
         pipe_fd,
-        move |write_fd| unsafe {
+        |write_fd| unsafe {
             // Creating a reference to NULL is UB. Mask the UB for now using black_box.
             // FIXME use a raw pointer and inline asm for reading instead for the initfs header.
             let initfs_start = core::ptr::addr_of!(__initfs_header);
@@ -139,31 +136,29 @@ pub fn main() -> ! {
             crate::initfs::run(
                 core::slice::from_raw_parts(initfs_start, initfs_length),
                 write_fd,
-                &infos_arc_clone,
+                &kernel_schemes,
                 scheme_creation_cap,
             );
         },
     );
 
-    let infos_arc_clone = infos_arc.clone();
     let proc_fd = spawn(
         "process manager",
         &auth,
         &this_thr_fd,
         pipe_fd,
-        |write_fd| crate::procmgr::run(write_fd, &auth, &infos_arc_clone, scheme_creation_cap),
+        |write_fd| crate::procmgr::run(write_fd, &auth, &kernel_schemes, scheme_creation_cap),
     );
 
-    let infos_arc_clone = infos_arc.clone();
     let initns_fd = spawn(
         "init namespace manager",
         &auth,
         &this_thr_fd,
         pipe_fd,
-        |write_fd| {
+        move |write_fd| {
             crate::initnsmgr::run(
                 write_fd,
-                &infos_arc_clone,
+                kernel_schemes,
                 initfs_fd,
                 proc_fd,
                 scheme_creation_cap,
@@ -192,8 +187,6 @@ pub fn main() -> ! {
     )
     .to_upper()
     .unwrap();
-
-    drop(infos_arc);
 
     let exe_path = alloc::format!("/scheme/initfs{}", path);
 

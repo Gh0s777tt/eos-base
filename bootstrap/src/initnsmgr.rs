@@ -489,7 +489,7 @@ where
 
 pub fn run(
     sync_pipe: usize,
-    kernel_schemes: &KernelSchemeMap,
+    kernel_schemes: KernelSchemeMap,
     initfs_cap: usize,
     proc_cap: usize,
     scheme_creation_cap: usize,
