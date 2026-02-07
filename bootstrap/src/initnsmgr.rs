@@ -1,5 +1,3 @@
-use super::KernelSchemeMap;
-
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -491,20 +489,11 @@ where
 
 pub fn run(
     sync_pipe: FdGuard,
-    kernel_schemes: KernelSchemeMap,
-    initfs_cap: usize,
-    proc_cap: usize,
+    schemes: HashMap<String, Arc<FdGuard>>,
     scheme_creation_cap: usize,
 ) -> ! {
     let socket = Socket::create_inner(scheme_creation_cap, false)
         .expect("failed to open init namespace scheme socket");
-
-    let mut schemes = HashMap::default();
-    for (scheme, fd) in kernel_schemes.0.into_iter() {
-        schemes.insert(scheme.as_str().to_string(), Arc::new(FdGuard::new(fd)));
-    }
-    schemes.insert("proc".to_string(), Arc::new(FdGuard::new(proc_cap)));
-    schemes.insert("initfs".to_string(), Arc::new(FdGuard::new(initfs_cap)));
 
     let mut scheme = NamespaceScheme::new(&socket, schemes, FdGuard::new(scheme_creation_cap));
 

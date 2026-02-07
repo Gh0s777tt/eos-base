@@ -1,6 +1,9 @@
+use alloc::string::ToString;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 use core::str::FromStr;
+use hashbrown::HashMap;
 
 use syscall::CallFlags;
 use syscall::data::{GlobalSchemes, KernelSchemeInfo};
@@ -156,13 +159,14 @@ pub fn main() -> ! {
         &this_thr_fd,
         pipe_fd,
         move |write_fd| {
-            crate::initnsmgr::run(
-                write_fd,
-                kernel_schemes,
-                initfs_fd,
-                proc_fd,
-                scheme_creation_cap,
-            )
+            let mut schemes = HashMap::default();
+            for (scheme, fd) in kernel_schemes.0.into_iter() {
+                schemes.insert(scheme.as_str().to_string(), Arc::new(FdGuard::new(fd)));
+            }
+            schemes.insert("proc".to_string(), Arc::new(FdGuard::new(proc_fd)));
+            schemes.insert("initfs".to_string(), Arc::new(FdGuard::new(initfs_fd)));
+
+            crate::initnsmgr::run(write_fd, schemes, scheme_creation_cap)
         },
     );
 
