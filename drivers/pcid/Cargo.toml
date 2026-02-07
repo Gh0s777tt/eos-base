@@ -16,7 +16,7 @@ bincode = "1.2"
 fdt = "0.1.5"
 libc.workspace = true
 log.workspace = true
-pci_types = "0.10"
+pci_types = "=0.10.0"
 pico-args = { version = "0.5", features = ["combined-flags"] }
 plain = "0.2"
 redox-scheme.workspace = true
