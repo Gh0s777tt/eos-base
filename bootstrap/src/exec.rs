@@ -1,7 +1,9 @@
+use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ffi::CStr;
 use core::str::FromStr;
+use hashbrown::HashMap;
 
 use syscall::CallFlags;
 use syscall::data::{GlobalSchemes, KernelSchemeInfo};
@@ -61,7 +63,6 @@ pub fn main() -> ! {
     let pipe_fd = *kernel_schemes
         .get(GlobalSchemes::Pipe)
         .expect("failed to get pipe fd");
-    let infos_arc = Arc::new(kernel_schemes);
 
     let this_thr_fd = auth
         .dup(b"cur-context")
@@ -74,7 +75,7 @@ pub fn main() -> ! {
     let mut envs = {
         let fd = FdGuard::new(
             syscall::openat(
-                *infos_arc
+                *kernel_schemes
                     .get(GlobalSchemes::Sys)
                     .expect("failed to get sys fd"),
                 "env",
@@ -124,13 +125,12 @@ pub fn main() -> ! {
         (*(core::ptr::addr_of!(__initfs_header) as *const redox_initfs::types::Header)).initfs_size
     };
 
-    let infos_arc_clone = infos_arc.clone();
     let initfs_fd = spawn(
         "initfs daemon",
         &auth,
         &this_thr_fd,
         pipe_fd,
-        move |write_fd| unsafe {
+        |write_fd| unsafe {
             // Creating a reference to NULL is UB. Mask the UB for now using black_box.
             // FIXME use a raw pointer and inline asm for reading instead for the initfs header.
             let initfs_start = core::ptr::addr_of!(__initfs_header);
@@ -139,35 +139,34 @@ pub fn main() -> ! {
             crate::initfs::run(
                 core::slice::from_raw_parts(initfs_start, initfs_length),
                 write_fd,
-                &infos_arc_clone,
+                &kernel_schemes,
                 scheme_creation_cap,
             );
         },
     );
 
-    let infos_arc_clone = infos_arc.clone();
     let proc_fd = spawn(
         "process manager",
         &auth,
         &this_thr_fd,
         pipe_fd,
-        |write_fd| crate::procmgr::run(write_fd, &auth, &infos_arc_clone, scheme_creation_cap),
+        |write_fd| crate::procmgr::run(write_fd, &auth, &kernel_schemes, scheme_creation_cap),
     );
 
-    let infos_arc_clone = infos_arc.clone();
     let initns_fd = spawn(
         "init namespace manager",
         &auth,
         &this_thr_fd,
         pipe_fd,
-        |write_fd| {
-            crate::initnsmgr::run(
-                write_fd,
-                &infos_arc_clone,
-                initfs_fd,
-                proc_fd,
-                scheme_creation_cap,
-            )
+        move |write_fd| {
+            let mut schemes = HashMap::default();
+            for (scheme, fd) in kernel_schemes.0.into_iter() {
+                schemes.insert(scheme.as_str().to_string(), Arc::new(FdGuard::new(fd)));
+            }
+            schemes.insert("proc".to_string(), Arc::new(FdGuard::new(proc_fd)));
+            schemes.insert("initfs".to_string(), Arc::new(FdGuard::new(initfs_fd)));
+
+            crate::initnsmgr::run(write_fd, schemes, scheme_creation_cap)
         },
     );
 
@@ -192,8 +191,6 @@ pub fn main() -> ! {
     )
     .to_upper()
     .unwrap();
-
-    drop(infos_arc);
 
     let exe_path = alloc::format!("/scheme/initfs{}", path);
 
@@ -247,12 +244,16 @@ pub(crate) fn spawn(
     auth: &FdGuard,
     this_thr_fd: &FdGuardUpper,
     pipe_fd: usize,
-    inner: impl FnOnce(usize) -> !,
+    inner: impl FnOnce(FdGuard) -> !,
 ) -> usize {
-    let read = syscall::openat(pipe_fd, "", O_CLOEXEC, 0).expect("failed to open sync read pipe");
+    let read = FdGuard::new(
+        syscall::openat(pipe_fd, "", O_CLOEXEC, 0).expect("failed to open sync read pipe"),
+    );
 
     // The write pipe will not inherit O_CLOEXEC, but is closed by the daemon later.
-    let write = syscall::dup(read, b"write").expect("failed to open sync write pipe");
+    let write = FdGuard::new(
+        syscall::dup(read.as_raw_fd(), b"write").expect("failed to open sync write pipe"),
+    );
 
     match fork_impl(&ForkArgs::Init { this_thr_fd, auth }) {
         Err(err) => {
@@ -260,11 +261,11 @@ pub(crate) fn spawn(
         }
         // Continue serving the scheme as the child.
         Ok(0) => {
-            let _ = syscall::close(read);
+            drop(read);
         }
         // Return in order to execute init, as the parent.
         Ok(_) => {
-            let _ = syscall::close(write);
+            drop(write);
 
             let mut new_fd = usize::MAX;
             let fd_bytes = unsafe {
@@ -274,7 +275,12 @@ pub(crate) fn spawn(
                 )
             };
             loop {
-                match syscall::call_ro(read, fd_bytes, CallFlags::FD | CallFlags::FD_UPPER, &[]) {
+                match syscall::call_ro(
+                    read.as_raw_fd(),
+                    fd_bytes,
+                    CallFlags::FD | CallFlags::FD_UPPER,
+                    &[],
+                ) {
                     Err(Error { errno: EINTR }) => continue,
                     _ => break,
                 }

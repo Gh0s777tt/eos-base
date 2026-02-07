@@ -9,6 +9,7 @@ use hashbrown::HashMap;
 use redox_initfs::{InitFs, Inode, InodeDir, InodeKind, InodeStruct, types::Timespec};
 
 use redox_path::canonicalize_to_standard;
+use redox_rt::proc::FdGuard;
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, scheme::SchemeSync};
 
 use redox_scheme::{SignalBehavior, Socket};
@@ -385,7 +386,7 @@ impl SchemeSync for InitFsScheme {
 
 pub fn run(
     bytes: &'static [u8],
-    sync_pipe: usize,
+    sync_pipe: FdGuard,
     kernel_schemes: &KernelSchemeMap,
     scheme_creation_cap: usize,
 ) -> ! {
@@ -406,8 +407,13 @@ pub fn run(
     let cap_fd = socket
         .create_this_scheme_fd(0, new_id, 0, 0)
         .expect("failed to issue initfs root fd");
-    let _ = syscall::call_rw(sync_pipe, &mut cap_fd.to_ne_bytes(), CallFlags::FD, &[]);
-    let _ = syscall::close(sync_pipe);
+    let _ = syscall::call_rw(
+        sync_pipe.as_raw_fd(),
+        &mut cap_fd.to_ne_bytes(),
+        CallFlags::FD,
+        &[],
+    );
+    drop(sync_pipe);
 
     loop {
         let Some(req) = socket
