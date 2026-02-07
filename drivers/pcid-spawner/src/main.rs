@@ -40,10 +40,16 @@ fn main() -> Result<()> {
 
         let mut handle = match PciFunctionHandle::connect_by_path(&device_path) {
             Ok(handle) => handle,
-            Err(err) => {
-                // Either the device is gone or it is already in-use by a driver.
+            Err(err) if err.raw_os_error() == Some(syscall::ENOLCK) => {
                 log::debug!(
                     "pcid-spawner: {} already in use: {err}",
+                    device_path.display(),
+                );
+                continue;
+            }
+            Err(err) => {
+                log::error!(
+                    "pcid-spawner: failed to open channel for {}: {err}",
                     device_path.display(),
                 );
                 continue;

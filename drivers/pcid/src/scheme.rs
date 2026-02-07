@@ -436,7 +436,8 @@ impl PciScheme {
 }
 
 fn parse_pci_addr(addr: &str) -> Option<PciAddress> {
-    let (segment, rest) = addr.split_once('-')?;
+    // FIXME use : instead of -- as separator once the old scheme format is no longer supported.
+    let (segment, rest) = addr.split_once("--")?;
     let segment = u16::from_str_radix(segment, 16).ok()?;
 
     // FIXME use : instead of -- as separator once the old scheme format is no longer supported.
