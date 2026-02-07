@@ -108,15 +108,13 @@ impl<'sock> NamespaceScheme<'sock> {
         schemes: HashMap<String, usize>,
         scheme_creation_cap: usize,
     ) -> Self {
-        let mut scheme = Self {
+        Self {
             socket,
             handles: HashMap::new(),
             root_namespace: Namespace { schemes },
             next_id: 0,
             scheme_creation_cap,
-        };
-
-        scheme
+        }
     }
 
     fn add_namespace(&mut self, id: usize, schemes: Namespace, permission: NsPermissions) {
@@ -431,7 +429,7 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
         Ok(buf)
     }
 
-    fn fstat(&mut self, id: usize, stat: &mut Stat, ctx: &CallerCtx) -> Result<()> {
+    fn fstat(&mut self, id: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {
         let resource_stat = match self.handles.get(&id).ok_or(Error::new(EBADF))? {
             Handle::List(_) => Stat {
                 st_mode: 0o444 | syscall::MODE_DIR,
