@@ -2493,17 +2493,15 @@ impl<'a> ProcScheme<'a> {
         // TODO: enforce uid == 0?
 
         let mut string = alloc::format!(
-            "{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<8}{:<16}\n",
+            "{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<8}{:<16}\n",
             "PID",
             "PGID",
             "PPID",
             "SID",
             "RUID",
             "RGID",
-            "RNS",
             "EUID",
             "EGID",
-            "ENS",
             "NTHRD",
             "STATUS",
             "NAME",
