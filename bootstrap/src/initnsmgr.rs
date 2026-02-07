@@ -2,6 +2,7 @@ use super::KernelSchemeMap;
 
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt::Debug;
@@ -22,7 +23,7 @@ use syscall::{CallFlags, FobtainFdFlags, error::*, schemev2::NewFdFlags};
 
 #[derive(Debug, Clone)]
 struct Namespace {
-    schemes: HashMap<String, usize>,
+    schemes: HashMap<String, Arc<FdGuard>>,
 }
 
 impl Namespace {
@@ -39,7 +40,7 @@ impl Namespace {
                 let prefix = &name[..name.len() - 1];
                 for (registered_name, fd) in &self.schemes {
                     if registered_name.starts_with(prefix) {
-                        schemes.insert(registered_name.clone(), *fd);
+                        schemes.insert(registered_name.clone(), fd.clone());
                     }
                 }
             } else {
@@ -47,13 +48,13 @@ impl Namespace {
                     warn!("Scheme {} not found in namespace", name);
                     continue;
                 };
-                schemes.insert(name, *fd);
+                schemes.insert(name, fd.clone());
             }
         }
         Ok(Self { schemes })
     }
-    fn get_scheme_fd(&self, scheme: &str) -> Option<usize> {
-        self.schemes.get(scheme).copied()
+    fn get_scheme_fd(&self, scheme: &str) -> Option<&Arc<FdGuard>> {
+        self.schemes.get(scheme)
     }
 }
 
@@ -76,12 +77,12 @@ struct SchemeRegister {
 }
 
 impl SchemeRegister {
-    fn register(&self, fd: usize) -> Result<()> {
+    fn register(&self, fd: FdGuard) -> Result<()> {
         let mut ns = self.target_namespace.borrow_mut();
         if ns.schemes.contains_key(&self.scheme_name) {
             return Err(Error::new(EEXIST));
         }
-        ns.schemes.insert(self.scheme_name.clone(), fd);
+        ns.schemes.insert(self.scheme_name.clone(), Arc::new(fd));
         Ok(())
     }
 }
@@ -98,7 +99,7 @@ pub struct NamespaceScheme<'sock> {
     handles: HashMap<usize, Handle>,
     root_namespace: Namespace,
     next_id: usize,
-    scheme_creation_cap: usize,
+    scheme_creation_cap: FdGuard,
 }
 
 const HIGH_PERMISSIONS: NsPermissions = NsPermissions::SCHEME_CREATE;
@@ -106,8 +107,8 @@ const HIGH_PERMISSIONS: NsPermissions = NsPermissions::SCHEME_CREATE;
 impl<'sock> NamespaceScheme<'sock> {
     pub fn new(
         socket: &'sock Socket,
-        schemes: HashMap<String, usize>,
-        scheme_creation_cap: usize,
+        schemes: HashMap<String, Arc<FdGuard>>,
+        scheme_creation_cap: FdGuard,
     ) -> Self {
         Self {
             socket,
@@ -148,7 +149,7 @@ impl<'sock> NamespaceScheme<'sock> {
                     error!("Permission denied to get scheme creation capability");
                     return Err(Error::new(EACCES));
                 }
-                Ok(syscall::dup(self.scheme_creation_cap, &[])?)
+                Ok(syscall::dup(self.scheme_creation_cap.as_raw_fd(), &[])?)
             }
             _ => {
                 error!("Unknown special reference: {}", reference);
@@ -172,7 +173,7 @@ impl<'sock> NamespaceScheme<'sock> {
         };
 
         let scheme_fd = syscall::openat_with_filter(
-            cap_fd,
+            cap_fd.as_raw_fd(),
             reference,
             flags,
             fcntl_flags as usize,
@@ -345,7 +346,7 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
             return Err(Error::new(ENODEV));
         };
 
-        syscall::unlinkat_with_filter(cap_fd, reference, flags, ctx.uid, ctx.gid)?;
+        syscall::unlinkat_with_filter(cap_fd.as_raw_fd(), reference, flags, ctx.uid, ctx.gid)?;
 
         Ok(())
     }
@@ -386,7 +387,7 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
             error!("on_sendfd: obtain_fd failed with error: {:?}", e);
             return Err(e);
         }
-        register_cap.register(new_fd)?;
+        register_cap.register(FdGuard::new(new_fd))?;
 
         Ok(num_fds)
     }
@@ -499,13 +500,13 @@ pub fn run(
         .expect("failed to open init namespace scheme socket");
 
     let mut schemes = HashMap::default();
-    for (scheme, fd) in kernel_schemes.0.iter() {
-        schemes.insert(scheme.as_str().to_string(), *fd);
+    for (scheme, fd) in kernel_schemes.0.into_iter() {
+        schemes.insert(scheme.as_str().to_string(), Arc::new(FdGuard::new(fd)));
     }
-    schemes.insert("proc".to_string(), proc_cap);
-    schemes.insert("initfs".to_string(), initfs_cap);
+    schemes.insert("proc".to_string(), Arc::new(FdGuard::new(proc_cap)));
+    schemes.insert("initfs".to_string(), Arc::new(FdGuard::new(initfs_cap)));
 
-    let mut scheme = NamespaceScheme::new(&socket, schemes, scheme_creation_cap);
+    let mut scheme = NamespaceScheme::new(&socket, schemes, FdGuard::new(scheme_creation_cap));
 
     // send namespace fd to bootstrap
     let new_id = scheme.next_id;
