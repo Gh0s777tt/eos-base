@@ -188,7 +188,7 @@ pub fn run(
             log::trace!("--THREAD DIED {}, {}", event.data, thread.pid.0);
 
             if let Err(err) = scheme.queue.unsubscribe(event.data, event.data) {
-                log::error!("failed to unsubscribe from fd {}", event.data);
+                log::error!("failed to unsubscribe from fd {}: {err}", event.data);
             }
             scheme.thread_lookup.remove(&event.data);
             proc.threads.retain(|rc| !Rc::ptr_eq(rc, &thread_rc));
@@ -960,9 +960,6 @@ impl<'a> ProcScheme<'a> {
                     log::trace!("Invalid proc call: {metadata:?}");
                     return Response::ready_err(EINVAL, op);
                 };
-                fn cvt_u32(u: u32) -> Option<u32> {
-                    if u == u32::MAX { None } else { Some(u) }
-                }
                 match verb {
                     ProcCall::Exit => self.on_exit_start(
                         fd_pid,
@@ -1083,7 +1080,6 @@ impl<'a> ProcScheme<'a> {
                     // setrens is no longer implemented as procmgr call
                     // FIXME remove this ProcCall variant
                     ProcCall::Setrens => Response::ready_err(EINVAL, op),
-
                 }
             }
             Handle::Ps(_) => Response::ready_err(EOPNOTSUPP, op),
@@ -1406,7 +1402,7 @@ impl<'a> ProcScheme<'a> {
         let recv_nonblock = |waitpid: &mut BTreeMap<WaitpidKey, (ProcessId, WaitpidStatus)>,
                              key: &WaitpidKey|
          -> Option<(ProcessId, WaitpidStatus)> {
-            if let Some((pid, mut sts)) = waitpid.get(key).map(|(k, v)| (*k, *v)) {
+            if let Some((pid, sts)) = waitpid.get(key).map(|(k, v)| (*k, *v)) {
                 waitpid.remove(key);
                 /*while let Some((_, new_sts)) = waitpid.remove(&WaitpidKey { pid: Some(pid), pgid: None }) {
                     sts = new_sts;
@@ -1641,7 +1637,7 @@ impl<'a> ProcScheme<'a> {
         awoken: &mut VecDeque<VirtualId>,
     ) -> Poll<Response> {
         let req_id = *state_entry.key();
-        let mut state = state_entry.get_mut();
+        let state = state_entry.get_mut();
         let this_state = core::mem::replace(state, PendingState::Placeholder);
         match this_state {
             PendingState::Placeholder => return Pending, // unreachable!(),
@@ -1847,8 +1843,8 @@ impl<'a> ProcScheme<'a> {
         }
     }
     fn debug(&self) {
-        log::trace!("PROCESSES\n{:#?}", self.processes,);
-        log::trace!("HANDLES\n{:#?}", self.handles,);
+        log::trace!("PROCESSES\n{:#?}", self.processes);
+        log::trace!("HANDLES\n{:#?}", self.handles);
     }
     fn on_kill_thread(
         &mut self,
@@ -2497,17 +2493,15 @@ impl<'a> ProcScheme<'a> {
         // TODO: enforce uid == 0?
 
         let mut string = alloc::format!(
-            "{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<8}{:<16}\n",
+            "{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<6}{:<8}{:<16}\n",
             "PID",
             "PGID",
             "PPID",
             "SID",
             "RUID",
             "RGID",
-            "RNS",
             "EUID",
             "EGID",
-            "ENS",
             "NTHRD",
             "STATUS",
             "NAME",
@@ -2542,7 +2536,7 @@ impl<'a> ProcScheme<'a> {
         // Useful for debugging memory leaks.
         log::trace!("NEXT FD: {}", {
             let nextfd = syscall::dup(0, &[]).unwrap();
-            syscall::close(nextfd);
+            let _ = syscall::close(nextfd);
             nextfd
         });
         log::trace!("{} processes", self.processes.len());

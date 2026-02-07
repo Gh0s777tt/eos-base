@@ -118,7 +118,7 @@ impl SchemeSync for InitFsScheme {
         path: &str,
         flags: usize,
         _fcntl_flags: u32,
-        ctx: &CallerCtx,
+        _ctx: &CallerCtx,
     ) -> Result<OpenResult> {
         if !matches!(
             self.handles.get(&dirfd).ok_or(Error::new(EBADF))?,
@@ -363,7 +363,7 @@ impl SchemeSync for InitFsScheme {
         let data = match Self::get_inode(&self.fs, node.inode)?.kind() {
             InodeKind::File(file) => file.data().map_err(|_| Error::new(EIO))?,
             InodeKind::Dir(_) => return Err(Error::new(EISDIR)),
-            InodeKind::Link(link) => return Err(Error::new(ELOOP)),
+            InodeKind::Link(_) => return Err(Error::new(ELOOP)),
             InodeKind::Unknown => return Err(Error::new(EIO)),
         };
 
