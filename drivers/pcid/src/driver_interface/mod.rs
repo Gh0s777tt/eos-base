@@ -331,8 +331,7 @@ impl PciFunctionHandle {
             device_path.join("channel").to_str().unwrap(),
             libredox::flag::O_RDWR,
             0,
-        )
-        .map_err(|err| io::Error::other(format!("failed to open pcid channel: {}", err)))?;
+        )?;
         Ok(Self::connect_common(channel_fd as RawFd))
     }
 
