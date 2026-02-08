@@ -309,16 +309,21 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             if self.has_edid {
                 let edid = edid::parse(&display.edid).unwrap().1;
 
-                let first_detailed_timing = edid
-                    .descriptors
-                    .iter()
-                    .find_map(|descriptor| match descriptor {
-                        edid::Descriptor::DetailedTiming(detailed_timing) => Some(detailed_timing),
-                        _ => None,
-                    })
-                    .unwrap();
-                connector.mm_width = first_detailed_timing.horizontal_size.into();
-                connector.mm_height = first_detailed_timing.vertical_size.into();
+                if let Some(first_detailed_timing) =
+                    edid.descriptors
+                        .iter()
+                        .find_map(|descriptor| match descriptor {
+                            edid::Descriptor::DetailedTiming(detailed_timing) => {
+                                Some(detailed_timing)
+                            }
+                            _ => None,
+                        })
+                {
+                    connector.mm_width = first_detailed_timing.horizontal_size.into();
+                    connector.mm_height = first_detailed_timing.vertical_size.into();
+                } else {
+                    log::error!("No edid timing descriptor detected");
+                }
 
                 connector.modes = edid
                     .descriptors
