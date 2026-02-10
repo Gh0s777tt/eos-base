@@ -59,7 +59,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let mut timeout_count = 0u64;
 
     scan_requests(&mut handler, &scheme).expect("pty: could not scan requests");
-    issue_events(&socket, &mut *scheme.borrow_mut());
+    issue_events(&socket, &mut scheme.borrow_mut());
 
     for event_res in event_queue {
         let event = event_res.expect("pty: failed to read from event queue");
@@ -87,7 +87,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
             }
         }
 
-        issue_events(&socket, &mut *scheme.borrow_mut());
+        issue_events(&socket, &mut scheme.borrow_mut());
     }
 
     std::process::exit(0);

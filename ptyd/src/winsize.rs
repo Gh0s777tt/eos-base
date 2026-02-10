@@ -16,10 +16,7 @@ pub struct PtyWinsize {
 
 impl PtyWinsize {
     pub fn new(pty: Weak<RefCell<Pty>>, flags: usize) -> Self {
-        PtyWinsize {
-            pty: pty,
-            flags: flags,
-        }
+        PtyWinsize { pty, flags }
     }
 }
 

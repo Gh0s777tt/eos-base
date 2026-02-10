@@ -16,10 +16,7 @@ pub struct PtyTermios {
 
 impl PtyTermios {
     pub fn new(pty: Weak<RefCell<Pty>>, flags: usize) -> Self {
-        PtyTermios {
-            pty: pty,
-            flags: flags,
-        }
+        PtyTermios { pty, flags }
     }
 }
 

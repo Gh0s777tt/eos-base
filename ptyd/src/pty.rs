@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::io::{Cursor, Write};
 
 use redox_termios::*;
-use syscall;
 use syscall::error::Result;
 
 pub struct Pty {
@@ -20,7 +19,7 @@ pub struct Pty {
 impl Pty {
     pub fn new(id: usize) -> Self {
         Pty {
-            id: id,
+            id,
             pgrp: 0,
             termios: Termios::default(),
             winsize: Winsize::default(),
@@ -273,20 +272,18 @@ impl Pty {
                     if !self.cooked.is_empty() {
                         self.mosi.push_back(self.cooked.clone());
                         self.cooked.clear();
-                    } else {
-                        if let Some(timeout_character) = self.timeout_character {
-                            if self.timeout_count >= timeout_character.wrapping_add(vtime) {
-                                self.timeout_character = None;
+                    } else if let Some(timeout_character) = self.timeout_character {
+                        if self.timeout_count >= timeout_character.wrapping_add(vtime) {
+                            self.timeout_character = None;
 
-                                if self.mosi.is_empty() {
-                                    self.mosi.push_back(self.cooked.clone());
-                                    self.cooked.clear();
-                                }
+                            if self.mosi.is_empty() {
+                                self.mosi.push_back(self.cooked.clone());
+                                self.cooked.clear();
                             }
-                        } else {
-                            // Start timer if not already started
-                            self.timeout_character = Some(self.timeout_count);
                         }
+                    } else {
+                        // Start timer if not already started
+                        self.timeout_character = Some(self.timeout_count);
                     }
                 } else {
                     // Return when min bytes are received or the timer expires

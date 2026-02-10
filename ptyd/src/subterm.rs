@@ -18,8 +18,8 @@ pub struct PtySubTerm {
 impl PtySubTerm {
     pub fn new(pty: Weak<RefCell<Pty>>, flags: usize) -> Self {
         PtySubTerm {
-            pty: pty,
-            flags: flags,
+            pty,
+            flags,
             notified_read: false,
             notified_write: false,
         }
