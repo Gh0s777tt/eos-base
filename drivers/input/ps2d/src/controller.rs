@@ -356,9 +356,11 @@ impl Ps2 {
         {
             // Enable keyboard data reporting
             // Use inner function to prevent retries
-            self.keyboard_command_inner(KeyboardCommand::EnableReporting as u8)?;
             // Response is ignored since scanning is now on
-            //TODO: fix by using interrupts?
+            if let Err(err) = self.keyboard_command_inner(KeyboardCommand::EnableReporting as u8) {
+                error!("failed to initialize keyboard reporting: {:?}", err);
+                //TODO: fix by using interrupts?
+            }
         }
 
         // Enable clocks and interrupts
