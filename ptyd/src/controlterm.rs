@@ -18,8 +18,8 @@ pub struct PtyControlTerm {
 impl PtyControlTerm {
     pub fn new(pty: Rc<RefCell<Pty>>, flags: usize) -> Self {
         PtyControlTerm {
-            pty: pty,
-            flags: flags,
+            pty,
+            flags,
             notified_read: false,
             notified_write: false,
         }

@@ -15,10 +15,7 @@ pub struct PtyPgrp {
 
 impl PtyPgrp {
     pub fn new(pty: Weak<RefCell<Pty>>, flags: usize) -> Self {
-        PtyPgrp {
-            pty: pty,
-            flags: flags,
-        }
+        PtyPgrp { pty, flags }
     }
 }
 
