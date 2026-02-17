@@ -1,2 +1,2 @@
 notify hwd
-pcid-spawner /scheme/initfs/etc/pcid/initfs.toml
+pcid-spawner --initfs

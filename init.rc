@@ -27,7 +27,7 @@ notify fbcond 2
 notify lived
 
 # Drivers
-run /scheme/initfs/etc/init_drivers.rc
+run /scheme/initfs/lib/init_drivers.rc
 unset RSDP_ADDR RSDP_SIZE
 
 # Mount rootfs

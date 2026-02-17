@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "audiod",
+    "config",
     "daemon",
     "init",
     "initfs",

@@ -1,7 +1,5 @@
-use std::collections::BTreeMap;
-use std::fs::read_dir;
 use std::io::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{env, fs};
 
@@ -103,46 +101,20 @@ fn run_command(line: &str, config: &InitConfig) {
                 }
             }
             "run.d" => {
-                // This must be a BTreeMap to iterate in sorted order.
-                let mut entries = BTreeMap::new();
-                let mut missing_arg = true;
-
-                for new_dir in args {
-                    if !Path::new(&new_dir).exists() {
-                        // Skip non-existent dirs
-                        continue;
-                    }
-                    missing_arg = false;
-
-                    let list = match read_dir(&new_dir) {
-                        Ok(list) => list,
-                        Err(err) => {
-                            eprintln!("init: failed to run.d: '{}': {}", new_dir, err);
-                            continue;
-                        }
-                    };
-                    for entry_res in list {
-                        match entry_res {
-                            Ok(entry) => {
-                                // This intentionally overwrites older entries with
-                                // the same filename to allow overriding entries in
-                                // one search dir with those in a later search dir.
-                                entries.insert(entry.file_name(), entry.path());
-                            }
-                            Err(err) => {
-                                eprintln!("init: failed to run.d: '{}': {}", new_dir, err);
-                            }
-                        }
-                    }
-                }
-
-                if missing_arg {
+                let args = args.map(|arg| PathBuf::from(arg)).collect::<Vec<_>>();
+                if args.is_empty() {
                     eprintln!("init: failed to run.d: no argument or all dirs are non-existent");
                     return;
                 }
+                let entries = match config::config_for_dirs(&args) {
+                    Ok(list) => list,
+                    Err(err) => {
+                        eprintln!("init: failed to run.d: '{args:?}': {err}");
+                        return;
+                    }
+                };
 
-                // This takes advantage of BTreeMap iterating in sorted order.
-                for (_, entry_path) in entries {
+                for entry_path in entries {
                     if let Err(err) = run(&entry_path, config) {
                         eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
                     }
@@ -234,10 +206,18 @@ fn run_command(line: &str, config: &InitConfig) {
 }
 
 fn main() {
-    let init_path = Path::new("/scheme/initfs/etc/init.rc");
     let init_config = InitConfig::new();
-    if let Err(err) = run(&init_path, &init_config) {
-        eprintln!("init: failed to run {:?}: {}", init_path, err);
+    let entries = match config::config_for_initfs("init") {
+        Ok(entries) => entries,
+        Err(err) => {
+            eprintln!("init: failed to find config files: {}", err);
+            return;
+        }
+    };
+    for entry_path in entries {
+        if let Err(err) = run(&entry_path, &init_config) {
+            eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
+        }
     }
 
     libredox::call::setrens(0, 0).expect("init: failed to enter null namespace");
