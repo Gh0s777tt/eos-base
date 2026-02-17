@@ -253,7 +253,7 @@ fn write_inode(
 
     *inode_hdr = initfs::InodeHeader {
         type_: (ty as u32).into(),
-        length: write_result.size.into(),
+        length: initfs::Length(write_result.size.into()),
         offset: initfs::Offset(write_result.offset.into()),
     };
 

@@ -81,7 +81,7 @@ const _: () = {
 #[derive(Clone, Copy, Debug)]
 pub struct InodeHeader {
     pub type_: U32,
-    pub length: U32,
+    pub length: Length,
     pub offset: Offset,
 }
 

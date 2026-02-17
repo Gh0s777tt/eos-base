@@ -141,8 +141,7 @@ impl<'initfs> InodeStruct<'initfs> {
     }
     fn data(&self) -> Result<&'initfs [u8]> {
         let start: usize = self.inode.offset.0.get().try_into().map_err(|_| Error)?;
-
-        let length: usize = self.inode.length.get().try_into().map_err(|_| Error)?;
+        let length: usize = self.inode.length.0.get().try_into().map_err(|_| Error)?;
 
         let end = start.checked_add(length).ok_or(Error)?;
 
