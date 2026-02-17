@@ -120,14 +120,14 @@ fn read_directory(state: &mut State, path: &Path, root_path: &Path) -> Result<Di
                     link_parent.canonicalize()?.join(link_path.clone())
                 };
 
-                let root_path = root_path
+                let dir_path = path
                     .canonicalize()
-                    .context("Failed to cannonicalize root path")?;
-                let path = pathdiff::diff_paths(cannonical, &root_path).ok_or_else(|| {
+                    .context("Failed to cannonicalize path")?;
+                let path = pathdiff::diff_paths(cannonical, &dir_path).ok_or_else(|| {
                     anyhow!(
-                        "Failed to diff symlink path [{}] to root path [{}]",
+                        "Failed to diff symlink path [{}] to path [{}]",
                         link_path.display(),
-                        root_path.display()
+                        dir_path.display()
                     )
                 })?;
                 EntryKind::Link(path)

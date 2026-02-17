@@ -8,7 +8,6 @@ use alloc::string::String;
 use hashbrown::HashMap;
 use redox_initfs::{InitFs, Inode, InodeDir, InodeKind, InodeStruct, types::Timespec};
 
-use redox_path::canonicalize_to_standard;
 use redox_rt::proc::FdGuard;
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, scheme::SchemeSync};
 
@@ -238,12 +237,7 @@ impl SchemeSync for InitFsScheme {
             InodeKind::Dir(_) => Err(Error::new(EISDIR)),
             InodeKind::Link(link) => {
                 let link_data = link.data().map_err(|_| Error::new(EIO))?;
-                let path = core::str::from_utf8(link_data).map_err(|_| Error::new(ENOENT))?;
-                let cannonical =
-                    canonicalize_to_standard(Some("/"), path).ok_or_else(|| Error::new(ENOENT))?;
-                let data = cannonical.as_bytes();
-
-                let src_buf = &data[core::cmp::min(offset, data.len())..];
+                let src_buf = &link_data[core::cmp::min(offset, link_data.len())..];
 
                 let to_copy = core::cmp::min(src_buf.len(), buffer.len());
                 buffer[..to_copy].copy_from_slice(&src_buf[..to_copy]);
