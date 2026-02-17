@@ -2,9 +2,6 @@
 //! A super simple initfs, only meant to be loaded into RAM by the bootloader, and then directly be
 //! read.
 
-#[cfg(any(test, feature = "std"))]
-extern crate std;
-
 use core::convert::{TryFrom, TryInto};
 
 pub mod types;
@@ -28,8 +25,7 @@ impl core::fmt::Display for Error {
     }
 }
 
-#[cfg(any(test, feature = "std"))]
-impl std::error::Error for Error {}
+impl core::error::Error for Error {}
 
 type Result<T> = core::result::Result<T, Error>;
 

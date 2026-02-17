@@ -9,8 +9,3 @@ license = "MIT"
 
 [dependencies]
 plain = "0.2"
-
-[features]
-default = ["std"]
-
-std = []
