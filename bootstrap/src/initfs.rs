@@ -185,8 +185,9 @@ impl SchemeSync for InitFsScheme {
             Self::get_inode(&self.fs, current_inode)?.kind(),
             InodeKind::Link(_)
         );
+        let o_stat_nofollow = flags & O_STAT != 0 && flags & O_NOFOLLOW != 0;
         let o_symlink = flags & O_SYMLINK != 0;
-        if is_link && !o_symlink {
+        if is_link && !o_stat_nofollow && !o_symlink {
             return Err(Error::new(EXDEV));
         }
 
@@ -328,6 +329,7 @@ impl SchemeSync for InitFsScheme {
             | match inode.kind() {
                 InodeKind::Dir(_) => MODE_DIR,
                 InodeKind::File(_) => MODE_FILE,
+                InodeKind::Link(_) => MODE_SYMLINK,
                 _ => 0,
             };
         stat.st_uid = 0;
