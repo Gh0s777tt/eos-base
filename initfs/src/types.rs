@@ -11,12 +11,8 @@ macro_rules! primitive(
 
         impl $wrapper {
             #[inline]
-            pub const fn get(&self) -> $primitive {
+            pub const fn get(self) -> $primitive {
                 <$primitive>::from_le_bytes(self.0)
-            }
-            #[inline]
-            pub fn set(&mut self, primitive: $primitive) {
-                *self = Self::new(primitive);
             }
             #[inline]
             pub const fn new(primitive: $primitive) -> Self {
