@@ -323,6 +323,7 @@ impl SchemeSync for InitFsScheme {
 
         let inode = Self::get_inode(&self.fs, handle.inode)?;
 
+        stat.st_ino = inode.id();
         stat.st_mode = inode.mode()
             | match inode.kind() {
                 InodeKind::Dir(_) => MODE_DIR,

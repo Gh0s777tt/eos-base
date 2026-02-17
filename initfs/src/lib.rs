@@ -32,6 +32,7 @@ type Result<T> = core::result::Result<T, Error>;
 #[derive(Clone, Copy)]
 pub struct InodeStruct<'initfs> {
     initfs: InitFs<'initfs>,
+    inode_id: Inode,
     inode: &'initfs InodeHeader,
 }
 
@@ -135,6 +136,9 @@ pub enum InodeKind<'initfs> {
 }
 
 impl<'initfs> InodeStruct<'initfs> {
+    pub fn id(&self) -> u64 {
+        self.inode_id.0.into()
+    }
     fn data(&self) -> Result<&'initfs [u8]> {
         let start: usize = self.inode.offset.0.get().try_into().map_err(|_| Error)?;
 
@@ -276,17 +280,11 @@ impl<'initfs> InitFs<'initfs> {
     pub fn inode_count(&self) -> u16 {
         self.get_header_assume_valid().inode_count.get()
     }
-    pub fn get_inode(&self, inode: Inode) -> Option<InodeStruct<'initfs>> {
-        // NOTE: Even for 16-bit architectures (obviously edge-case, but some bootloaders may
-        // perhaps use this code), we have already checked that the inode table can fit within
-        // usize, and the table byte size is always larger than the count.
-        let inode_usize = inode.0 as usize;
-
-        let inode = self.inode_table().get(inode_usize)?;
-
+    pub fn get_inode(&self, inode_id: Inode) -> Option<InodeStruct<'initfs>> {
         Some(InodeStruct {
             initfs: *self,
-            inode,
+            inode_id,
+            inode: self.inode_table().get(usize::from(inode_id.0))?,
         })
     }
 }
