@@ -147,12 +147,6 @@ impl<'initfs> InodeStruct<'initfs> {
     pub fn mode(&self) -> u16 {
         (self.inode.type_and_mode.get() & MODE_MASK) as u16
     }
-    pub fn uid(&self) -> u32 {
-        self.inode.uid.get()
-    }
-    pub fn gid(&self) -> u32 {
-        self.inode.gid.get()
-    }
     fn ty(&self) -> Option<InodeType> {
         let raw = (self.inode.type_and_mode.get() & TYPE_MASK) >> TYPE_SHIFT;
 

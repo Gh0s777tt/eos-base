@@ -25,7 +25,7 @@ fn main() -> Result<()> {
     let bytes = std::fs::read(source).context("failed to read image into memory")?;
     let initfs = InitFs::new(&bytes, None).context("failed to parse initfs header")?;
 
-    dbg!(initfs.header());
+    println!("{:#?}", initfs.header());
 
     for inode in initfs.all_inodes() {
         print!("{:?}: ", inode);
@@ -38,10 +38,8 @@ fn main() -> Result<()> {
             }
         };
         print!(
-            "mode={:#0o}, uid={}, gid={}, kind=",
+            "mode={:#0o}, kind=",
             inode_struct.mode(),
-            inode_struct.uid(),
-            inode_struct.gid()
         );
 
         use redox_initfs::InodeKind;

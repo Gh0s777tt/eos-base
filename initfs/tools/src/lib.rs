@@ -258,9 +258,6 @@ fn write_inode(
         type_and_mode: type_and_mode.into(),
         length: write_result.size.into(),
         offset: initfs::Offset(write_result.offset.into()),
-
-        gid: 0.into(), //metadata.gid().into(),
-        uid: 0.into(), //metadata.uid().into(),
     };
 
     log::debug!(

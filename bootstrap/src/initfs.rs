@@ -329,8 +329,8 @@ impl SchemeSync for InitFsScheme {
                 InodeKind::File(_) => MODE_FILE,
                 _ => 0,
             };
-        stat.st_uid = inode.uid();
-        stat.st_gid = inode.gid();
+        stat.st_uid = 0;
+        stat.st_gid = 0;
         stat.st_size = u64::try_from(inode_len(inode)?).unwrap_or(u64::MAX);
 
         stat.st_ctime = sec.get();

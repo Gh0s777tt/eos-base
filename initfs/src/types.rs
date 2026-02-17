@@ -87,8 +87,6 @@ pub struct InodeHeader {
     pub type_and_mode: U32,
     pub length: U32,
     pub offset: Offset,
-    pub uid: U32,
-    pub gid: U32,
 }
 
 pub const MODE_MASK: u32 = 0xFFF;
