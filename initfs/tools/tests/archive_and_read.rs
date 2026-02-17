@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use redox_initfs::{InitFs, InodeKind, InodeStruct};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -74,13 +74,13 @@ fn build_tree<'a>(fs: InitFs<'a>, inode: InodeStruct<'a>) -> anyhow::Result<Node
 fn archive_and_read() -> Result<()> {
     env_logger::init();
 
-    let args = archive_common::Args {
+    let args = redox_initfs_tools::Args {
         destination_path: Path::new("out.img"),
         source: Path::new("data"),
         bootstrap_code: None,
-        max_size: archive_common::DEFAULT_MAX_SIZE,
+        max_size: redox_initfs_tools::DEFAULT_MAX_SIZE,
     };
-    archive_common::archive(&args).context("failed to archive")?;
+    redox_initfs_tools::archive(&args).context("failed to archive")?;
 
     let data = std::fs::read(args.destination_path).context("failed to read new archive")?;
     let filesystem =

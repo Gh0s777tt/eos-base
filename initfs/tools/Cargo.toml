@@ -21,8 +21,8 @@ anyhow.workspace = true
 clap = {version = "4", features = ["cargo"]}
 env_logger = "0.8"
 log.workspace = true
+pathdiff = "0.2.1"
 plain = "0.2"
 twox-hash = "1.6"
 
-archive-common = {path = "../archive-common"}
 redox-initfs = {path = ".."}

@@ -5,7 +5,6 @@ members = [
     "daemon",
     "init",
     "initfs",
-    "initfs/archive-common",
     "initfs/tools",
     "ipcd",
     "logd",
