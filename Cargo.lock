@@ -164,17 +164,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
 
 [[package]]
-name = "archive-common"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "log",
- "pathdiff",
- "plain",
- "redox-initfs",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1750,10 +1739,6 @@ dependencies = [
 name = "redox-initfs"
 version = "0.2.0"
 dependencies = [
- "anyhow",
- "archive-common",
- "env_logger",
- "log",
  "plain",
 ]
 
@@ -1762,10 +1747,10 @@ name = "redox-initfs-tools"
 version = "0.2.0"
 dependencies = [
  "anyhow",
- "archive-common",
  "clap 4.5.58",
  "env_logger",
  "log",
+ "pathdiff",
  "plain",
  "redox-initfs",
  "twox-hash",

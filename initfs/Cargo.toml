@@ -9,15 +9,3 @@ license = "MIT"
 
 [dependencies]
 plain = "0.2"
-
-[features]
-default = ["std"]
-
-std = []
-
-[dev-dependencies]
-# FIXME remove loggers
-anyhow.workspace = true
-archive-common = {path = "archive-common"}
-env_logger = "0.8"
-log.workspace = true

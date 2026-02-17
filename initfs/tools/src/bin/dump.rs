@@ -3,7 +3,7 @@ use std::{ffi::OsStr, path::Path};
 use anyhow::{Context, Result};
 use clap::{Arg, Command};
 
-use redox_initfs::InitFs;
+use redox_initfs::{InitFs, InodeKind};
 
 fn main() -> Result<()> {
     let matches = Command::new("redox-initfs-dump")
@@ -25,7 +25,7 @@ fn main() -> Result<()> {
     let bytes = std::fs::read(source).context("failed to read image into memory")?;
     let initfs = InitFs::new(&bytes, None).context("failed to parse initfs header")?;
 
-    dbg!(initfs.header());
+    println!("{:#?}", initfs.header());
 
     for inode in initfs.all_inodes() {
         print!("{:?}: ", inode);
@@ -37,14 +37,6 @@ fn main() -> Result<()> {
                 continue;
             }
         };
-        print!(
-            "mode={:#0o}, uid={}, gid={}, kind=",
-            inode_struct.mode(),
-            inode_struct.uid(),
-            inode_struct.gid()
-        );
-
-        use redox_initfs::InodeKind;
 
         match inode_struct.kind() {
             InodeKind::Unknown => println!("(unknown)"),

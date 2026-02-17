@@ -2,9 +2,6 @@
 //! A super simple initfs, only meant to be loaded into RAM by the bootloader, and then directly be
 //! read.
 
-#[cfg(any(test, feature = "std"))]
-extern crate std;
-
 use core::convert::{TryFrom, TryInto};
 
 pub mod types;
@@ -28,14 +25,14 @@ impl core::fmt::Display for Error {
     }
 }
 
-#[cfg(any(test, feature = "std"))]
-impl std::error::Error for Error {}
+impl core::error::Error for Error {}
 
 type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Clone, Copy)]
 pub struct InodeStruct<'initfs> {
     initfs: InitFs<'initfs>,
+    inode_id: Inode,
     inode: &'initfs InodeHeader,
 }
 
@@ -139,42 +136,36 @@ pub enum InodeKind<'initfs> {
 }
 
 impl<'initfs> InodeStruct<'initfs> {
+    pub fn id(&self) -> u64 {
+        self.inode_id.0.into()
+    }
     fn data(&self) -> Result<&'initfs [u8]> {
         let start: usize = self.inode.offset.0.get().try_into().map_err(|_| Error)?;
-
-        let length: usize = self.inode.length.get().try_into().map_err(|_| Error)?;
+        let length: usize = self.inode.length.0.get().try_into().map_err(|_| Error)?;
 
         let end = start.checked_add(length).ok_or(Error)?;
 
         self.initfs.base.get(start..end).ok_or(Error)
     }
     pub fn mode(&self) -> u16 {
-        (self.inode.type_and_mode.get() & MODE_MASK) as u16
-    }
-    pub fn uid(&self) -> u32 {
-        self.inode.uid.get()
-    }
-    pub fn gid(&self) -> u32 {
-        self.inode.gid.get()
+        match self.ty() {
+            Some(InodeType::RegularFile) => 0o444,
+            Some(InodeType::ExecutableFile) => 0o555,
+            Some(InodeType::Dir) => 0o555,
+            Some(InodeType::Link) => 0o777,
+            None => 0o000,
+        }
     }
     fn ty(&self) -> Option<InodeType> {
-        let raw = (self.inode.type_and_mode.get() & TYPE_MASK) >> TYPE_SHIFT;
-
-        Some(if raw == InodeType::Dir as u32 {
-            InodeType::Dir
-        } else if raw == InodeType::RegularFile as u32 {
-            InodeType::RegularFile
-        } else if raw == InodeType::Link as u32 {
-            InodeType::Link
-        } else {
-            return None;
-        })
+        InodeType::try_from(self.inode.type_.get()).ok()
     }
     pub fn kind(&self) -> InodeKind<'initfs> {
         let inner = *self;
         match self.ty() {
             Some(InodeType::Dir) => InodeKind::Dir(InodeDir { inner }),
-            Some(InodeType::RegularFile) => InodeKind::File(InodeFile { inner }),
+            Some(InodeType::RegularFile | InodeType::ExecutableFile) => {
+                InodeKind::File(InodeFile { inner })
+            }
             Some(InodeType::Link) => InodeKind::Link(InodeLink { inner }),
             None => InodeKind::Unknown,
         }
@@ -286,17 +277,11 @@ impl<'initfs> InitFs<'initfs> {
     pub fn inode_count(&self) -> u16 {
         self.get_header_assume_valid().inode_count.get()
     }
-    pub fn get_inode(&self, inode: Inode) -> Option<InodeStruct<'initfs>> {
-        // NOTE: Even for 16-bit architectures (obviously edge-case, but some bootloaders may
-        // perhaps use this code), we have already checked that the inode table can fit within
-        // usize, and the table byte size is always larger than the count.
-        let inode_usize = inode.0 as usize;
-
-        let inode = self.inode_table().get(inode_usize)?;
-
+    pub fn get_inode(&self, inode_id: Inode) -> Option<InodeStruct<'initfs>> {
         Some(InodeStruct {
             initfs: *self,
-            inode,
+            inode_id,
+            inode: self.inode_table().get(usize::from(inode_id.0))?,
         })
     }
 }

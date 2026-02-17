@@ -8,7 +8,6 @@ use alloc::string::String;
 use hashbrown::HashMap;
 use redox_initfs::{InitFs, Inode, InodeDir, InodeKind, InodeStruct, types::Timespec};
 
-use redox_path::canonicalize_to_standard;
 use redox_rt::proc::FdGuard;
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, scheme::SchemeSync};
 
@@ -185,8 +184,9 @@ impl SchemeSync for InitFsScheme {
             Self::get_inode(&self.fs, current_inode)?.kind(),
             InodeKind::Link(_)
         );
+        let o_stat_nofollow = flags & O_STAT != 0 && flags & O_NOFOLLOW != 0;
         let o_symlink = flags & O_SYMLINK != 0;
-        if is_link && !o_symlink {
+        if is_link && !o_stat_nofollow && !o_symlink {
             return Err(Error::new(EXDEV));
         }
 
@@ -237,12 +237,7 @@ impl SchemeSync for InitFsScheme {
             InodeKind::Dir(_) => Err(Error::new(EISDIR)),
             InodeKind::Link(link) => {
                 let link_data = link.data().map_err(|_| Error::new(EIO))?;
-                let path = core::str::from_utf8(link_data).map_err(|_| Error::new(ENOENT))?;
-                let cannonical =
-                    canonicalize_to_standard(Some("/"), path).ok_or_else(|| Error::new(ENOENT))?;
-                let data = cannonical.as_bytes();
-
-                let src_buf = &data[core::cmp::min(offset, data.len())..];
+                let src_buf = &link_data[core::cmp::min(offset, link_data.len())..];
 
                 let to_copy = core::cmp::min(src_buf.len(), buffer.len());
                 buffer[..to_copy].copy_from_slice(&src_buf[..to_copy]);
@@ -323,14 +318,16 @@ impl SchemeSync for InitFsScheme {
 
         let inode = Self::get_inode(&self.fs, handle.inode)?;
 
+        stat.st_ino = inode.id();
         stat.st_mode = inode.mode()
             | match inode.kind() {
                 InodeKind::Dir(_) => MODE_DIR,
                 InodeKind::File(_) => MODE_FILE,
+                InodeKind::Link(_) => MODE_SYMLINK,
                 _ => 0,
             };
-        stat.st_uid = inode.uid();
-        stat.st_gid = inode.gid();
+        stat.st_uid = 0;
+        stat.st_gid = 0;
         stat.st_size = u64::try_from(inode_len(inode)?).unwrap_or(u64::MAX);
 
         stat.st_ctime = sec.get();

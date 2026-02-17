@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use clap::{Arg, Command};
 
-use archive_common::{self as archive, Args, DEFAULT_MAX_SIZE};
+use redox_initfs_tools::{self as archive, Args, DEFAULT_MAX_SIZE};
 
 fn main() -> Result<()> {
     let matches = Command::new("redox-initfs-ar")
