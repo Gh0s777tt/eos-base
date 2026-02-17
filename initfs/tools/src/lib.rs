@@ -4,7 +4,7 @@ use std::io::{prelude::*, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{FileExt, FileTypeExt, MetadataExt};
+use std::os::unix::fs::{FileExt, FileTypeExt, PermissionsExt};
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -238,15 +238,12 @@ fn allocate_and_write_link(state: &mut State, link: &Path) -> Result<WriteResult
 fn write_inode(
     state: &mut State,
     ty: initfs::InodeType,
-    metadata: &Metadata,
     write_result: WriteResult,
     inode: u16,
 ) -> Result<()> {
     let inode_size: u32 = std::mem::size_of::<initfs::InodeHeader>()
         .try_into()
         .expect("inode header length cannot fit within u32");
-
-    let type_and_mode = ((ty as u32) << initfs::TYPE_SHIFT) | (metadata.mode() & 0xFFF);
 
     // TODO: Use main buffer and write in bulk.
     let mut inode_buf = [0_u8; std::mem::size_of::<initfs::InodeHeader>()];
@@ -255,7 +252,7 @@ fn write_inode(
         .expect("expected inode struct to have alignment 1, and buffer size to match");
 
     *inode_hdr = initfs::InodeHeader {
-        type_and_mode: type_and_mode.into(),
+        type_: (ty as u32).into(),
         length: write_result.size.into(),
         offset: initfs::Offset(write_result.offset.into()),
     };
@@ -310,7 +307,13 @@ fn allocate_and_write_dir(
                 let write_result = allocate_and_write_file(state, file)
                     .context("failed to copy file into image")?;
 
-                (write_result, initfs::InodeType::RegularFile)
+                let type_ = if entry.metadata.permissions().mode() & 0o100 != 0 {
+                    initfs::InodeType::ExecutableFile
+                } else {
+                    initfs::InodeType::RegularFile
+                };
+
+                (write_result, type_)
             }
 
             EntryKind::Link(ref path) => {
@@ -325,7 +328,7 @@ fn allocate_and_write_dir(
             .expect("expected dir entry count not to exceed u32");
 
         *current_inode += 1;
-        write_inode(state, ty, &entry.metadata, write_result, *current_inode)?;
+        write_inode(state, ty, write_result, *current_inode)?;
 
         let (name_offset, name_len) = {
             let name_len: u16 = entry.name.len().try_into().context("file name too long")?;
@@ -374,24 +377,14 @@ fn allocate_and_write_dir(
         offset: entry_table_offset,
     })
 }
-fn allocate_contents_and_write_inodes(
-    state: &mut State,
-    dir: &Dir,
-    root_metadata: Metadata,
-) -> Result<()> {
+fn allocate_contents_and_write_inodes(state: &mut State, dir: &Dir) -> Result<()> {
     let start_inode = 0;
     let mut current_inode = start_inode;
 
     let write_result = allocate_and_write_dir(state, dir, &mut current_inode)
         .context("failed to allocate and write all directories and files")?;
 
-    write_inode(
-        state,
-        initfs::InodeType::Dir,
-        &root_metadata,
-        write_result,
-        start_inode,
-    )
+    write_inode(state, initfs::InodeType::Dir, write_result, start_inode)
 }
 
 struct OutputImageGuard<'a> {
@@ -478,9 +471,6 @@ pub fn archive(
     };
 
     let root_path = source;
-    let root_metadata = root_path
-        .metadata()
-        .context("failed to obtain metadata for root")?;
     let root = read_directory(&mut state, root_path, root_path).context("failed to read root")?;
 
     log::debug!("there are {} inodes", state.inode_count);
@@ -532,7 +522,7 @@ pub fn archive(
 
     state.inode_table_offset = inode_table_offset.0.get();
 
-    allocate_contents_and_write_inodes(&mut state, &root, root_metadata)?;
+    allocate_contents_and_write_inodes(&mut state, &root)?;
 
     let current_system_time = std::time::SystemTime::now();
 

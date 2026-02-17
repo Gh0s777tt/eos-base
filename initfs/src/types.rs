@@ -84,24 +84,37 @@ const _: () = {
 #[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct InodeHeader {
-    pub type_and_mode: U32,
+    pub type_: U32,
     pub length: U32,
     pub offset: Offset,
 }
-
-pub const MODE_MASK: u32 = 0xFFF;
-pub const MODE_SHIFT: u8 = 0;
-
-pub const TYPE_SHIFT: u8 = 28;
-pub const TYPE_MASK: u32 = 0xF000_0000;
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum InodeType {
     RegularFile = 0x0,
-    Dir = 0x1,
-    Link = 0x2,
+    ExecutableFile = 0x1,
+    Dir = 0x2,
+    Link = 0x3,
     // All other bit patterns are reserved... for now.
+}
+
+impl TryFrom<u32> for InodeType {
+    type Error = ();
+
+    fn try_from(value: u32) -> Result<Self, ()> {
+        Ok(if value == InodeType::RegularFile as u32 {
+            InodeType::RegularFile
+        } else if value == InodeType::ExecutableFile as u32 {
+            InodeType::ExecutableFile
+        } else if value == InodeType::Dir as u32 {
+            InodeType::Dir
+        } else if value == InodeType::Link as u32 {
+            InodeType::Link
+        } else {
+            return Err(());
+        })
+    }
 }
 
 #[repr(C, packed)]

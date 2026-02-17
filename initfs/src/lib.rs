@@ -149,26 +149,24 @@ impl<'initfs> InodeStruct<'initfs> {
         self.initfs.base.get(start..end).ok_or(Error)
     }
     pub fn mode(&self) -> u16 {
-        (self.inode.type_and_mode.get() & MODE_MASK) as u16
+        match self.ty() {
+            Some(InodeType::RegularFile) => 0o444,
+            Some(InodeType::ExecutableFile) => 0o555,
+            Some(InodeType::Dir) => 0o555,
+            Some(InodeType::Link) => 0o777,
+            None => 0o000,
+        }
     }
     fn ty(&self) -> Option<InodeType> {
-        let raw = (self.inode.type_and_mode.get() & TYPE_MASK) >> TYPE_SHIFT;
-
-        Some(if raw == InodeType::Dir as u32 {
-            InodeType::Dir
-        } else if raw == InodeType::RegularFile as u32 {
-            InodeType::RegularFile
-        } else if raw == InodeType::Link as u32 {
-            InodeType::Link
-        } else {
-            return None;
-        })
+        InodeType::try_from(self.inode.type_.get()).ok()
     }
     pub fn kind(&self) -> InodeKind<'initfs> {
         let inner = *self;
         match self.ty() {
             Some(InodeType::Dir) => InodeKind::Dir(InodeDir { inner }),
-            Some(InodeType::RegularFile) => InodeKind::File(InodeFile { inner }),
+            Some(InodeType::RegularFile | InodeType::ExecutableFile) => {
+                InodeKind::File(InodeFile { inner })
+            }
             Some(InodeType::Link) => InodeKind::Link(InodeLink { inner }),
             None => InodeKind::Unknown,
         }

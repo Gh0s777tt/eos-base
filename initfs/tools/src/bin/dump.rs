@@ -3,7 +3,7 @@ use std::{ffi::OsStr, path::Path};
 use anyhow::{Context, Result};
 use clap::{Arg, Command};
 
-use redox_initfs::InitFs;
+use redox_initfs::{InitFs, InodeKind};
 
 fn main() -> Result<()> {
     let matches = Command::new("redox-initfs-dump")
@@ -37,12 +37,6 @@ fn main() -> Result<()> {
                 continue;
             }
         };
-        print!(
-            "mode={:#0o}, kind=",
-            inode_struct.mode(),
-        );
-
-        use redox_initfs::InodeKind;
 
         match inode_struct.kind() {
             InodeKind::Unknown => println!("(unknown)"),
