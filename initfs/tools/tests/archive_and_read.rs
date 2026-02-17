@@ -75,7 +75,7 @@ fn archive_and_read() -> Result<()> {
     env_logger::init();
 
     let args = redox_initfs_tools::Args {
-        destination_path: Path::new("out.img"),
+        destination_path: &Path::new(env!("CARGO_TARGET_TMPDIR")).join("out.img"),
         source: Path::new("data"),
         bootstrap_code: None,
         max_size: redox_initfs_tools::DEFAULT_MAX_SIZE,
