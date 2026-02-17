@@ -13,6 +13,7 @@ redox_syscall.workspace = true
 serde = { version = "1", features = ["derive"] }
 toml = "0.5"
 
+config = { path = "../../config" }
 common = { path = "../common" }
 daemon = { path = "../../daemon" }
 pcid = { path = "../pcid" }

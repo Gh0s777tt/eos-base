@@ -1,3 +1,0 @@
-notify ps2d
-notify hwd
-pcid-spawner /scheme/initfs/etc/pcid/initfs.toml

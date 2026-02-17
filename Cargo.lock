@@ -442,6 +442,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "config"
+version = "0.0.0"
+
+[[package]]
 name = "console-draw"
 version = "0.1.0"
 dependencies = [
@@ -1098,6 +1102,7 @@ dependencies = [
 name = "init"
 version = "0.1.0"
 dependencies = [
+ "config",
  "daemon",
  "libredox",
 ]
@@ -1480,6 +1485,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "common",
+ "config",
  "daemon",
  "log",
  "pcid",

@@ -8,9 +8,7 @@ use pcid_interface::PciFunctionHandle;
 
 fn main() -> Result<()> {
     let mut args = pico_args::Arguments::from_env();
-    let config_path = args
-        .free_from_str::<String>()
-        .expect("failed to parse --config argument");
+    let initfs = args.contains("--initfs");
 
     common::setup_logging(
         "bus",
@@ -20,17 +18,17 @@ fn main() -> Result<()> {
         common::file_level(),
     );
 
-    let config_data = if fs::metadata(&config_path)?.is_file() {
-        fs::read_to_string(&config_path)?
+    let mut config_data = String::new();
+    for path in if initfs {
+        config::config_for_initfs("pcid")?
     } else {
-        let mut config_data = String::new();
-        for path in fs::read_dir(&config_path)? {
-            if let Ok(tmp) = fs::read_to_string(path.unwrap().path()) {
-                config_data.push_str(&tmp);
-            }
+        config::config("pcid")?
+    } {
+        if let Ok(tmp) = fs::read_to_string(path) {
+            config_data.push_str(&tmp);
         }
-        config_data
-    };
+    }
+
     let config: Config = toml::from_str(&config_data)?;
 
     for entry in fs::read_dir("/scheme/pci")? {
