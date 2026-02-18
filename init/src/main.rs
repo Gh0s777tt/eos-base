@@ -1,9 +1,13 @@
+use std::env;
 use std::io::Result;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::{env, fs};
+use std::path::Path;
+use std::process;
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
+
+use crate::script::Command;
+
+mod script;
 
 fn switch_stdio(stdio: &str) -> Result<()> {
     let stdin = libredox::Fd::open(stdio, O_RDONLY, 0)?;
@@ -39,166 +43,121 @@ impl InitConfig {
 }
 
 fn run(file: &Path, config: &InitConfig) -> Result<()> {
-    for line_raw in fs::read_to_string(file)?.lines() {
-        let line = line_raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
+    let (script, errors) = script::Script::from_file(file)?;
+
+    for error in errors {
+        eprintln!("init: {}: {error}", file.display());
+    }
+
+    for cmd in script.0 {
         if config.log_debug {
-            eprintln!("init: running: {:?}", line);
+            eprintln!("init: running: {cmd:?}");
         }
-        run_command(line, config);
+        run_command(cmd, config);
     }
 
     Ok(())
 }
 
-fn run_command(line: &str, config: &InitConfig) {
-    let mut args = line.split(' ').map(|arg| {
-        if arg.starts_with('$') {
-            env::var(&arg[1..]).unwrap_or(String::new())
-        } else {
-            arg.to_string()
+fn run_command(cmd: Command, config: &InitConfig) {
+    match cmd {
+        Command::Nothing => {}
+        Command::Cd(dir) => {
+            if let Err(err) = env::set_current_dir(&dir) {
+                eprintln!("init: failed to cd to '{}': {}", dir.display(), err);
+            }
         }
-    });
+        Command::Echo(text) => println!("{text}"),
+        Command::Export(var, value) => unsafe { env::set_var(var, value) },
+        Command::RunD(dirs) => {
+            let entries = match config::config_for_dirs(&dirs) {
+                Ok(list) => list,
+                Err(err) => {
+                    eprintln!("init: failed to run.d: '{dirs:?}': {err}");
+                    return;
+                }
+            };
 
-    if let Some(cmd) = args.next() {
-        match cmd.as_str() {
-            "cd" => {
-                let Some(dir) = args.next() else {
-                    eprintln!("init: failed to cd: no argument");
-                    return;
-                };
-                if let Err(err) = env::set_current_dir(&dir) {
-                    eprintln!("init: failed to cd to '{}': {}", dir, err);
+            for entry_path in entries {
+                if let Err(err) = run(&entry_path, config) {
+                    eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
                 }
             }
-            "echo" => {
-                println!("{}", args.collect::<Vec<_>>().join(" "));
+        }
+        Command::Stdio(stdio) => {
+            if let Err(err) = switch_stdio(&stdio) {
+                eprintln!("init: failed to switch stdio to '{}': {}", stdio, err);
             }
-            "export" => {
-                let Some(var) = args.next() else {
-                    eprintln!("init: failed to export: no argument");
-                    return;
-                };
-                let mut value = String::new();
-                if let Some(arg) = args.next() {
-                    value.push_str(&arg);
-                }
-                for arg in args {
-                    value.push(' ');
-                    value.push_str(&arg);
-                }
-                unsafe { env::set_var(var, value) };
+        }
+        Command::Unset(envs) => {
+            for env in envs {
+                unsafe { env::remove_var(&env) };
             }
-            "run" => {
-                let Some(new_file) = args.next() else {
-                    eprintln!("init: failed to run: no argument");
-                    return;
-                };
-                if let Err(err) = run(&Path::new(&new_file), config) {
-                    eprintln!("init: failed to run '{}': {}", new_file, err);
-                }
+        }
+        Command::Nowait(cmd, args) => {
+            if config.skip_cmd.contains(&cmd) {
+                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+                return;
             }
-            "run.d" => {
-                let args = args.map(|arg| PathBuf::from(arg)).collect::<Vec<_>>();
-                if args.is_empty() {
-                    eprintln!("init: failed to run.d: no argument or all dirs are non-existent");
+
+            let mut command = process::Command::new(cmd);
+
+            for arg in args {
+                command.arg(arg);
+            }
+
+            match command.spawn() {
+                Ok(_child) => {}
+                Err(err) => eprintln!("init: failed to execute '{:?}': {}", command, err),
+            }
+        }
+        Command::Notify(cmd, args) => {
+            if config.skip_cmd.contains(&cmd) {
+                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+                return;
+            }
+
+            let mut command = process::Command::new(&cmd);
+            for arg in args {
+                command.arg(arg);
+            }
+
+            daemon::Daemon::spawn(command);
+        }
+        Command::Scheme(scheme, cmd, args) => {
+            if config.skip_cmd.contains(&cmd) {
+                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+                return;
+            }
+
+            let mut command = process::Command::new(&cmd);
+            for arg in args {
+                command.arg(arg);
+            }
+
+            daemon::SchemeDaemon::spawn(command, &scheme);
+        }
+        Command::Regular(cmd, args) => {
+            let mut command = process::Command::new(cmd.clone());
+            for arg in args {
+                command.arg(arg);
+            }
+
+            let mut child = match command.spawn() {
+                Ok(child) => child,
+                Err(err) => {
+                    eprintln!("init: failed to execute '{:?}': {}", command, err);
                     return;
                 }
-                let entries = match config::config_for_dirs(&args) {
-                    Ok(list) => list,
-                    Err(err) => {
-                        eprintln!("init: failed to run.d: '{args:?}': {err}");
-                        return;
+            };
+            match child.wait() {
+                Ok(exit_status) => {
+                    if !exit_status.success() {
+                        eprintln!("{cmd} failed with {exit_status}");
                     }
-                };
-
-                for entry_path in entries {
-                    if let Err(err) = run(&entry_path, config) {
-                        eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
-                    }
                 }
-            }
-            "stdio" => {
-                let Some(stdio) = args.next() else {
-                    eprintln!("init: failed to set stdio: no argument");
-                    return;
-                };
-                if let Err(err) = switch_stdio(&stdio) {
-                    eprintln!("init: failed to switch stdio to '{}': {}", stdio, err);
-                }
-            }
-            "unset" => {
-                for arg in args {
-                    unsafe { env::remove_var(&arg) };
-                }
-            }
-            "nowait" => {
-                let Some(cmd) = args.next() else {
-                    eprintln!("init: failed to run nowait: no argument");
-                    return;
-                };
-                if config.skip_cmd.contains(&cmd) {
-                    eprintln!("init: skipping '{}'", line);
-                    return;
-                }
-
-                let mut command = Command::new(cmd);
-
-                for arg in args {
-                    command.arg(arg);
-                }
-
-                match command.spawn() {
-                    Ok(_child) => {}
-                    Err(err) => eprintln!("init: failed to execute '{}': {}", line, err),
-                }
-            }
-            "notify" => {
-                let Some(cmd) = args.next() else {
-                    eprintln!("init: failed to run nowait: no argument");
-                    return;
-                };
-                if config.skip_cmd.contains(&cmd) {
-                    eprintln!("init: skipping '{}'", line);
-                    return;
-                }
-
-                let mut command = Command::new(&cmd);
-                for arg in args {
-                    command.arg(arg);
-                }
-
-                daemon::Daemon::spawn(command);
-            }
-            _ => {
-                if config.skip_cmd.contains(&cmd) {
-                    eprintln!("init: skipping '{}'", line);
-                    return;
-                }
-
-                let mut command = Command::new(cmd.clone());
-                for arg in args {
-                    command.arg(arg);
-                }
-
-                let mut child = match command.spawn() {
-                    Ok(child) => child,
-                    Err(err) => {
-                        eprintln!("init: failed to execute '{}': {}", line, err);
-                        return;
-                    }
-                };
-                match child.wait() {
-                    Ok(exit_status) => {
-                        if !exit_status.success() {
-                            eprintln!("{cmd} failed with {exit_status}");
-                        }
-                    }
-                    Err(err) => {
-                        eprintln!("init: failed to wait for '{}': {}", line, err)
-                    }
+                Err(err) => {
+                    eprintln!("init: failed to wait for '{:?}': {}", command, err)
                 }
             }
         }

@@ -3,7 +3,7 @@ use inputd::ConsumerHandleEvent;
 use libredox::errno::{EAGAIN, EINTR};
 use orbclient::Event;
 use redox_scheme::{
-    scheme::{register_sync_scheme, Op, SchemeResponse, SchemeSync},
+    scheme::{Op, SchemeResponse, SchemeSync},
     CallerCtx, RequestKind, Response, SignalBehavior, Socket,
 };
 use std::env;
@@ -16,9 +16,9 @@ mod scheme;
 mod text;
 
 fn main() {
-    daemon::Daemon::new(daemon);
+    daemon::SchemeDaemon::new(daemon);
 }
-fn daemon(daemon: daemon::Daemon) -> ! {
+fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     let vt_ids = env::args()
         .skip(1)
         .map(|arg| arg.parse().expect("invalid vt number"))
@@ -46,14 +46,11 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
     let mut scheme = FbconScheme::new(&vt_ids, &mut event_queue);
 
-    register_sync_scheme(&socket, "fbcon", &mut scheme)
-        .expect("fbcond: failed to register scheme to namespace");
+    let _ = daemon.ready_sync_scheme(&socket, &mut scheme);
 
     // This is not possible for now as fbcond needs to open new displays at runtime for graphics
     // driver handoff. In the future inputd may directly pass a handle to the display instead.
     // libredox::call::setrens(0, 0).expect("fbcond: failed to enter null namespace");
-
-    daemon.ready();
 
     let mut blocked = Vec::new();
 
@@ -139,7 +136,7 @@ fn handle_event(
                 RequestKind::Cancellation(cancellation_request) => {
                     if let Some(i) = blocked
                         .iter()
-                        .position(|(op, caller)| caller.id == cancellation_request.id)
+                        .position(|(_op, caller)| caller.id == cancellation_request.id)
                     {
                         let (blocked_req, _) = blocked.remove(i);
                         let resp = Response::err(EINTR, blocked_req);

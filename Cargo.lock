@@ -517,6 +517,9 @@ name = "daemon"
 version = "0.0.0"
 dependencies = [
  "libc",
+ "libredox",
+ "redox-scheme",
+ "redox_syscall 0.7.1",
 ]
 
 [[package]]

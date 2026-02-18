@@ -7,14 +7,11 @@ use std::fs::OpenOptions;
 use std::io::Read;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
-use std::{env, process};
+use std::process;
 
 use common::acquire_port_io_rights;
 use event::{user_data, EventQueue};
 use inputd::ProducerHandle;
-use log::info;
-use redox_scheme::{scheme::register_sync_scheme, RequestKind, SignalBehavior, Socket};
-use syscall::{EAGAIN, EWOULDBLOCK};
 
 use crate::state::Ps2d;
 
@@ -77,7 +74,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         )
         .unwrap();
 
-    let mut time_file = OpenOptions::new()
+    let time_file = OpenOptions::new()
         .read(true)
         .write(true)
         .custom_flags(syscall::O_NONBLOCK as i32)

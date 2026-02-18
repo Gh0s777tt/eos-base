@@ -3,7 +3,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::mem;
 use std::os::fd::{FromRawFd, RawFd};
-use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
 
 use redox_scheme::scheme::SchemeSync;
