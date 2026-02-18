@@ -1,6 +1,7 @@
 # Various daemons that relibc needs to function as well as a bunch of env vars
 # that should be set for every program.
 export PATH /scheme/initfs/bin
+export LD_LIBRARY_PATH /scheme/initfs/lib
 export RUST_BACKTRACE 1
 rtcd
 notify nulld
