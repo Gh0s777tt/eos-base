@@ -124,6 +124,19 @@ fn run_command(cmd: Command, config: &InitConfig) {
 
             daemon::Daemon::spawn(command);
         }
+        Command::Scheme(scheme, cmd, args) => {
+            if config.skip_cmd.contains(&cmd) {
+                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+                return;
+            }
+
+            let mut command = process::Command::new(&cmd);
+            for arg in args {
+                command.arg(arg);
+            }
+
+            daemon::SchemeDaemon::spawn(command, &scheme);
+        }
         Command::Regular(cmd, args) => {
             let mut command = process::Command::new(cmd.clone());
             for arg in args {

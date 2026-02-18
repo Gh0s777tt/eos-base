@@ -4,6 +4,6 @@ export PATH /scheme/initfs/bin
 export LD_LIBRARY_PATH /scheme/initfs/lib
 export RUST_BACKTRACE 1
 rtcd
-notify nulld
-notify zerod
-notify randd
+scheme null nulld
+scheme zero zerod
+scheme rand randd

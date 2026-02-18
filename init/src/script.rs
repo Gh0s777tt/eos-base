@@ -37,6 +37,7 @@ pub enum Command {
     // Service
     Nowait(String, Vec<String>),
     Notify(String, Vec<String>),
+    Scheme(String, String, Vec<String>),
     Regular(String, Vec<String>),
 
     // Modify env
@@ -109,6 +110,16 @@ impl Command {
                 };
 
                 Ok(Command::Notify(cmd, args.collect()))
+            }
+            "scheme" => {
+                let Some(scheme) = args.next() else {
+                    return Err("init: failed to run scheme: no argument".to_owned());
+                };
+                let Some(cmd) = args.next() else {
+                    return Err("init: failed to run scheme: missing command".to_owned());
+                };
+
+                Ok(Command::Scheme(scheme, cmd, args.collect()))
             }
             _ => Ok(Command::Regular(cmd, args.collect())),
         }

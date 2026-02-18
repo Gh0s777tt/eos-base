@@ -14,13 +14,12 @@ pub const MODE_READ: u16 = 0o4;
 use raw_cpuid::CpuId;
 
 use redox_scheme::{
-    scheme::{register_sync_scheme, SchemeSync},
-    CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket,
+    scheme::SchemeSync, CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket,
 };
 use syscall::data::Stat;
 use syscall::flag::{EventFlags, O_CREAT, O_EXCL, O_RDONLY, O_RDWR, O_WRONLY};
 use syscall::schemev2::NewFdFlags;
-use syscall::{Error, Result, EACCES, EBADF, EEXIST, ENOENT, EOPNOTSUPP, EPERM, MODE_CHR};
+use syscall::{Error, Result, EACCES, EBADF, EEXIST, ENOENT, EPERM, MODE_CHR};
 
 // Create an RNG Seed to create initial seed from the rdrand intel instruction
 use rand_core::SeedableRng;
@@ -465,15 +464,12 @@ impl SchemeSync for RandScheme {
     }
 }
 
-fn daemon(daemon: daemon::Daemon) -> ! {
+fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     let socket = Socket::create().expect("randd: failed to create rand scheme");
 
     let mut scheme = RandScheme::new();
 
-    register_sync_scheme(&socket, "rand", &mut scheme)
-        .expect("randd: failed to register scheme to namespace");
-
-    daemon.ready();
+    let _ = daemon.ready_sync_scheme(&socket, &mut scheme);
 
     libredox::call::setrens(0, 0).expect("randd: failed to enter null namespace");
 
@@ -497,5 +493,5 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 }
 
 fn main() {
-    daemon::Daemon::new(daemon);
+    daemon::SchemeDaemon::new(daemon);
 }
