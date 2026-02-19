@@ -589,7 +589,7 @@ impl<'sock> UdsStreamScheme<'sock> {
     // After these three phases, the socket connection is considered established.
     fn handle_connect(&mut self, id: usize, token_buf: &[u8]) -> Result<usize> {
         let token = read_num::<u64>(token_buf)?;
-        let (listener_id, flags) = {
+        let (listener_id, connecting_res) = {
             let listener_rc = self
                 .socket_tokens
                 .get(&token)
@@ -603,6 +603,12 @@ impl<'sock> UdsStreamScheme<'sock> {
             let mut listener = listener_rc.borrow_mut();
             let listener_id = listener.primary_id;
 
+            let connecting_res = if client.flags & O_NONBLOCK == O_NONBLOCK {
+                Err(Error::new(EAGAIN))
+            } else {
+                Err(Error::new(EWOULDBLOCK))
+            };
+
             match client.state {
                 State::Connecting => {
                     if client
@@ -611,7 +617,7 @@ impl<'sock> UdsStreamScheme<'sock> {
                         .is_some_and(|c| c.peer == listener_id)
                     {
                         // No op
-                        return Ok(0);
+                        return connecting_res;
                     }
                 }
                 State::Established => {
@@ -628,13 +634,13 @@ impl<'sock> UdsStreamScheme<'sock> {
             // Phase 2: listener is now listening
             listener.connect(&mut client)?;
 
-            (listener_id, client.flags)
+            (listener_id, connecting_res)
         };
         // smoltcp sends writeable whenever a listener gets a
         // client, we'll do the same too (but also readable, why
         // not)
         self.post_fevent(listener_id, EVENT_READ | EVENT_WRITE)?;
-        Ok(0)
+        connecting_res
     }
 
     fn handle_setsockopt(&mut self, id: usize, option: i32, value_slice: &[u8]) -> Result<usize> {
