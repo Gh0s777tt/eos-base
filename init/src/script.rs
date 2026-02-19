@@ -46,8 +46,6 @@ pub enum Command {
 
     // Modify env
     Stdio(String),
-    Export(String, String),
-    Unset(Vec<String>),
 
     // Misc
     Echo(String),
@@ -63,20 +61,6 @@ impl Command {
 
         match cmd.as_str() {
             "echo" => Ok(Command::Echo(args.collect::<Vec<_>>().join(" "))),
-            "export" => {
-                let Some(var) = args.next() else {
-                    return Err("init: failed to export: no argument".to_owned());
-                };
-                let mut value = String::new();
-                if let Some(arg) = args.next() {
-                    value.push_str(&arg);
-                }
-                for arg in args {
-                    value.push(' ');
-                    value.push_str(&arg);
-                }
-                Ok(Command::Export(var, value))
-            }
             "switchroot" => {
                 let Some(prefix) = args.next() else {
                     return Err("init: failed to switchroot: no argument".to_owned());
@@ -95,7 +79,6 @@ impl Command {
                 };
                 Ok(Command::Stdio(stdio))
             }
-            "unset" => Ok(Command::Unset(args.collect())),
             "nowait" => Ok(Command::Nowait(Process::parse(args)?)),
             "notify" => Ok(Command::Notify(Process::parse(args)?)),
             "scheme" => {

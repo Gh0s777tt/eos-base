@@ -93,18 +93,12 @@ fn run_command(cmd: Command, config: &mut InitConfig) {
     match cmd {
         Command::Nothing => {}
         Command::Echo(text) => println!("{text}"),
-        Command::Export(var, value) => unsafe { env::set_var(var, value) },
         Command::SwitchRoot(prefix, etcdir) => {
             switch_root(&prefix, &etcdir, config);
         }
         Command::Stdio(stdio) => {
             if let Err(err) = switch_stdio(&stdio) {
                 eprintln!("init: failed to switch stdio to '{}': {}", stdio, err);
-            }
-        }
-        Command::Unset(envs) => {
-            for env in envs {
-                unsafe { env::remove_var(&env) };
             }
         }
         Command::Nowait(cmd) => {
