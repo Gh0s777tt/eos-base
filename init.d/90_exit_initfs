@@ -1,4 +1,2 @@
 cd /
-export PATH /usr/bin
-export LD_LIBRARY_PATH /usr/lib
-run.d /usr/lib/init.d /etc/init.d
+switchroot /usr /etc

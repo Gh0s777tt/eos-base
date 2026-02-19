@@ -42,6 +42,29 @@ impl InitConfig {
     }
 }
 
+fn switch_root(prefix: &Path, etcdir: &Path, config: &InitConfig) {
+    unsafe {
+        env::set_var("PATH", prefix.join("bin"));
+        env::set_var("LD_LIBRARY_PATH", prefix.join("lib"));
+    }
+    let entries = match config::config_for_dirs(&[
+        prefix.join("lib").join("init.d"),
+        etcdir.join("init.d"),
+    ]) {
+        Ok(list) => list,
+        Err(err) => {
+            eprintln!("init: failed to switchroot: '{prefix:?}', '{etcdir:?}': {err}");
+            return;
+        }
+    };
+
+    for entry_path in entries {
+        if let Err(err) = run(&entry_path, config) {
+            eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
+        }
+    }
+}
+
 fn run(file: &Path, config: &InitConfig) -> Result<()> {
     let (script, errors) = script::Script::from_file(file)?;
 
@@ -69,20 +92,8 @@ fn run_command(cmd: Command, config: &InitConfig) {
         }
         Command::Echo(text) => println!("{text}"),
         Command::Export(var, value) => unsafe { env::set_var(var, value) },
-        Command::RunD(dirs) => {
-            let entries = match config::config_for_dirs(&dirs) {
-                Ok(list) => list,
-                Err(err) => {
-                    eprintln!("init: failed to run.d: '{dirs:?}': {err}");
-                    return;
-                }
-            };
-
-            for entry_path in entries {
-                if let Err(err) = run(&entry_path, config) {
-                    eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
-                }
-            }
+        Command::SwitchRoot(prefix, etcdir) => {
+            switch_root(&prefix, &etcdir, config);
         }
         Command::Stdio(stdio) => {
             if let Err(err) = switch_stdio(&stdio) {
@@ -166,18 +177,11 @@ fn run_command(cmd: Command, config: &InitConfig) {
 
 fn main() {
     let init_config = InitConfig::new();
-    let entries = match config::config_for_initfs("init") {
-        Ok(entries) => entries,
-        Err(err) => {
-            eprintln!("init: failed to find config files: {}", err);
-            return;
-        }
-    };
-    for entry_path in entries {
-        if let Err(err) = run(&entry_path, &init_config) {
-            eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
-        }
-    }
+    switch_root(
+        Path::new("/scheme/initfs"),
+        Path::new("/scheme/initfs/etc"),
+        &init_config,
+    );
 
     libredox::call::setrens(0, 0).expect("init: failed to enter null namespace");
 

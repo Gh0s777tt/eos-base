@@ -48,7 +48,7 @@ pub enum Command {
 
     // Misc
     Echo(String),
-    RunD(Vec<PathBuf>),
+    SwitchRoot(PathBuf, PathBuf),
     Nothing,
 }
 
@@ -80,15 +80,17 @@ impl Command {
                 }
                 Ok(Command::Export(var, value))
             }
-            "run.d" => {
-                let args = args.map(|arg| PathBuf::from(arg)).collect::<Vec<_>>();
-                if args.is_empty() {
-                    return Err(
-                        "init: failed to run.d: no argument or all dirs are non-existent"
-                            .to_owned(),
-                    );
-                }
-                Ok(Command::RunD(args))
+            "switchroot" => {
+                let Some(prefix) = args.next() else {
+                    return Err("init: failed to switchroot: no argument".to_owned());
+                };
+                let Some(etcdir) = args.next() else {
+                    return Err("init: failed to switchroot: missing etcdir".to_owned());
+                };
+                Ok(Command::SwitchRoot(
+                    PathBuf::from(prefix),
+                    PathBuf::from(etcdir),
+                ))
             }
             "stdio" => {
                 let Some(stdio) = args.next() else {
