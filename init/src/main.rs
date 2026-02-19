@@ -1,7 +1,8 @@
+use std::collections::BTreeMap;
 use std::env;
+use std::ffi::OsString;
 use std::io::Result;
 use std::path::Path;
-use std::process;
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
 
@@ -24,6 +25,7 @@ fn switch_stdio(stdio: &str) -> Result<()> {
 struct InitConfig {
     log_debug: bool,
     skip_cmd: Vec<String>,
+    envs: BTreeMap<String, OsString>,
 }
 
 impl InitConfig {
@@ -38,11 +40,39 @@ impl InitConfig {
         Self {
             log_debug,
             skip_cmd,
+            envs: BTreeMap::from([("RUST_BACKTRACE".to_owned(), "1".into())]),
         }
     }
 }
 
-fn run(file: &Path, config: &InitConfig) -> Result<()> {
+fn switch_root(prefix: &Path, etcdir: &Path, config: &mut InitConfig) {
+    config
+        .envs
+        .insert("PATH".to_owned(), prefix.join("bin").into_os_string());
+    config.envs.insert(
+        "LD_LIBRARY_PATH".to_owned(),
+        prefix.join("lib").into_os_string(),
+    );
+
+    let entries = match config::config_for_dirs(&[
+        prefix.join("lib").join("init.d"),
+        etcdir.join("init.d"),
+    ]) {
+        Ok(list) => list,
+        Err(err) => {
+            eprintln!("init: failed to switchroot: '{prefix:?}', '{etcdir:?}': {err}");
+            return;
+        }
+    };
+
+    for entry_path in entries {
+        if let Err(err) = run(&entry_path, config) {
+            eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
+        }
+    }
+}
+
+fn run(file: &Path, config: &mut InitConfig) -> Result<()> {
     let (script, errors) = script::Script::from_file(file)?;
 
     for error in errors {
@@ -59,30 +89,13 @@ fn run(file: &Path, config: &InitConfig) -> Result<()> {
     Ok(())
 }
 
-fn run_command(cmd: Command, config: &InitConfig) {
+fn run_command(cmd: Command, config: &mut InitConfig) {
     match cmd {
         Command::Nothing => {}
-        Command::Cd(dir) => {
-            if let Err(err) = env::set_current_dir(&dir) {
-                eprintln!("init: failed to cd to '{}': {}", dir.display(), err);
-            }
-        }
         Command::Echo(text) => println!("{text}"),
         Command::Export(var, value) => unsafe { env::set_var(var, value) },
-        Command::RunD(dirs) => {
-            let entries = match config::config_for_dirs(&dirs) {
-                Ok(list) => list,
-                Err(err) => {
-                    eprintln!("init: failed to run.d: '{dirs:?}': {err}");
-                    return;
-                }
-            };
-
-            for entry_path in entries {
-                if let Err(err) = run(&entry_path, config) {
-                    eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
-                }
-            }
+        Command::SwitchRoot(prefix, etcdir) => {
+            switch_root(&prefix, &etcdir, config);
         }
         Command::Stdio(stdio) => {
             if let Err(err) = switch_stdio(&stdio) {
@@ -94,70 +107,62 @@ fn run_command(cmd: Command, config: &InitConfig) {
                 unsafe { env::remove_var(&env) };
             }
         }
-        Command::Nowait(cmd, args) => {
-            if config.skip_cmd.contains(&cmd) {
-                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+        Command::Nowait(cmd) => {
+            if config.skip_cmd.contains(&cmd.cmd) {
+                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
                 return;
             }
 
-            let mut command = process::Command::new(cmd);
-
-            for arg in args {
-                command.arg(arg);
-            }
+            let mut command = cmd.into_command(&config.envs);
 
             match command.spawn() {
                 Ok(_child) => {}
                 Err(err) => eprintln!("init: failed to execute '{:?}': {}", command, err),
             }
         }
-        Command::Notify(cmd, args) => {
-            if config.skip_cmd.contains(&cmd) {
-                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+        Command::Notify(cmd) => {
+            if config.skip_cmd.contains(&cmd.cmd) {
+                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
                 return;
             }
 
-            let mut command = process::Command::new(&cmd);
-            for arg in args {
-                command.arg(arg);
-            }
+            let command = cmd.into_command(&config.envs);
 
             daemon::Daemon::spawn(command);
         }
-        Command::Scheme(scheme, cmd, args) => {
-            if config.skip_cmd.contains(&cmd) {
-                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+        Command::Scheme(scheme, cmd) => {
+            if config.skip_cmd.contains(&cmd.cmd) {
+                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
                 return;
             }
 
-            let mut command = process::Command::new(&cmd);
-            for arg in args {
-                command.arg(arg);
-            }
+            let command = cmd.into_command(&config.envs);
 
             daemon::SchemeDaemon::spawn(command, &scheme);
         }
-        Command::Regular(cmd, args) => {
-            let mut command = process::Command::new(cmd.clone());
-            for arg in args {
-                command.arg(arg);
+        Command::Regular(cmd) => {
+            if config.skip_cmd.contains(&cmd.cmd) {
+                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
+                return;
             }
+
+            let mut command = cmd.into_command(&config.envs);
 
             let mut child = match command.spawn() {
                 Ok(child) => child,
                 Err(err) => {
-                    eprintln!("init: failed to execute '{:?}': {}", command, err);
+                    eprintln!("init: failed to execute {:?}: {}", command, err);
                     return;
                 }
             };
             match child.wait() {
                 Ok(exit_status) => {
                     if !exit_status.success() {
-                        eprintln!("{cmd} failed with {exit_status}");
+                        eprintln!("{command:?} failed with {exit_status}");
                     }
                 }
                 Err(err) => {
-                    eprintln!("init: failed to wait for '{:?}': {}", command, err)
+                    eprintln!("init: failed to wait for {:?}: {}", command, err)
                 }
             }
         }
@@ -165,19 +170,12 @@ fn run_command(cmd: Command, config: &InitConfig) {
 }
 
 fn main() {
-    let init_config = InitConfig::new();
-    let entries = match config::config_for_initfs("init") {
-        Ok(entries) => entries,
-        Err(err) => {
-            eprintln!("init: failed to find config files: {}", err);
-            return;
-        }
-    };
-    for entry_path in entries {
-        if let Err(err) = run(&entry_path, &init_config) {
-            eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
-        }
-    }
+    let mut init_config = InitConfig::new();
+    switch_root(
+        Path::new("/scheme/initfs"),
+        Path::new("/scheme/initfs/etc"),
+        &mut init_config,
+    );
 
     libredox::call::setrens(0, 0).expect("init: failed to enter null namespace");
 

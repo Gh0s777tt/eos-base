@@ -100,6 +100,7 @@ pub fn main() -> ! {
             .filter(|var| !var.starts_with(b"INITFS_"))
             .collect::<Vec<_>>()
     };
+    envs.push(b"RUST_BACKTRACE=1");
     //envs.push(b"LD_DEBUG=all");
     envs.push(b"LD_LIBRARY_PATH=/scheme/initfs/lib");
 
