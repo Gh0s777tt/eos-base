@@ -4,6 +4,7 @@ extern crate syscall;
 use driver_graphics::GraphicsScheme;
 use event::{user_data, EventQueue};
 use inputd::DisplayHandle;
+use std::collections::HashMap;
 use std::env;
 use std::os::fd::AsRawFd;
 
@@ -57,9 +58,17 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let mut framebuffers = vec![unsafe { FrameBuffer::new(phys, width, height, stride) }];
 
     //TODO: ideal maximum number of outputs?
+    let bootloader_env = std::fs::read_to_string("/scheme/sys/env")
+        .expect("failed to read env")
+        .lines()
+        .map(|line| {
+            let (env, value) = line.split_once('=').unwrap();
+            (env.to_owned(), value.to_owned())
+        })
+        .collect::<HashMap<String, String>>();
     for i in 1..1024 {
-        match env::var(&format!("FRAMEBUFFER{}", i)) {
-            Ok(var) => match unsafe { FrameBuffer::parse(&var) } {
+        match bootloader_env.get(&format!("FRAMEBUFFER{}", i)) {
+            Some(var) => match unsafe { FrameBuffer::parse(&var) } {
                 Some(fb) => {
                     println!(
                         "vesad: framebuffer {}: {}x{} stride {} at 0x{:X}",
@@ -71,7 +80,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                     eprintln!("vesad: framebuffer {}: failed to parse '{}'", i, var);
                 }
             },
-            Err(_err) => break,
+            None => break,
         };
     }
 
