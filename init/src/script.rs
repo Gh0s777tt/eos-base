@@ -1,5 +1,13 @@
 use std::path::{Path, PathBuf};
-use std::{env, fs, io};
+use std::{env, fs, io, iter, process};
+
+fn subst_env<'a>(arg: &str) -> String {
+    if arg.starts_with('$') {
+        env::var(&arg[1..]).unwrap_or(String::new())
+    } else {
+        arg.to_owned()
+    }
+}
 
 pub struct Script(pub Vec<Command>);
 
@@ -14,15 +22,9 @@ impl Script {
                 continue;
             }
 
-            let args = line.split(' ').map(|arg| {
-                if arg.starts_with('$') {
-                    env::var(&arg[1..]).unwrap_or(String::new())
-                } else {
-                    arg.to_string()
-                }
-            });
+            let args = line.split(' ').map(subst_env);
 
-            match Command::from_arg_iter(args) {
+            match Command::parse(args) {
                 Ok(cmd) => cmds.push(cmd),
                 Err(err) => errors.push(err),
             }
@@ -35,10 +37,10 @@ impl Script {
 #[derive(Debug)]
 pub enum Command {
     // Service
-    Nowait(String, Vec<String>),
-    Notify(String, Vec<String>),
-    Scheme(String, String, Vec<String>),
-    Regular(String, Vec<String>),
+    Nowait(Process),
+    Notify(Process),
+    Scheme(String, Process),
+    Regular(Process),
 
     // Modify env
     Stdio(String),
@@ -52,7 +54,7 @@ pub enum Command {
 }
 
 impl Command {
-    fn from_arg_iter(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
+    fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
         let Some(cmd) = args.next() else {
             return Ok(Command::Nothing);
         };
@@ -92,31 +94,64 @@ impl Command {
                 Ok(Command::Stdio(stdio))
             }
             "unset" => Ok(Command::Unset(args.collect())),
-            "nowait" => {
-                let Some(cmd) = args.next() else {
-                    return Err("init: failed to run nowait: no argument".to_owned());
-                };
-
-                Ok(Command::Nowait(cmd, args.collect()))
-            }
-            "notify" => {
-                let Some(cmd) = args.next() else {
-                    return Err("init: failed to run notify: no argument".to_owned());
-                };
-
-                Ok(Command::Notify(cmd, args.collect()))
-            }
+            "nowait" => Ok(Command::Nowait(Process::parse(args)?)),
+            "notify" => Ok(Command::Notify(Process::parse(args)?)),
             "scheme" => {
                 let Some(scheme) = args.next() else {
                     return Err("init: failed to run scheme: no argument".to_owned());
                 };
-                let Some(cmd) = args.next() else {
-                    return Err("init: failed to run scheme: missing command".to_owned());
-                };
 
-                Ok(Command::Scheme(scheme, cmd, args.collect()))
+                Ok(Command::Scheme(scheme, Process::parse(args)?))
             }
-            _ => Ok(Command::Regular(cmd, args.collect())),
+            _ => Ok(Command::Regular(Process::parse(
+                iter::once(cmd).chain(args),
+            )?)),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Process {
+    pub cmd: String,
+    pub args: Vec<String>,
+    pub envs: Vec<(String, String)>,
+}
+
+impl Process {
+    fn parse(parts: impl Iterator<Item = String>) -> Result<Process, String> {
+        let mut cmd = None;
+        let mut args = vec![];
+        let mut envs = vec![];
+
+        for arg in parts {
+            if cmd.is_none() {
+                if let Some((env, value)) = arg.split_once('=') {
+                    let value = if value == "$" {
+                        env::var(env).unwrap_or_default()
+                    } else {
+                        subst_env(value)
+                    };
+                    if !value.is_empty() {
+                        envs.push((env.to_owned(), value));
+                    }
+                } else {
+                    cmd = Some(arg);
+                }
+            } else {
+                args.push(arg);
+            }
+        }
+
+        if let Some(cmd) = cmd {
+            Ok(Process { cmd, args, envs })
+        } else {
+            Err("no command given".to_owned())
+        }
+    }
+
+    pub fn into_command(self) -> process::Command {
+        let mut command = process::Command::new(self.cmd);
+        command.args(self.args).envs(self.envs);
+        command
     }
 }

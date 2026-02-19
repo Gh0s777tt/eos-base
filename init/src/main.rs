@@ -1,7 +1,6 @@
 use std::env;
 use std::io::Result;
 use std::path::Path;
-use std::process;
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
 
@@ -100,70 +99,62 @@ fn run_command(cmd: Command, config: &InitConfig) {
                 unsafe { env::remove_var(&env) };
             }
         }
-        Command::Nowait(cmd, args) => {
-            if config.skip_cmd.contains(&cmd) {
-                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+        Command::Nowait(cmd) => {
+            if config.skip_cmd.contains(&cmd.cmd) {
+                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
                 return;
             }
 
-            let mut command = process::Command::new(cmd);
-
-            for arg in args {
-                command.arg(arg);
-            }
+            let mut command = cmd.into_command();
 
             match command.spawn() {
                 Ok(_child) => {}
                 Err(err) => eprintln!("init: failed to execute '{:?}': {}", command, err),
             }
         }
-        Command::Notify(cmd, args) => {
-            if config.skip_cmd.contains(&cmd) {
-                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+        Command::Notify(cmd) => {
+            if config.skip_cmd.contains(&cmd.cmd) {
+                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
                 return;
             }
 
-            let mut command = process::Command::new(&cmd);
-            for arg in args {
-                command.arg(arg);
-            }
+            let command = cmd.into_command();
 
             daemon::Daemon::spawn(command);
         }
-        Command::Scheme(scheme, cmd, args) => {
-            if config.skip_cmd.contains(&cmd) {
-                eprintln!("init: skipping '{} {}'", cmd, args.join(" "));
+        Command::Scheme(scheme, cmd) => {
+            if config.skip_cmd.contains(&cmd.cmd) {
+                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
                 return;
             }
 
-            let mut command = process::Command::new(&cmd);
-            for arg in args {
-                command.arg(arg);
-            }
+            let command = cmd.into_command();
 
             daemon::SchemeDaemon::spawn(command, &scheme);
         }
-        Command::Regular(cmd, args) => {
-            let mut command = process::Command::new(cmd.clone());
-            for arg in args {
-                command.arg(arg);
+        Command::Regular(cmd) => {
+            if config.skip_cmd.contains(&cmd.cmd) {
+                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
+                return;
             }
+
+            let mut command = cmd.into_command();
 
             let mut child = match command.spawn() {
                 Ok(child) => child,
                 Err(err) => {
-                    eprintln!("init: failed to execute '{:?}': {}", command, err);
+                    eprintln!("init: failed to execute {:?}: {}", command, err);
                     return;
                 }
             };
             match child.wait() {
                 Ok(exit_status) => {
                     if !exit_status.success() {
-                        eprintln!("{cmd} failed with {exit_status}");
+                        eprintln!("{command:?} failed with {exit_status}");
                     }
                 }
                 Err(err) => {
-                    eprintln!("init: failed to wait for '{:?}': {}", command, err)
+                    eprintln!("init: failed to wait for {:?}: {}", command, err)
                 }
             }
         }

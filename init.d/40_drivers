@@ -1,4 +1,4 @@
 notify ps2d
-notify hwd
+notify RSDP_ADDR=$ RSDP_SIZE=$ hwd
 unset RSDP_ADDR RSDP_SIZE
 pcid-spawner --initfs
