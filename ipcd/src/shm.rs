@@ -220,6 +220,7 @@ impl SchemeSync for ShmScheme {
                 if total_size > buf.len() {
                     return Err(Error::new(ERANGE));
                 }
+                /// TODO: This will not work well if there's multiple segments!
                 Ok(buf.as_ptr() + offset as usize)
             }
             //TODO: this should be only handled by ftruncate
@@ -272,84 +273,151 @@ impl SchemeSync for ShmScheme {
             .buffer
         {
             Some(ref mut map) => map.write(offset as usize, buf),
-            None => Err(Error::new(ERANGE)),
+            //TODO: this should be only handled by ftruncate, but relaxed because it can grow
+            ref mut newmap @ None => {
+                let mut map = MmapGuard::alloc(PAGE_SIZE)?;
+                let size = map.write(offset as usize, buf)?;
+                *newmap = Some(map);
+                Ok(size)
+            }
         }
     }
 }
 
-pub struct MmapGuard {
+pub struct MmapSegment {
     base: usize,
     size: usize,
-    // user specified, non-aligned size
+}
+
+pub struct MmapGuard {
+    segments: Vec<MmapSegment>,
     len: usize,
 }
+
 impl MmapGuard {
     pub fn alloc(len: usize) -> Result<Self> {
-        let page_count = len.div_ceil(PAGE_SIZE);
-        let size = page_count * PAGE_SIZE;
+        let mut guard = Self {
+            segments: Vec::new(),
+            len: 0,
+        };
+        if len > 0 {
+            guard.grow_to(len)?;
+        }
+        Ok(guard)
+    }
+
+    fn grow_to(&mut self, new_len: usize) -> Result<()> {
+        if new_len <= self.total_capacity() {
+            self.len = new_len;
+            return Ok(());
+        }
+
+        let needed = new_len - self.total_capacity();
+        let page_count = needed.div_ceil(PAGE_SIZE);
+        let alloc_size = page_count * PAGE_SIZE;
+
         let base = unsafe {
             syscall::fmap(
                 !0,
                 &Map {
                     offset: 0,
-                    size,
+                    size: alloc_size,
                     flags: MAP_PRIVATE | PROT_READ | PROT_WRITE,
                     address: 0,
                 },
             )
         }?;
 
-        Ok(Self { base, size, len })
+        self.segments.push(MmapSegment {
+            base,
+            size: alloc_size,
+        });
+        self.len = new_len;
+        Ok(())
     }
+
+    fn total_capacity(&self) -> usize {
+        self.segments.iter().map(|s| s.size).sum()
+    }
+
     pub fn len(&self) -> usize {
-        self.size
+        self.len
     }
+
+    /// TODO: Flatten multiple segment into one
     pub fn as_ptr(&self) -> usize {
-        self.base
+        self.segments.first().map(|s| s.base).unwrap_or(0)
     }
-    pub fn read(&self, offset: usize, buf: &mut [u8]) -> Result<usize> {
-        let read_len = buf.len();
-        let end = offset
-            .checked_add(read_len)
-            .ok_or_else(|| Error::new(ERANGE))
-            .map(|f| cmp::min(f, self.len))?;
 
-        if offset > self.len {
-            return Err(Error::new(EINVAL));
+    pub fn read(&self, mut offset: usize, buf: &mut [u8]) -> Result<usize> {
+        if offset >= self.len {
+            return Ok(0);
         }
 
-        unsafe {
-            let src_ptr = (self.base as *const u8).add(offset);
-            let dst_ptr = buf.as_mut_ptr();
-            core::ptr::copy_nonoverlapping(src_ptr, dst_ptr, end - offset);
+        let mut bytes_read = 0;
+        let mut buf_idx = 0;
+        let to_read = cmp::min(buf.len(), self.len - offset);
+
+        for seg in &self.segments {
+            if offset < seg.size {
+                let chunk_size = cmp::min(seg.size - offset, to_read - bytes_read);
+                unsafe {
+                    let src = (seg.base as *const u8).add(offset);
+                    let dst = buf.as_mut_ptr().add(buf_idx);
+                    core::ptr::copy_nonoverlapping(src, dst, chunk_size);
+                }
+                bytes_read += chunk_size;
+                buf_idx += chunk_size;
+                offset = 0;
+            } else {
+                offset -= seg.size;
+            }
+            if bytes_read >= to_read {
+                break;
+            }
         }
 
-        Ok(end - offset)
+        Ok(bytes_read)
     }
+
     pub fn write(&mut self, offset: usize, buf: &[u8]) -> Result<usize> {
-        let write_len = buf.len();
-        let end = offset
-            .checked_add(write_len)
-            .ok_or_else(|| Error::new(ERANGE))?;
+        let end = offset.checked_add(buf.len()).ok_or(Error::new(ERANGE))?;
 
-        if end > self.len {
-            return Err(Error::new(EINVAL));
+        if end > self.total_capacity() {
+            self.grow_to(end)?;
+        } else if end > self.len {
+            self.len = end;
         }
 
-        unsafe {
-            let src_ptr = buf.as_ptr();
-            let dst_ptr = (self.base as *mut u8).add(offset);
-            core::ptr::copy_nonoverlapping(src_ptr, dst_ptr, write_len);
+        let mut bytes_written = 0;
+        let mut current_offset = offset;
+
+        for seg in &self.segments {
+            if current_offset < seg.size {
+                let chunk_size = cmp::min(seg.size - current_offset, buf.len() - bytes_written);
+                unsafe {
+                    let src = buf.as_ptr().add(bytes_written);
+                    let dst = (seg.base as *mut u8).add(current_offset);
+                    core::ptr::copy_nonoverlapping(src, dst, chunk_size);
+                }
+                bytes_written += chunk_size;
+                current_offset = 0;
+            } else {
+                current_offset -= seg.size;
+            }
+            if bytes_written >= buf.len() {
+                break;
+            }
         }
 
-        Ok(write_len)
+        Ok(bytes_written)
     }
 }
+
 impl Drop for MmapGuard {
     fn drop(&mut self) {
-        if self.size == 0 {
-            return;
+        for seg in &self.segments {
+            let _ = unsafe { syscall::funmap(seg.base, seg.size) };
         }
-        let _ = unsafe { syscall::funmap(self.base, self.size) };
     }
 }
