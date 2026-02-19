@@ -15,7 +15,7 @@ impl SchemeSync for ZeroScheme {
     fn openat(
         &mut self,
         dirfd: usize,
-        path: &str,
+        _path: &str,
         _flags: usize,
         _fcntl_flags: u32,
         _ctx: &CallerCtx,

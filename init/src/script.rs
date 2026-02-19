@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::{env, fs, io, iter, process};
+use std::{env, fs, io, iter};
+
+use crate::service::{Service, ServiceType};
 
 fn subst_env<'a>(arg: &str) -> String {
     if arg.starts_with('$') {
@@ -39,10 +40,7 @@ impl Script {
 #[derive(Debug)]
 pub enum Command {
     // Service
-    Nowait(Process),
-    Notify(Process),
-    Scheme(String, Process),
-    Regular(Process),
+    Service(Service),
 
     // Modify env
     Stdio(String),
@@ -79,18 +77,50 @@ impl Command {
                 };
                 Ok(Command::Stdio(stdio))
             }
-            "nowait" => Ok(Command::Nowait(Process::parse(args)?)),
-            "notify" => Ok(Command::Notify(Process::parse(args)?)),
+            "notify" => {
+                let process = Process::parse(args)?;
+
+                Ok(Command::Service(Service {
+                    cmd: process.cmd,
+                    args: process.args,
+                    envs: process.envs,
+                    type_: ServiceType::Notify,
+                }))
+            }
             "scheme" => {
                 let Some(scheme) = args.next() else {
                     return Err("init: failed to run scheme: no argument".to_owned());
                 };
 
-                Ok(Command::Scheme(scheme, Process::parse(args)?))
+                let process = Process::parse(args)?;
+
+                Ok(Command::Service(Service {
+                    cmd: process.cmd,
+                    args: process.args,
+                    envs: process.envs,
+                    type_: ServiceType::Scheme(scheme),
+                }))
             }
-            _ => Ok(Command::Regular(Process::parse(
-                iter::once(cmd).chain(args),
-            )?)),
+            "nowait" => {
+                let process = Process::parse(args)?;
+
+                Ok(Command::Service(Service {
+                    cmd: process.cmd,
+                    args: process.args,
+                    envs: process.envs,
+                    type_: ServiceType::OneshotAsync,
+                }))
+            }
+            _ => {
+                let process = Process::parse(iter::once(cmd).chain(args))?;
+
+                Ok(Command::Service(Service {
+                    cmd: process.cmd,
+                    args: process.args,
+                    envs: process.envs,
+                    type_: ServiceType::Oneshot,
+                }))
+            }
         }
     }
 }
@@ -99,14 +129,14 @@ impl Command {
 pub struct Process {
     pub cmd: String,
     pub args: Vec<String>,
-    pub envs: Vec<(String, String)>,
+    pub envs: BTreeMap<String, String>,
 }
 
 impl Process {
     fn parse(parts: impl Iterator<Item = String>) -> Result<Process, String> {
         let mut cmd = None;
         let mut args = vec![];
-        let mut envs = vec![];
+        let mut envs = BTreeMap::new();
 
         for arg in parts {
             if cmd.is_none() {
@@ -117,7 +147,7 @@ impl Process {
                         subst_env(value)
                     };
                     if !value.is_empty() {
-                        envs.push((env.to_owned(), value));
+                        envs.insert(env.to_owned(), value);
                     }
                 } else {
                     cmd = Some(arg);
@@ -132,12 +162,5 @@ impl Process {
         } else {
             Err("no command given".to_owned())
         }
-    }
-
-    pub fn into_command(self, base_envs: &BTreeMap<String, OsString>) -> process::Command {
-        let mut command = process::Command::new(self.cmd);
-        command.args(self.args);
-        command.env_clear().envs(base_envs).envs(self.envs);
-        command
     }
 }

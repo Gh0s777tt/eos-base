@@ -9,6 +9,7 @@ use libredox::flag::{O_RDONLY, O_WRONLY};
 use crate::script::Command;
 
 mod script;
+mod service;
 
 fn switch_stdio(stdio: &str) -> Result<()> {
     let stdin = libredox::Fd::open(stdio, O_RDONLY, 0)?;
@@ -101,64 +102,17 @@ fn run_command(cmd: Command, config: &mut InitConfig) {
                 eprintln!("init: failed to switch stdio to '{}': {}", stdio, err);
             }
         }
-        Command::Nowait(cmd) => {
-            if config.skip_cmd.contains(&cmd.cmd) {
-                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
+        Command::Service(service) => {
+            if config.skip_cmd.contains(&service.cmd) {
+                eprintln!(
+                    "init: skipping '{} {}'",
+                    service.cmd,
+                    service.args.join(" ")
+                );
                 return;
             }
 
-            let mut command = cmd.into_command(&config.envs);
-
-            match command.spawn() {
-                Ok(_child) => {}
-                Err(err) => eprintln!("init: failed to execute '{:?}': {}", command, err),
-            }
-        }
-        Command::Notify(cmd) => {
-            if config.skip_cmd.contains(&cmd.cmd) {
-                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
-                return;
-            }
-
-            let command = cmd.into_command(&config.envs);
-
-            daemon::Daemon::spawn(command);
-        }
-        Command::Scheme(scheme, cmd) => {
-            if config.skip_cmd.contains(&cmd.cmd) {
-                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
-                return;
-            }
-
-            let command = cmd.into_command(&config.envs);
-
-            daemon::SchemeDaemon::spawn(command, &scheme);
-        }
-        Command::Regular(cmd) => {
-            if config.skip_cmd.contains(&cmd.cmd) {
-                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
-                return;
-            }
-
-            let mut command = cmd.into_command(&config.envs);
-
-            let mut child = match command.spawn() {
-                Ok(child) => child,
-                Err(err) => {
-                    eprintln!("init: failed to execute {:?}: {}", command, err);
-                    return;
-                }
-            };
-            match child.wait() {
-                Ok(exit_status) => {
-                    if !exit_status.success() {
-                        eprintln!("{command:?} failed with {exit_status}");
-                    }
-                }
-                Err(err) => {
-                    eprintln!("init: failed to wait for {:?}: {}", command, err)
-                }
-            }
+            service.spawn(&config.envs);
         }
     }
 }
