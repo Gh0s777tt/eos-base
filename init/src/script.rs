@@ -41,7 +41,6 @@ pub enum Command {
     Regular(String, Vec<String>),
 
     // Modify env
-    Cd(PathBuf),
     Stdio(String),
     Export(String, String),
     Unset(Vec<String>),
@@ -59,12 +58,6 @@ impl Command {
         };
 
         match cmd.as_str() {
-            "cd" => {
-                let Some(dir) = args.next() else {
-                    return Err("init: failed to cd: no argument".to_owned());
-                };
-                Ok(Command::Cd(PathBuf::from(dir)))
-            }
             "echo" => Ok(Command::Echo(args.collect::<Vec<_>>().join(" "))),
             "export" => {
                 let Some(var) = args.next() else {

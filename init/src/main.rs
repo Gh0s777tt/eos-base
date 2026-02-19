@@ -85,11 +85,6 @@ fn run(file: &Path, config: &InitConfig) -> Result<()> {
 fn run_command(cmd: Command, config: &InitConfig) {
     match cmd {
         Command::Nothing => {}
-        Command::Cd(dir) => {
-            if let Err(err) = env::set_current_dir(&dir) {
-                eprintln!("init: failed to cd to '{}': {}", dir.display(), err);
-            }
-        }
         Command::Echo(text) => println!("{text}"),
         Command::Export(var, value) => unsafe { env::set_var(var, value) },
         Command::SwitchRoot(prefix, etcdir) => {
