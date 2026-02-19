@@ -1,4 +1,6 @@
+use std::collections::BTreeMap;
 use std::env;
+use std::ffi::OsString;
 use std::io::Result;
 use std::path::Path;
 
@@ -23,6 +25,7 @@ fn switch_stdio(stdio: &str) -> Result<()> {
 struct InitConfig {
     log_debug: bool,
     skip_cmd: Vec<String>,
+    envs: BTreeMap<String, OsString>,
 }
 
 impl InitConfig {
@@ -37,15 +40,20 @@ impl InitConfig {
         Self {
             log_debug,
             skip_cmd,
+            envs: BTreeMap::from([("RUST_BACKTRACE".to_owned(), "1".into())]),
         }
     }
 }
 
-fn switch_root(prefix: &Path, etcdir: &Path, config: &InitConfig) {
-    unsafe {
-        env::set_var("PATH", prefix.join("bin"));
-        env::set_var("LD_LIBRARY_PATH", prefix.join("lib"));
-    }
+fn switch_root(prefix: &Path, etcdir: &Path, config: &mut InitConfig) {
+    config
+        .envs
+        .insert("PATH".to_owned(), prefix.join("bin").into_os_string());
+    config.envs.insert(
+        "LD_LIBRARY_PATH".to_owned(),
+        prefix.join("lib").into_os_string(),
+    );
+
     let entries = match config::config_for_dirs(&[
         prefix.join("lib").join("init.d"),
         etcdir.join("init.d"),
@@ -64,7 +72,7 @@ fn switch_root(prefix: &Path, etcdir: &Path, config: &InitConfig) {
     }
 }
 
-fn run(file: &Path, config: &InitConfig) -> Result<()> {
+fn run(file: &Path, config: &mut InitConfig) -> Result<()> {
     let (script, errors) = script::Script::from_file(file)?;
 
     for error in errors {
@@ -81,7 +89,7 @@ fn run(file: &Path, config: &InitConfig) -> Result<()> {
     Ok(())
 }
 
-fn run_command(cmd: Command, config: &InitConfig) {
+fn run_command(cmd: Command, config: &mut InitConfig) {
     match cmd {
         Command::Nothing => {}
         Command::Echo(text) => println!("{text}"),
@@ -105,7 +113,7 @@ fn run_command(cmd: Command, config: &InitConfig) {
                 return;
             }
 
-            let mut command = cmd.into_command();
+            let mut command = cmd.into_command(&config.envs);
 
             match command.spawn() {
                 Ok(_child) => {}
@@ -118,7 +126,7 @@ fn run_command(cmd: Command, config: &InitConfig) {
                 return;
             }
 
-            let command = cmd.into_command();
+            let command = cmd.into_command(&config.envs);
 
             daemon::Daemon::spawn(command);
         }
@@ -128,7 +136,7 @@ fn run_command(cmd: Command, config: &InitConfig) {
                 return;
             }
 
-            let command = cmd.into_command();
+            let command = cmd.into_command(&config.envs);
 
             daemon::SchemeDaemon::spawn(command, &scheme);
         }
@@ -138,7 +146,7 @@ fn run_command(cmd: Command, config: &InitConfig) {
                 return;
             }
 
-            let mut command = cmd.into_command();
+            let mut command = cmd.into_command(&config.envs);
 
             let mut child = match command.spawn() {
                 Ok(child) => child,
@@ -162,11 +170,11 @@ fn run_command(cmd: Command, config: &InitConfig) {
 }
 
 fn main() {
-    let init_config = InitConfig::new();
+    let mut init_config = InitConfig::new();
     switch_root(
         Path::new("/scheme/initfs"),
         Path::new("/scheme/initfs/etc"),
-        &init_config,
+        &mut init_config,
     );
 
     libredox::call::setrens(0, 0).expect("init: failed to enter null namespace");

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::{env, fs, io, iter, process};
 
@@ -149,9 +151,10 @@ impl Process {
         }
     }
 
-    pub fn into_command(self) -> process::Command {
+    pub fn into_command(self, base_envs: &BTreeMap<String, OsString>) -> process::Command {
         let mut command = process::Command::new(self.cmd);
-        command.args(self.args).envs(self.envs);
+        command.args(self.args);
+        command.env_clear().envs(base_envs).envs(self.envs);
         command
     }
 }
