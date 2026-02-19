@@ -217,11 +217,12 @@ impl SchemeSync for ShmScheme {
             .buffer
         {
             Some(ref mut buf) => {
-                if total_size > buf.len() {
+                // TODO: This will not work well if there's multiple segments!
+                let segment = buf.segments.first().ok_or_else(|| Error::new(ERANGE))?;
+                if total_size > segment.size {
                     return Err(Error::new(ERANGE));
                 }
-                /// TODO: This will not work well if there's multiple segments!
-                Ok(buf.as_ptr() + offset as usize)
+                Ok(segment.base + offset as usize)
             }
             //TODO: this should be only handled by ftruncate
             ref mut buf @ None => {
