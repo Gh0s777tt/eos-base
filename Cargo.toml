@@ -74,8 +74,7 @@ exclude = ["bootstrap"]
 # Remember to also update bootstrap dependencies, those are not in the workspace
 [workspace.dependencies]
 anyhow = "1"
-# Update libc after https://github.com/bytecodealliance/rustix/pull/1582
-libc = "=0.2.180"
+libc = "0.2.181"
 log = "0.4"
 libredox = "0.1.12"
 orbclient = { git = "https://gitlab.redox-os.org/redox-os/orbclient" }
@@ -94,6 +93,8 @@ precedence = "deny"
 # Rustix doesn't support ioctls on Redox OS
 drm = { git = "https://github.com/Smithay/drm-rs.git" }
 drm-sys = { git = "https://github.com/Smithay/drm-rs.git" }
+# Use crates.io version after next release
+rustix = { git = "https://github.com/bytecodealliance/rustix.git" }
 
 [patch."https://gitlab.redox-os.org/redox-os/relibc.git"]
 #redox-rt = { path = "../../relibc/source/redox-rt" }
