@@ -14,3 +14,6 @@ redox-scheme.workspace = true
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 raw-cpuid = "11.0.1"
+
+[lints]
+workspace = true

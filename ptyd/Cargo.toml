@@ -10,3 +10,6 @@ redox-scheme.workspace = true
 redox_event.workspace = true
 redox_syscall.workspace = true
 redox_termios.workspace = true
+
+[lints]
+workspace = true

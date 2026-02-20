@@ -8,3 +8,6 @@ libc.workspace = true
 libredox.workspace = true
 redox-scheme.workspace = true
 redox_syscall.workspace = true
+
+[lints]
+workspace = true

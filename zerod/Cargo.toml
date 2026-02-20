@@ -9,3 +9,6 @@ redox_syscall.workspace = true
 redox-scheme.workspace = true
 daemon = { path = "../daemon" }
 libredox.workspace = true
+
+[lints]
+workspace = true

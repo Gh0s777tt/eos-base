@@ -15,3 +15,6 @@ redox-scheme.workspace = true
 libredox = { workspace = true, features = ["call"] }
 indexmap = "2.5.0"
 slab = "0.4.9"
+
+[lints]
+workspace = true

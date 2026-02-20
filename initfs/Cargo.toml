@@ -9,3 +9,6 @@ license = "MIT"
 
 [dependencies]
 plain = "0.2"
+
+[lints]
+workspace = true

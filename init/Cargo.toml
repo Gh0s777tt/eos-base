@@ -9,3 +9,6 @@ libredox.workspace = true
 
 config = { path = "../config" }
 daemon = { path = "../daemon" }
+
+[lints]
+workspace = true
