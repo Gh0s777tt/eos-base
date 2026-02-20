@@ -15,3 +15,6 @@ driver-block = { path = "../driver-block" }
 pcid = { path = "../../pcid" }
 libredox.workspace = true
 redox_event.workspace = true
+
+[lints]
+workspace = true

@@ -17,3 +17,6 @@ config = { path = "../../config" }
 common = { path = "../common" }
 daemon = { path = "../../daemon" }
 pcid = { path = "../pcid" }
+
+[lints]
+workspace = true

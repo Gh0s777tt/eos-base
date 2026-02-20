@@ -12,3 +12,6 @@ libredox = { workspace =  true, features = ["mkns"] }
 redox-scheme.workspace = true
 anyhow.workspace = true
 ioslice = "0.6.0"
+
+[lints]
+workspace = true

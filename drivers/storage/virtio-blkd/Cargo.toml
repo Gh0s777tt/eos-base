@@ -21,3 +21,6 @@ driver-block = { path = "../driver-block" }
 pcid = { path = "../../pcid" }
 virtio-core = { path = "../../virtio-core" }
 libredox.workspace = true
+
+[lints]
+workspace = true

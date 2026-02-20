@@ -10,3 +10,6 @@ description = "Async framework for queue-based HW interfaces"
 log.workspace = true
 redox_event.workspace = true
 slab = "0.4.9"
+
+[lints]
+workspace = true

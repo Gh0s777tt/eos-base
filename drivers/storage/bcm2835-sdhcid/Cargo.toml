@@ -14,3 +14,6 @@ driver-block = { path = "../driver-block" }
 libredox.workspace = true
 redox_syscall = { workspace = true, features = ["std"] }
 redox_event.workspace = true
+
+[lints]
+workspace = true

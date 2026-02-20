@@ -11,3 +11,6 @@ redox-ioctl.workspace = true
 redox_syscall.workspace = true
 
 common = { path = "../../common" }
+
+[lints]
+workspace = true

@@ -12,3 +12,6 @@ graphics-ipc = { path = "../graphics-ipc" }
 
 [features]
 default = []
+
+[lints]
+workspace = true

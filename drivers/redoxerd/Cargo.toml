@@ -12,3 +12,6 @@ redox_syscall.workspace = true
 redox_termios.workspace = true
 common = { path = "../common" }
 qemu-exit = "3.0.2"
+
+[lints]
+workspace = true

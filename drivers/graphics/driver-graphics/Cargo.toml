@@ -13,3 +13,6 @@ libredox.workspace = true
 common = { path = "../../common" }
 graphics-ipc = { path = "../graphics-ipc" }
 inputd = { path = "../../inputd" }
+
+[lints]
+workspace = true

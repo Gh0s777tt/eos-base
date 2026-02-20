@@ -26,3 +26,6 @@ plain = "0.2"
 twox-hash = "1.6"
 
 redox-initfs = {path = ".."}
+
+[lints]
+workspace = true

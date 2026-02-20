@@ -15,3 +15,6 @@ libredox.workspace = true
 common = { path = "../../common" }
 daemon = { path = "../../../daemon" }
 inputd = { path = "../../inputd" }
+
+[lints]
+workspace = true

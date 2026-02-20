@@ -18,3 +18,6 @@ xhcid = { path = "../../usb/xhcid" }
 
 common = { path = "../../common" }
 inputd = { path = "../../inputd" }
+
+[lints]
+workspace = true

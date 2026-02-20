@@ -16,3 +16,6 @@ futures = { version = "0.3.28", features = ["executor"] }
 
 redox_syscall = { workspace = true, features = ["std"] }
 redox-scheme.workspace = true
+
+[lints]
+workspace = true

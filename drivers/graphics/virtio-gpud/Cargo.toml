@@ -26,3 +26,6 @@ redox_syscall.workspace = true
 orbclient.workspace = true
 spin = "0.9.8"
 libredox.workspace = true
+
+[lints]
+workspace = true

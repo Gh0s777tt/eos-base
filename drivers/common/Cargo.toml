@@ -12,3 +12,6 @@ libredox.workspace = true
 log.workspace = true
 redox_syscall = { workspace = true, features = ["std"] }
 redox-log.workspace = true
+
+[lints]
+workspace = true
