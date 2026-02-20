@@ -23,3 +23,6 @@ pcid = { path = "../../pcid" }
 
 [features]
 default = []
+
+[lints]
+workspace = true

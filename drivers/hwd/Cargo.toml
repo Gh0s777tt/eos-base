@@ -12,3 +12,6 @@ libredox = { version = "0.1.12", default-features = false, features = ["std", "c
 amlserde = { path = "../amlserde" }
 common = { path = "../common" }
 daemon = { path = "../../daemon" }
+
+[lints]
+workspace = true

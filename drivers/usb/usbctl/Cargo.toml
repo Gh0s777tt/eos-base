@@ -10,3 +10,6 @@ edition = "2018"
 clap = "2.33"
 xhcid = { path = "../xhcid" }
 common = { path = "../../common" }
+
+[lints]
+workspace = true

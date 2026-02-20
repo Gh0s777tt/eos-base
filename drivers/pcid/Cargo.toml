@@ -26,3 +26,6 @@ serde = { version = "1", features = ["derive"] }
 common = { path = "../common" }
 daemon = { path = "../../daemon" }
 libredox.workspace = true
+
+[lints]
+workspace = true

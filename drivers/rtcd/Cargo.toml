@@ -10,3 +10,6 @@ license = "MIT"
 anyhow.workspace = true
 
 common = { path = "../common" }
+
+[lints]
+workspace = true

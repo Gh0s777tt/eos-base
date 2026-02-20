@@ -12,3 +12,6 @@ redox_syscall.workspace = true
 xhcid = { path = "../xhcid" }
 
 common = { path = "../../common" }
+
+[lints]
+workspace = true

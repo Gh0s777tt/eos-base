@@ -16,3 +16,6 @@ driver-network = { path = "../driver-network" }
 
 redox_syscall.workspace = true
 libredox.workspace = true
+
+[lints]
+workspace = true

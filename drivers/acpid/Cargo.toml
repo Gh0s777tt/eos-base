@@ -26,3 +26,6 @@ common = { path = "../common" }
 daemon = { path = "../../daemon" }
 libredox.workspace = true
 redox-scheme.workspace = true
+
+[lints]
+workspace = true
