@@ -1,0 +1,7 @@
+{
+    "unit": {},
+    "switchroot": {
+        "prefix": "/usr",
+        "etcdir": "/etc"
+    }
+}

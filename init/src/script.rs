@@ -37,7 +37,7 @@ impl Script {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Command {
     // Service
     Service(Service),
@@ -47,7 +47,6 @@ pub enum Command {
 
     // Misc
     Echo(String),
-    SwitchRoot(PathBuf, PathBuf),
     Nothing,
 }
 
@@ -59,18 +58,6 @@ impl Command {
 
         match cmd.as_str() {
             "echo" => Ok(Command::Echo(args.collect::<Vec<_>>().join(" "))),
-            "switchroot" => {
-                let Some(prefix) = args.next() else {
-                    return Err("init: failed to switchroot: no argument".to_owned());
-                };
-                let Some(etcdir) = args.next() else {
-                    return Err("init: failed to switchroot: missing etcdir".to_owned());
-                };
-                Ok(Command::SwitchRoot(
-                    PathBuf::from(prefix),
-                    PathBuf::from(etcdir),
-                ))
-            }
             "stdio" => {
                 let Some(stdio) = args.next() else {
                     return Err("init: failed to set stdio: no argument".to_owned());

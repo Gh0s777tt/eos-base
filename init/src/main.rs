@@ -1,13 +1,14 @@
 use std::collections::BTreeMap;
-use std::env;
 use std::ffi::OsString;
 use std::io::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::{env, mem};
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
+use serde::Deserialize;
 
 use crate::script::Command;
-use crate::unit::Unit;
+use crate::unit::{UnitId, UnitStore};
 
 mod script;
 mod service;
@@ -48,42 +49,51 @@ impl InitConfig {
     }
 }
 
-fn switch_root(prefix: &Path, etcdir: &Path, config: &mut InitConfig) {
-    config
-        .envs
-        .insert("PATH".to_owned(), prefix.join("bin").into_os_string());
-    config.envs.insert(
-        "LD_LIBRARY_PATH".to_owned(),
-        prefix.join("lib").into_os_string(),
-    );
+#[derive(Clone, Deserialize)]
+struct SwitchRoot {
+    prefix: PathBuf,
+    etcdir: PathBuf,
+}
 
-    let entries = match config::config_for_dirs(&[
-        prefix.join("lib").join("init.d"),
-        etcdir.join("init.d"),
-    ]) {
-        Ok(list) => list,
-        Err(err) => {
-            eprintln!("init: failed to switchroot: '{prefix:?}', '{etcdir:?}': {err}");
-            return;
-        }
-    };
+impl SwitchRoot {
+    fn apply(
+        self,
+        pending_units: &mut Vec<UnitId>,
+        unit_store: &mut UnitStore,
+        config: &mut InitConfig,
+    ) {
+        config
+            .envs
+            .insert("PATH".to_owned(), self.prefix.join("bin").into_os_string());
+        config.envs.insert(
+            "LD_LIBRARY_PATH".to_owned(),
+            self.prefix.join("lib").into_os_string(),
+        );
 
-    for entry_path in entries {
-        if let Err(err) = run(&entry_path, config) {
-            eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
+        unit_store.config_dirs = vec![
+            self.prefix.join("lib").join("init.d"),
+            self.etcdir.join("init.d"),
+        ];
+
+        let (loaded_units, errors) = unit_store.load_units();
+        for error in errors {
+            eprintln!("init: {error}");
         }
+        pending_units.extend(loaded_units);
     }
 }
 
-fn run(file: &Path, config: &mut InitConfig) -> Result<()> {
-    let (unit, errors) = Unit::from_file(file)?;
-    for error in errors {
-        eprintln!("init: {}: {error}", file.display());
-    }
+fn run(
+    unit: &UnitId,
+    pending_units: &mut Vec<UnitId>,
+    unit_store: &mut UnitStore,
+    config: &mut InitConfig,
+) -> Result<()> {
+    let unit = unit_store.unit_mut(unit);
 
-    match unit.kind {
+    match &unit.kind {
         unit::UnitKind::LegacyScript { script } => {
-            for cmd in script.0 {
+            for cmd in script.0.clone() {
                 if config.log_debug {
                     eprintln!("init: running: {cmd:?}");
                 }
@@ -92,9 +102,15 @@ fn run(file: &Path, config: &mut InitConfig) -> Result<()> {
         }
         unit::UnitKind::Service { service } => {
             if config.log_debug {
-                eprintln!("init: running: {} {}", service.cmd, service.args.join(" "));
+                eprintln!(
+                    "Starting {}",
+                    unit.info.description.as_ref().unwrap_or(&unit.id.0)
+                );
             }
             service.spawn(&config.envs);
+        }
+        unit::UnitKind::SwitchRoot { switchroot } => {
+            switchroot.clone().apply(pending_units, unit_store, config);
         }
     }
 
@@ -105,9 +121,6 @@ fn run_command(cmd: Command, config: &mut InitConfig) {
     match cmd {
         Command::Nothing => {}
         Command::Echo(text) => println!("{text}"),
-        Command::SwitchRoot(prefix, etcdir) => {
-            switch_root(&prefix, &etcdir, config);
-        }
         Command::Stdio(stdio) => {
             if let Err(err) = switch_stdio(&stdio) {
                 eprintln!("init: failed to switch stdio to '{}': {}", stdio, err);
@@ -130,11 +143,22 @@ fn run_command(cmd: Command, config: &mut InitConfig) {
 
 fn main() {
     let mut init_config = InitConfig::new();
-    switch_root(
-        Path::new("/scheme/initfs"),
-        Path::new("/scheme/initfs/etc"),
-        &mut init_config,
-    );
+    let mut unit_store = UnitStore::new();
+    let mut pending_units = vec![];
+
+    SwitchRoot {
+        prefix: Path::new("/scheme/initfs").to_owned(),
+        etcdir: Path::new("/scheme/initfs/etc").to_owned(),
+    }
+    .apply(&mut pending_units, &mut unit_store, &mut init_config);
+
+    while !pending_units.is_empty() {
+        for unit in mem::take(&mut pending_units) {
+            if let Err(err) = run(&unit, &mut pending_units, &mut unit_store, &mut init_config) {
+                eprintln!("init: failed to run {}: {}", unit.0, err);
+            }
+        }
+    }
 
     libredox::call::setrens(0, 0).expect("init: failed to enter null namespace");
 

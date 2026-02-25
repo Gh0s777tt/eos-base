@@ -1,5 +1,7 @@
 {
-    "unit": {},
+    "unit": {
+        "description": "Set time from realtime clock"
+    },
     "service": {
         "cmd": "rtcd",
         "type": "oneshot"

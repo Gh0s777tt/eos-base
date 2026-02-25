@@ -4,7 +4,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Service {
     pub cmd: String,
     #[serde(default)]
@@ -15,7 +15,7 @@ pub struct Service {
     pub type_: ServiceType,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServiceType {
     #[default]
@@ -26,12 +26,12 @@ pub enum ServiceType {
 }
 
 impl Service {
-    pub fn spawn(self, base_envs: &BTreeMap<String, OsString>) {
-        let mut command = Command::new(self.cmd);
-        command.args(self.args);
-        command.env_clear().envs(base_envs).envs(self.envs);
+    pub fn spawn(&self, base_envs: &BTreeMap<String, OsString>) {
+        let mut command = Command::new(&self.cmd);
+        command.args(&self.args);
+        command.env_clear().envs(base_envs).envs(&self.envs);
 
-        match self.type_ {
+        match &self.type_ {
             ServiceType::Notify => {
                 daemon::Daemon::spawn(command);
             }
