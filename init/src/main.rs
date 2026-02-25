@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
+use std::env;
 use std::ffi::OsString;
 use std::io::Result;
 use std::path::{Path, PathBuf};
-use std::{env, mem};
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
 use serde::Deserialize;
@@ -58,7 +58,7 @@ struct SwitchRoot {
 impl SwitchRoot {
     fn apply(
         self,
-        pending_units: &mut Vec<UnitId>,
+        pending_units: &mut VecDeque<UnitId>,
         unit_store: &mut UnitStore,
         config: &mut InitConfig,
     ) {
@@ -85,7 +85,7 @@ impl SwitchRoot {
 
 fn run(
     unit: &UnitId,
-    pending_units: &mut Vec<UnitId>,
+    pending_units: &mut VecDeque<UnitId>,
     unit_store: &mut UnitStore,
     config: &mut InitConfig,
 ) -> Result<()> {
@@ -104,12 +104,25 @@ fn run(
             if config.log_debug {
                 eprintln!(
                     "Starting {}",
-                    unit.info.description.as_ref().unwrap_or(&unit.id.0)
+                    unit.info.description.as_ref().unwrap_or(&unit.id.0),
                 );
             }
             service.spawn(&config.envs);
         }
+        unit::UnitKind::Target {} => {
+            if config.log_debug {
+                eprintln!(
+                    "Started target {}",
+                    unit.info.description.as_ref().unwrap_or(&unit.id.0),
+                );
+            }
+        }
         unit::UnitKind::SwitchRoot { switchroot } => {
+            eprintln!(
+                "init: switchroot to {} {}",
+                switchroot.prefix.display(),
+                switchroot.etcdir.display()
+            );
             switchroot.clone().apply(pending_units, unit_store, config);
         }
     }
@@ -119,6 +132,7 @@ fn run(
 
 fn run_command(cmd: Command, config: &mut InitConfig) {
     match cmd {
+        Command::RequiresWeak(_) => {} // handled by unit parsing code
         Command::Nothing => {}
         Command::Echo(text) => println!("{text}"),
         Command::Stdio(stdio) => {
@@ -144,7 +158,7 @@ fn run_command(cmd: Command, config: &mut InitConfig) {
 fn main() {
     let mut init_config = InitConfig::new();
     let mut unit_store = UnitStore::new();
-    let mut pending_units = vec![];
+    let mut pending_units = VecDeque::new();
 
     SwitchRoot {
         prefix: Path::new("/scheme/initfs").to_owned(),
@@ -152,11 +166,24 @@ fn main() {
     }
     .apply(&mut pending_units, &mut unit_store, &mut init_config);
 
-    while !pending_units.is_empty() {
-        for unit in mem::take(&mut pending_units) {
-            if let Err(err) = run(&unit, &mut pending_units, &mut unit_store, &mut init_config) {
-                eprintln!("init: failed to run {}: {}", unit.0, err);
+    let runtime_target = UnitId("00_runtime.target".to_owned());
+
+    'a: while let Some(unit) = pending_units.pop_front() {
+        if unit_store.unit(&unit).info.default_dependencies {
+            if pending_units.contains(&runtime_target) {
+                pending_units.push_back(unit);
+                continue 'a;
             }
+        }
+        for dep in &unit_store.unit(&unit).info.requires_weak {
+            if pending_units.contains(dep) {
+                pending_units.push_back(unit);
+                continue 'a;
+            }
+        }
+
+        if let Err(err) = run(&unit, &mut pending_units, &mut unit_store, &mut init_config) {
+            eprintln!("init: failed to run {}: {}", unit.0, err);
         }
     }
 

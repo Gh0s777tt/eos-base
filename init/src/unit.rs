@@ -5,7 +5,7 @@ use std::{fs, io};
 use serde::Deserialize;
 
 use crate::SwitchRoot;
-use crate::script::Script;
+use crate::script::{Command, Script};
 use crate::service::Service;
 
 pub struct UnitStore {
@@ -56,12 +56,17 @@ impl UnitStore {
         (loaded_units, errors)
     }
 
+    pub fn unit(&self, unit: &UnitId) -> &Unit {
+        self.units.get(unit).unwrap()
+    }
+
     pub fn unit_mut(&mut self, unit: &UnitId) -> &mut Unit {
         self.units.get_mut(unit).unwrap()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(transparent)]
 pub struct UnitId(pub String);
 
 pub struct Unit {
@@ -74,15 +79,20 @@ pub struct Unit {
 #[derive(Deserialize)]
 pub struct UnitInfo {
     pub description: Option<String>,
+    #[serde(default = "true_bool")]
+    pub default_dependencies: bool,
     #[serde(default)]
-    pub requires: Vec<String>,
-    #[serde(default)]
-    pub requires_weak: Vec<String>,
+    pub requires_weak: Vec<UnitId>,
+}
+
+fn true_bool() -> bool {
+    true
 }
 
 pub enum UnitKind {
     LegacyScript { script: Script },
     Service { service: Service },
+    Target {},
     SwitchRoot { switchroot: SwitchRoot },
 }
 
@@ -90,6 +100,11 @@ pub enum UnitKind {
 struct SerializedService {
     unit: UnitInfo,
     service: Service,
+}
+
+#[derive(Deserialize)]
+struct SerializedTarget {
+    unit: UnitInfo,
 }
 
 #[derive(Deserialize)]
@@ -114,11 +129,20 @@ impl Unit {
         let (info, kind, errors) = match config_path.extension().map(|ext| ext.to_str().unwrap()) {
             None => {
                 let (script, warnings) = Script::from_str(&config)?;
+                let mut requires_weak = vec![];
+                for command in &script.0 {
+                    match command {
+                        Command::RequiresWeak(deps) => {
+                            requires_weak.extend(deps.into_iter().cloned())
+                        }
+                        _ => {}
+                    }
+                }
                 (
                     UnitInfo {
                         description: None,
-                        requires: vec![],
-                        requires_weak: vec![],
+                        default_dependencies: true,
+                        requires_weak,
                     },
                     UnitKind::LegacyScript { script },
                     warnings,
@@ -133,6 +157,10 @@ impl Unit {
                     },
                     vec![],
                 )
+            }
+            Some("target") => {
+                let target: SerializedTarget = serde_json::from_str(&config)?;
+                (target.unit, UnitKind::Target {}, vec![])
             }
             Some("switchroot") => {
                 let switchroot: SerializedSwitchRoot = serde_json::from_str(&config)?;

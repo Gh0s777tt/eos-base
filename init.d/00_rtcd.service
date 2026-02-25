@@ -1,6 +1,7 @@
 {
     "unit": {
-        "description": "Set time from realtime clock"
+        "description": "Set time from realtime clock",
+        "default_dependencies": false
     },
     "service": {
         "cmd": "rtcd",

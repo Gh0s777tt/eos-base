@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::{env, io, iter};
 
 use crate::service::{Service, ServiceType};
+use crate::unit::UnitId;
 
 fn subst_env<'a>(arg: &str) -> String {
     if arg.starts_with('$') {
@@ -39,6 +39,9 @@ impl Script {
 
 #[derive(Clone, Debug)]
 pub enum Command {
+    // Dependencies
+    RequiresWeak(Vec<UnitId>),
+
     // Service
     Service(Service),
 
@@ -57,6 +60,7 @@ impl Command {
         };
 
         match cmd.as_str() {
+            "requires_weak" => Ok(Command::RequiresWeak(args.map(UnitId).collect::<Vec<_>>())),
             "echo" => Ok(Command::Echo(args.collect::<Vec<_>>().join(" "))),
             "stdio" => {
                 let Some(stdio) = args.next() else {

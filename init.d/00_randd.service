@@ -1,5 +1,7 @@
 {
-    "unit": {},
+    "unit": {
+        "default_dependencies": false
+    },
     "service": {
         "cmd": "randd",
         "args": [
