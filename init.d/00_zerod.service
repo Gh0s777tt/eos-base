@@ -1,4 +1,9 @@
 {
-    "cmd": "zerod",
-    "type": { "scheme": "zero" }
+    "unit": {},
+    "service": {
+        "cmd": "zerod",
+        "type": {
+            "scheme": "zero"
+        }
+    }
 }

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::{env, fs, io, iter};
+use std::path::PathBuf;
+use std::{env, io, iter};
 
 use crate::service::{Service, ServiceType};
 
@@ -15,11 +15,11 @@ fn subst_env<'a>(arg: &str) -> String {
 pub struct Script(pub Vec<Command>);
 
 impl Script {
-    pub fn from_file(file: &Path) -> io::Result<(Script, Vec<String>)> {
+    pub fn from_str(config: &str) -> io::Result<(Script, Vec<String>)> {
         let mut cmds = vec![];
         let mut errors = vec![];
 
-        for line_raw in fs::read_to_string(file)?.lines() {
+        for line_raw in config.lines() {
             let line = line_raw.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;

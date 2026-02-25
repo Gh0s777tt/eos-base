@@ -1,4 +1,9 @@
 {
-    "cmd": "nulld",
-    "type": { "scheme": "null" }
+    "unit": {},
+    "service": {
+        "cmd": "nulld",
+        "type": {
+            "scheme": "null"
+        }
+    }
 }

@@ -1,4 +1,7 @@
 {
-    "cmd": "rtcd",
-    "type": "oneshot"
+    "unit": {},
+    "service": {
+        "cmd": "rtcd",
+        "type": "oneshot"
+    }
 }

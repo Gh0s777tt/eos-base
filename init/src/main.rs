@@ -1,16 +1,17 @@
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
+use std::env;
+use std::ffi::OsString;
 use std::io::Result;
 use std::path::Path;
-use std::{env, fs};
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
 
 use crate::script::Command;
-use crate::service::Service;
+use crate::unit::Unit;
 
 mod script;
 mod service;
+mod unit;
 
 fn switch_stdio(stdio: &str) -> Result<()> {
     let stdin = libredox::Fd::open(stdio, O_RDONLY, 0)?;
@@ -75,23 +76,26 @@ fn switch_root(prefix: &Path, etcdir: &Path, config: &mut InitConfig) {
 }
 
 fn run(file: &Path, config: &mut InitConfig) -> Result<()> {
-    if file.extension() == Some(OsStr::new("service")) {
-        let service: Service = serde_json::from_str(&fs::read_to_string(file).unwrap()).unwrap();
-        service.spawn(&config.envs);
-        return Ok(());
-    }
-
-    let (script, errors) = script::Script::from_file(file)?;
-
+    let (unit, errors) = Unit::from_file(file)?;
     for error in errors {
         eprintln!("init: {}: {error}", file.display());
     }
 
-    for cmd in script.0 {
-        if config.log_debug {
-            eprintln!("init: running: {cmd:?}");
+    match unit.kind {
+        unit::UnitKind::LegacyScript { script } => {
+            for cmd in script.0 {
+                if config.log_debug {
+                    eprintln!("init: running: {cmd:?}");
+                }
+                run_command(cmd, config);
+            }
         }
-        run_command(cmd, config);
+        unit::UnitKind::Service { service } => {
+            if config.log_debug {
+                eprintln!("init: running: {} {}", service.cmd, service.args.join(" "));
+            }
+            service.spawn(&config.envs);
+        }
     }
 
     Ok(())

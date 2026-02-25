@@ -1,5 +1,12 @@
 {
-    "cmd": "randd",
-    "args": ["rand"],
-    "type": { "scheme": "rand" }
+    "unit": {},
+    "service": {
+        "cmd": "randd",
+        "args": [
+            "rand"
+        ],
+        "type": {
+            "scheme": "rand"
+        }
+    }
 }
