@@ -1,0 +1,5 @@
+{
+    "cmd": "randd",
+    "args": ["rand"],
+    "type": { "scheme": "rand" }
+}

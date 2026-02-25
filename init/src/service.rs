@@ -2,15 +2,21 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::process::Command;
 
-#[derive(Debug)]
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
 pub struct Service {
     pub cmd: String,
+    #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default)]
     pub envs: BTreeMap<String, String>,
+    #[serde(rename = "type")]
     pub type_: ServiceType,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ServiceType {
     #[default]
     Notify,
