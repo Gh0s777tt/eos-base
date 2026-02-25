@@ -1,0 +1,11 @@
+{
+    "unit": {
+        "default_dependencies": false
+    },
+    "service": {
+        "cmd": "nulld",
+        "type": {
+            "scheme": "null"
+        }
+    }
+}

@@ -1,14 +1,18 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::env;
 use std::ffi::OsString;
 use std::io::Result;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
+use serde::Deserialize;
 
 use crate::script::Command;
+use crate::unit::{UnitId, UnitStore};
 
 mod script;
+mod service;
+mod unit;
 
 fn switch_stdio(stdio: &str) -> Result<()> {
     let stdin = libredox::Fd::open(stdio, O_RDONLY, 0)?;
@@ -45,45 +49,82 @@ impl InitConfig {
     }
 }
 
-fn switch_root(prefix: &Path, etcdir: &Path, config: &mut InitConfig) {
-    config
-        .envs
-        .insert("PATH".to_owned(), prefix.join("bin").into_os_string());
-    config.envs.insert(
-        "LD_LIBRARY_PATH".to_owned(),
-        prefix.join("lib").into_os_string(),
-    );
+#[derive(Clone, Deserialize)]
+struct SwitchRoot {
+    prefix: PathBuf,
+    etcdir: PathBuf,
+}
 
-    let entries = match config::config_for_dirs(&[
-        prefix.join("lib").join("init.d"),
-        etcdir.join("init.d"),
-    ]) {
-        Ok(list) => list,
-        Err(err) => {
-            eprintln!("init: failed to switchroot: '{prefix:?}', '{etcdir:?}': {err}");
-            return;
-        }
-    };
+impl SwitchRoot {
+    fn apply(
+        self,
+        pending_units: &mut VecDeque<UnitId>,
+        unit_store: &mut UnitStore,
+        config: &mut InitConfig,
+    ) {
+        config
+            .envs
+            .insert("PATH".to_owned(), self.prefix.join("bin").into_os_string());
+        config.envs.insert(
+            "LD_LIBRARY_PATH".to_owned(),
+            self.prefix.join("lib").into_os_string(),
+        );
 
-    for entry_path in entries {
-        if let Err(err) = run(&entry_path, config) {
-            eprintln!("init: failed to run '{}': {}", entry_path.display(), err);
+        unit_store.config_dirs = vec![
+            self.prefix.join("lib").join("init.d"),
+            self.etcdir.join("init.d"),
+        ];
+
+        let (loaded_units, errors) = unit_store.load_units();
+        for error in errors {
+            eprintln!("init: {error}");
         }
+        pending_units.extend(loaded_units);
     }
 }
 
-fn run(file: &Path, config: &mut InitConfig) -> Result<()> {
-    let (script, errors) = script::Script::from_file(file)?;
+fn run(
+    unit: &UnitId,
+    pending_units: &mut VecDeque<UnitId>,
+    unit_store: &mut UnitStore,
+    config: &mut InitConfig,
+) -> Result<()> {
+    let unit = unit_store.unit_mut(unit);
 
-    for error in errors {
-        eprintln!("init: {}: {error}", file.display());
-    }
-
-    for cmd in script.0 {
-        if config.log_debug {
-            eprintln!("init: running: {cmd:?}");
+    match &unit.kind {
+        unit::UnitKind::LegacyScript { script } => {
+            for cmd in script.0.clone() {
+                if config.log_debug {
+                    eprintln!("init: running: {cmd:?}");
+                }
+                run_command(cmd, config);
+            }
         }
-        run_command(cmd, config);
+        unit::UnitKind::Service { service } => {
+            if config.log_debug {
+                eprintln!(
+                    "Starting {}",
+                    unit.info.description.as_ref().unwrap_or(&unit.id.0),
+                );
+            }
+            service.spawn(&config.envs);
+        }
+        unit::UnitKind::Target {} => {
+            if config.log_debug {
+                eprintln!(
+                    "Started target {}",
+                    unit.info.description.as_ref().unwrap_or(&unit.id.0),
+                );
+            }
+        }
+        unit::UnitKind::SwitchRoot { switchroot } => {
+            eprintln!(
+                "init: switchroot to {} {}",
+                switchroot.prefix.display(),
+                switchroot.etcdir.display()
+            );
+            switchroot.clone().apply(pending_units, unit_store, config);
+        }
     }
 
     Ok(())
@@ -91,91 +132,60 @@ fn run(file: &Path, config: &mut InitConfig) -> Result<()> {
 
 fn run_command(cmd: Command, config: &mut InitConfig) {
     match cmd {
+        Command::RequiresWeak(_) => {} // handled by unit parsing code
         Command::Nothing => {}
         Command::Echo(text) => println!("{text}"),
-        Command::Export(var, value) => unsafe { env::set_var(var, value) },
-        Command::SwitchRoot(prefix, etcdir) => {
-            switch_root(&prefix, &etcdir, config);
-        }
         Command::Stdio(stdio) => {
             if let Err(err) = switch_stdio(&stdio) {
                 eprintln!("init: failed to switch stdio to '{}': {}", stdio, err);
             }
         }
-        Command::Unset(envs) => {
-            for env in envs {
-                unsafe { env::remove_var(&env) };
-            }
-        }
-        Command::Nowait(cmd) => {
-            if config.skip_cmd.contains(&cmd.cmd) {
-                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
+        Command::Service(service) => {
+            if config.skip_cmd.contains(&service.cmd) {
+                eprintln!(
+                    "init: skipping '{} {}'",
+                    service.cmd,
+                    service.args.join(" ")
+                );
                 return;
             }
 
-            let mut command = cmd.into_command(&config.envs);
-
-            match command.spawn() {
-                Ok(_child) => {}
-                Err(err) => eprintln!("init: failed to execute '{:?}': {}", command, err),
-            }
-        }
-        Command::Notify(cmd) => {
-            if config.skip_cmd.contains(&cmd.cmd) {
-                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
-                return;
-            }
-
-            let command = cmd.into_command(&config.envs);
-
-            daemon::Daemon::spawn(command);
-        }
-        Command::Scheme(scheme, cmd) => {
-            if config.skip_cmd.contains(&cmd.cmd) {
-                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
-                return;
-            }
-
-            let command = cmd.into_command(&config.envs);
-
-            daemon::SchemeDaemon::spawn(command, &scheme);
-        }
-        Command::Regular(cmd) => {
-            if config.skip_cmd.contains(&cmd.cmd) {
-                eprintln!("init: skipping '{} {}'", cmd.cmd, cmd.args.join(" "));
-                return;
-            }
-
-            let mut command = cmd.into_command(&config.envs);
-
-            let mut child = match command.spawn() {
-                Ok(child) => child,
-                Err(err) => {
-                    eprintln!("init: failed to execute {:?}: {}", command, err);
-                    return;
-                }
-            };
-            match child.wait() {
-                Ok(exit_status) => {
-                    if !exit_status.success() {
-                        eprintln!("{command:?} failed with {exit_status}");
-                    }
-                }
-                Err(err) => {
-                    eprintln!("init: failed to wait for {:?}: {}", command, err)
-                }
-            }
+            service.spawn(&config.envs);
         }
     }
 }
 
 fn main() {
     let mut init_config = InitConfig::new();
-    switch_root(
-        Path::new("/scheme/initfs"),
-        Path::new("/scheme/initfs/etc"),
-        &mut init_config,
-    );
+    let mut unit_store = UnitStore::new();
+    let mut pending_units = VecDeque::new();
+
+    SwitchRoot {
+        prefix: Path::new("/scheme/initfs").to_owned(),
+        etcdir: Path::new("/scheme/initfs/etc").to_owned(),
+    }
+    .apply(&mut pending_units, &mut unit_store, &mut init_config);
+
+    let runtime_target = UnitId("00_runtime.target".to_owned());
+
+    'a: while let Some(unit) = pending_units.pop_front() {
+        if unit_store.unit(&unit).info.default_dependencies {
+            if pending_units.contains(&runtime_target) {
+                pending_units.push_back(unit);
+                continue 'a;
+            }
+        }
+        for dep in &unit_store.unit(&unit).info.requires_weak {
+            if pending_units.contains(dep) {
+                pending_units.push_back(unit);
+                continue 'a;
+            }
+        }
+
+        if let Err(err) = run(&unit, &mut pending_units, &mut unit_store, &mut init_config) {
+            eprintln!("init: failed to run {}: {}", unit.0, err);
+        }
+    }
 
     libredox::call::setrens(0, 0).expect("init: failed to enter null namespace");
 

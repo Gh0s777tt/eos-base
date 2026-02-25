@@ -1,0 +1,14 @@
+{
+    "unit": {
+        "default_dependencies": false
+    },
+    "service": {
+        "cmd": "randd",
+        "args": [
+            "rand"
+        ],
+        "type": {
+            "scheme": "rand"
+        }
+    }
+}

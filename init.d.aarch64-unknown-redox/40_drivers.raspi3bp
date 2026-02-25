@@ -1,2 +1,3 @@
+requires_weak 30_live
 unset RSDP_ADDR RSDP_SIZE
 notify bcm2835-sdhcid
