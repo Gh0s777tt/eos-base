@@ -184,7 +184,7 @@ impl SchemeSync for FbbootlogScheme {
         &mut self,
         dirfd: usize,
         path_str: &str,
-        flags: usize,
+        _flags: usize,
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<OpenResult> {

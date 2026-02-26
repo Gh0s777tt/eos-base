@@ -130,11 +130,7 @@ impl SchemeSync for FbconScheme {
         flags: syscall::EventFlags,
         _ctx: &CallerCtx,
     ) -> Result<syscall::EventFlags> {
-        let handle = match self.handles.get_mut(&id) {
-            Some(Handle::Vt(handle)) => Ok(handle),
-            Some(Handle::SchemeRoot) => Err(Error::new(EBADF)),
-            None => Err(Error::new(EBADF)),
-        }?;
+        let handle = self.get_vt_handle_mut(id)?;
 
         handle.notified_read = false;
         handle.events = flags;
@@ -143,11 +139,7 @@ impl SchemeSync for FbconScheme {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let handle = match self.handles.get(&id) {
-            Some(Handle::Vt(handle)) => Ok(handle),
-            Some(Handle::SchemeRoot) => Err(Error::new(EBADF)),
-            None => Err(Error::new(EBADF)),
-        }?;
+        let handle = self.get_vt_handle_mut(id)?;
 
         let path_str = format!("fbcon:{}", handle.vt_i.0);
         let path = path_str.as_bytes();
@@ -162,14 +154,11 @@ impl SchemeSync for FbconScheme {
     }
 
     fn fsync(&mut self, id: usize, _ctx: &CallerCtx) -> Result<()> {
-        match self.handles.get(&id) {
-            Some(Handle::Vt(_)) => Ok(()),
-            Some(Handle::SchemeRoot) => Err(Error::new(EBADF)),
-            None => Err(Error::new(EBADF)),
-        }
+        let _handle = self.get_vt_handle_mut(id)?;
+        Ok(())
     }
 
-    fn fcntl(&mut self, id: usize, cmd: usize, arg: usize, _ctx: &CallerCtx) -> Result<usize> {
+    fn fcntl(&mut self, id: usize, _cmd: usize, _arg: usize, _ctx: &CallerCtx) -> Result<usize> {
         if !self.handles.get(&id).is_some() {
             return Err(Error::new(EBADF));
         };
@@ -213,13 +202,9 @@ impl SchemeSync for FbconScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let handle = match self.handles.get(&id) {
-            Some(Handle::Vt(handle)) => Ok(handle),
-            Some(Handle::SchemeRoot) => Err(Error::new(EBADF)),
-            None => Err(Error::new(EBADF)),
-        }?;
+        let vt_i = self.get_vt_handle_mut(id)?.vt_i;
 
-        if let Some(console) = self.vts.get_mut(&handle.vt_i) {
+        if let Some(console) = self.vts.get_mut(&vt_i) {
             console.write(buf)
         } else {
             Err(Error::new(EBADF))
