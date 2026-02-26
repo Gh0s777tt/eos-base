@@ -1,4 +1,0 @@
-requires_weak 00_runtime.target
-scheme log logd
-stdio /scheme/log
-scheme logging ramfs logging
