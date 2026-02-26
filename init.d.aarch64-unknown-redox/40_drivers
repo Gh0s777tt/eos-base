@@ -1,4 +1,3 @@
-requires_weak 30_live
-notify hwd
+requires_weak 10_lived.service 20_graphics.target
 notify RSDP_ADDR=$ RSDP_SIZE=$ hwd
 pcid-spawner --initfs
