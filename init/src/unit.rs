@@ -149,7 +149,8 @@ impl Unit {
                 )
             }
             Some("service") => {
-                let service: SerializedService = serde_json::from_str(&config)?;
+                let service: SerializedService = toml::from_str(&config)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                 (
                     service.unit,
                     UnitKind::Service {
@@ -159,11 +160,13 @@ impl Unit {
                 )
             }
             Some("target") => {
-                let target: SerializedTarget = serde_json::from_str(&config)?;
+                let target: SerializedTarget = toml::from_str(&config)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                 (target.unit, UnitKind::Target {}, vec![])
             }
             Some("switchroot") => {
-                let switchroot: SerializedSwitchRoot = serde_json::from_str(&config)?;
+                let switchroot: SerializedSwitchRoot = toml::from_str(&config)
+                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                 (
                     switchroot.unit,
                     UnitKind::SwitchRoot {

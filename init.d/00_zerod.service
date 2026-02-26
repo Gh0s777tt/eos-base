@@ -1,12 +1,7 @@
-{
-    "unit": {
-        "description": "/dev/zero",
-        "default_dependencies": false
-    },
-    "service": {
-        "cmd": "zerod",
-        "type": {
-            "scheme": "zero"
-        }
-    }
-}
+[unit]
+description = "/dev/zero"
+default_dependencies = false
+
+[service]
+cmd = "zerod"
+type = { scheme = "zero" }
