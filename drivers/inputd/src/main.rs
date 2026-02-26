@@ -661,12 +661,17 @@ fn main() {
             }
             // Activates a keymap.
             "-K" => {
-                let vt = args
-                    .next()
-                    .unwrap()
-                    .to_ascii_lowercase()
-                    .parse::<KeymapKind>()
-                    .expect("inputd: unrecognized keymap code (see: inputd --keymaps)");
+                let arg = if let Some(a) = args.next() {
+                    a
+                } else {
+                    eprintln!("Error: Option -K requires a layout argument.");
+                    std::process::exit(1);
+                };
+
+                let vt: KeymapKind = arg.to_ascii_lowercase().parse().unwrap_or_else(|_| {
+                    eprintln!("inputd: unrecognized keymap code (see: inputd --keymaps)");
+                    std::process::exit(1);
+                });
 
                 let mut handle =
                     inputd::ControlHandle::new().expect("inputd: failed to open control handle");
