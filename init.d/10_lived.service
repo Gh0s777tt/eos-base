@@ -1,0 +1,10 @@
+{
+    "_comment": "Needs to start before drivers to ensure it gets priority when redoxfs searches for disks",
+    "unit": {
+        "description": "Live disk"
+    },
+    "service": {
+        "cmd": "lived",
+        "type": "notify"
+    }
+}

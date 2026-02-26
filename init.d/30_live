@@ -1,3 +1,0 @@
-requires_weak 20_graphics
-# Note: Needs to start before drivers to ensure it gets priority when redoxfs searches for disks
-notify lived
