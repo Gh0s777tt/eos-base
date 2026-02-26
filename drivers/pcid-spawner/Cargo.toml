@@ -11,7 +11,7 @@ log.workspace = true
 pico-args = "0.5"
 redox_syscall.workspace = true
 serde = { version = "1", features = ["derive"] }
-toml = "0.5"
+toml = "1"
 
 config = { path = "../../config" }
 common = { path = "../common" }
