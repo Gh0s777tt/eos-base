@@ -1,6 +1,6 @@
 {
     "unit": {
-        "description": "Various daemons that relibc needs to function.",
+        "description": "Services that relibc needs to function",
         "default_dependencies": false,
         "requires_weak": [
             "00_nulld.service",
