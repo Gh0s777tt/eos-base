@@ -1,12 +1,13 @@
 {
     "unit": {
-        "description": "Various daemons that relibc needs to function.",
+        "description": "Services that relibc needs to function",
         "default_dependencies": false,
         "requires_weak": [
             "00_nulld.service",
             "00_randd.service",
             "00_rtcd.service",
-            "00_zerod.service"
+            "00_zerod.service",
+            "00_logging_ramfs.service"
         ]
     }
 }

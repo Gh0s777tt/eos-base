@@ -25,7 +25,7 @@ use redox_scheme::{CallerCtx, OpenResult, RequestKind, Response, SignalBehavior,
 
 use orbclient::{Event, EventOption};
 use syscall::schemev2::NewFdFlags;
-use syscall::{Error as SysError, EventFlags, EACCES, EBADF, EINVAL};
+use syscall::{Error as SysError, EventFlags, EACCES, EBADF, EEXIST, EINVAL};
 
 pub mod keymap;
 
@@ -79,7 +79,7 @@ impl InputScheme {
             handles: BTreeMap::new(),
 
             next_id: AtomicUsize::new(0),
-            next_vt_id: AtomicUsize::new(1),
+            next_vt_id: AtomicUsize::new(2), // VT 1 is reserved for the bootlog
 
             display: None,
             vts: BTreeSet::new(),
@@ -193,6 +193,20 @@ impl SchemeSync for InputScheme {
                     needs_handoff: false,
                     notified: false,
                     vt,
+                }
+            }
+            "consumer_bootlog" => {
+                if !self.vts.insert(1) {
+                    return Err(SysError::new(EEXIST));
+                }
+
+                self.switch_vt(1);
+                Handle::Consumer {
+                    events: EventFlags::empty(),
+                    pending: Vec::new(),
+                    needs_handoff: false,
+                    notified: false,
+                    vt: 1,
                 }
             }
             "handle" | "handle_early" => {

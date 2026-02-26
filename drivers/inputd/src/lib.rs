@@ -47,6 +47,14 @@ impl ConsumerHandle {
         Ok(Self(file))
     }
 
+    pub fn bootlog_vt() -> io::Result<Self> {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(O_NONBLOCK as i32)
+            .open(format!("/scheme/input/consumer_bootlog"))?;
+        Ok(Self(file))
+    }
+
     pub fn event_handle(&self) -> BorrowedFd<'_> {
         self.0.as_fd()
     }

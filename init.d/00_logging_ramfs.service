@@ -1,0 +1,13 @@
+{
+    "unit": {
+        "default_dependencies": false,
+        "requires_weak": ["00_randd.service"]
+    },
+    "service": {
+        "cmd": "ramfs",
+        "args": ["logging"],
+        "type": {
+            "scheme": "logging"
+        }
+    }
+}

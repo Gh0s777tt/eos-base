@@ -1,7 +1,0 @@
-requires_weak 10_logging
-scheme input inputd
-notify FRAMEBUFFER_ADDR=$ FRAMEBUFFER_VIRT=$ FRAMEBUFFER_WIDTH=$ FRAMEBUFFER_HEIGHT=$ FRAMEBUFFER_STRIDE=$ vesad
-scheme fbbootlog fbbootlogd
-# Activate framebuffer log VT, which disables kernel graphical debug
-inputd -A 1
-scheme fbcon fbcond 2

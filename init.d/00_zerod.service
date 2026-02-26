@@ -1,5 +1,6 @@
 {
     "unit": {
+        "description": "/dev/zero",
         "default_dependencies": false
     },
     "service": {

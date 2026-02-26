@@ -1,3 +1,2 @@
-requires_weak 30_live
-unset RSDP_ADDR RSDP_SIZE
+requires_weak 10_lived.service 20_graphics.target
 notify bcm2835-sdhcid

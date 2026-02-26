@@ -135,11 +135,6 @@ fn run_command(cmd: Command, config: &mut InitConfig) {
         Command::RequiresWeak(_) => {} // handled by unit parsing code
         Command::Nothing => {}
         Command::Echo(text) => println!("{text}"),
-        Command::Stdio(stdio) => {
-            if let Err(err) = switch_stdio(&stdio) {
-                eprintln!("init: failed to switch stdio to '{}': {}", stdio, err);
-            }
-        }
         Command::Service(service) => {
             if config.skip_cmd.contains(&service.cmd) {
                 eprintln!(
@@ -165,6 +160,13 @@ fn main() {
         etcdir: Path::new("/scheme/initfs/etc").to_owned(),
     }
     .apply(&mut pending_units, &mut unit_store, &mut init_config);
+
+    let mut command = std::process::Command::new("logd");
+    command.env_clear().envs(&init_config.envs);
+    daemon::SchemeDaemon::spawn(command, "log");
+    if let Err(err) = switch_stdio("/scheme/log") {
+        eprintln!("init: failed to switch stdio to '/scheme/log': {err}");
+    }
 
     let runtime_target = UnitId("00_runtime.target".to_owned());
 

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::{env, io, iter};
 
 use crate::service::{Service, ServiceType};
@@ -45,9 +45,6 @@ pub enum Command {
     // Service
     Service(Service),
 
-    // Modify env
-    Stdio(String),
-
     // Misc
     Echo(String),
     Nothing,
@@ -62,12 +59,6 @@ impl Command {
         match cmd.as_str() {
             "requires_weak" => Ok(Command::RequiresWeak(args.map(UnitId).collect::<Vec<_>>())),
             "echo" => Ok(Command::Echo(args.collect::<Vec<_>>().join(" "))),
-            "stdio" => {
-                let Some(stdio) = args.next() else {
-                    return Err("init: failed to set stdio: no argument".to_owned());
-                };
-                Ok(Command::Stdio(stdio))
-            }
             "notify" => {
                 let process = Process::parse(args)?;
 
@@ -75,6 +66,7 @@ impl Command {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
+                    inherit_envs: BTreeSet::new(),
                     type_: ServiceType::Notify,
                 }))
             }
@@ -89,6 +81,7 @@ impl Command {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
+                    inherit_envs: BTreeSet::new(),
                     type_: ServiceType::Scheme(scheme),
                 }))
             }
@@ -99,6 +92,7 @@ impl Command {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
+                    inherit_envs: BTreeSet::new(),
                     type_: ServiceType::OneshotAsync,
                 }))
             }
@@ -109,6 +103,7 @@ impl Command {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
+                    inherit_envs: BTreeSet::new(),
                     type_: ServiceType::Oneshot,
                 }))
             }

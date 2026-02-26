@@ -1,6 +1,5 @@
 //! <https://www.qemu.org/docs/master/specs/standard-vga.html>
 
-use common::acquire_port_io_rights;
 use inputd::ProducerHandle;
 use pcid_interface::PciFunctionHandle;
 use redox_scheme::{scheme::register_sync_scheme, RequestKind, SignalBehavior, Socket};

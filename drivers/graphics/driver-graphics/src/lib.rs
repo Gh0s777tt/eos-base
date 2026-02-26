@@ -22,9 +22,7 @@ use libredox::Fd;
 use redox_scheme::scheme::{register_scheme_inner, SchemeSync};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
 use syscall::schemev2::NewFdFlags;
-use syscall::{
-    CallFlags, Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP,
-};
+use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP};
 
 use crate::objects::{DrmObjectId, DrmObjects};
 use crate::properties::DrmPropertyKind;
