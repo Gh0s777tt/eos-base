@@ -1,0 +1,12 @@
+{
+    "unit": {
+        "description": "Graphical bootlog",
+        "requires_weak": ["10_inputd.service"]
+    },
+    "service": {
+        "cmd": "fbbootlogd",
+        "type": {
+            "scheme": "fbbootlog"
+        }
+    }
+}

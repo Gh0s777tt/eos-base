@@ -25,7 +25,7 @@ pub struct FbbootlogScheme {
 impl FbbootlogScheme {
     pub fn new() -> FbbootlogScheme {
         let mut scheme = FbbootlogScheme {
-            input_handle: ConsumerHandle::new_vt().expect("fbbootlogd: Failed to open vt"),
+            input_handle: ConsumerHandle::bootlog_vt().expect("fbbootlogd: Failed to open vt"),
             display_map: None,
             text_screen: console_draw::TextScreen::new(),
             text_buffer: console_draw::TextBuffer::new(1000),

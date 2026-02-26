@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::ffi::OsString;
 use std::process::Command;
 
@@ -11,6 +12,8 @@ pub struct Service {
     pub args: Vec<String>,
     #[serde(default)]
     pub envs: BTreeMap<String, String>,
+    #[serde(default)]
+    pub inherit_envs: BTreeSet<String>,
     #[serde(rename = "type")]
     pub type_: ServiceType,
 }
@@ -29,7 +32,13 @@ impl Service {
     pub fn spawn(&self, base_envs: &BTreeMap<String, OsString>) {
         let mut command = Command::new(&self.cmd);
         command.args(&self.args);
-        command.env_clear().envs(base_envs).envs(&self.envs);
+        command.env_clear();
+        for env in &self.inherit_envs {
+            if let Some(value) = env::var_os(env) {
+                command.env(env, value);
+            }
+        }
+        command.envs(base_envs).envs(&self.envs);
 
         match &self.type_ {
             ServiceType::Notify => {

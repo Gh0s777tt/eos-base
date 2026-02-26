@@ -1,4 +1,0 @@
-requires_weak 10_inputd.service
-notify FRAMEBUFFER_ADDR=$ FRAMEBUFFER_VIRT=$ FRAMEBUFFER_WIDTH=$ FRAMEBUFFER_HEIGHT=$ FRAMEBUFFER_STRIDE=$ vesad
-scheme fbbootlog fbbootlogd
-scheme fbcon fbcond 2

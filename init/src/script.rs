@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::{env, io, iter};
 
 use crate::service::{Service, ServiceType};
@@ -66,6 +66,7 @@ impl Command {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
+                    inherit_envs: BTreeSet::new(),
                     type_: ServiceType::Notify,
                 }))
             }
@@ -80,6 +81,7 @@ impl Command {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
+                    inherit_envs: BTreeSet::new(),
                     type_: ServiceType::Scheme(scheme),
                 }))
             }
@@ -90,6 +92,7 @@ impl Command {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
+                    inherit_envs: BTreeSet::new(),
                     type_: ServiceType::OneshotAsync,
                 }))
             }
@@ -100,6 +103,7 @@ impl Command {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
+                    inherit_envs: BTreeSet::new(),
                     type_: ServiceType::Oneshot,
                 }))
             }
