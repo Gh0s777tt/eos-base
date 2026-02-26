@@ -1,9 +1,6 @@
-{
-    "unit": {
-        "requires_weak": ["50_rootfs"]
-    },
-    "switchroot": {
-        "prefix": "/usr",
-        "etcdir": "/etc"
-    }
-}
+[unit]
+requires_weak = ["50_rootfs"]
+
+[switchroot]
+prefix = "/usr"
+etcdir = "/etc"

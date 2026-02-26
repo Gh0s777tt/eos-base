@@ -1133,6 +1133,7 @@ dependencies = [
  "libredox",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

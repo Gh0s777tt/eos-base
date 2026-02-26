@@ -8,6 +8,7 @@ license = "MIT"
 libredox.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "1"
 
 config = { path = "../config" }
 daemon = { path = "../daemon" }
