@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 
 use syscall::CallFlags;
 use syscall::data::{GlobalSchemes, KernelSchemeInfo};
-use syscall::flag::{O_CLOEXEC, O_RDONLY};
+use syscall::flag::{O_CLOEXEC, O_RDONLY, O_STAT};
 use syscall::{EINTR, Error};
 
 use redox_rt::proc::*;
@@ -175,6 +175,10 @@ pub fn main() -> ! {
     // from this point, this_thr_fd is no longer valid
 
     const CWD: &[u8] = b"/scheme/initfs";
+    let cwd_fd =
+        FdGuard::new(syscall::openat(initfs_fd, "", O_STAT, 0).expect("failed to open cwd fd"))
+            .to_upper()
+            .unwrap();
     let extrainfo = ExtraInfo {
         cwd: Some(CWD),
         sigprocmask: 0,
@@ -183,6 +187,7 @@ pub fn main() -> ! {
         thr_fd: init_thr_fd.as_raw_fd(),
         proc_fd: init_proc_fd.as_raw_fd(),
         ns_fd: Some(initns_fd),
+        cwd_fd: Some(cwd_fd.as_raw_fd()),
     };
 
     let path = "/bin/init";
