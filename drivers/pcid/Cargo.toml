@@ -21,7 +21,7 @@ pico-args = { version = "0.5", features = ["combined-flags"] }
 plain = "0.2"
 redox-scheme.workspace = true
 redox_syscall.workspace = true
-serde = { version = "1", features = ["derive"] }
+serde.workspace = true
 
 common = { path = "../common" }
 daemon = { path = "../../daemon" }
