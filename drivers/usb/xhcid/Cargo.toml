@@ -22,11 +22,11 @@ log.workspace = true
 redox_event.workspace = true
 redox-scheme.workspace = true
 redox_syscall.workspace = true
-serde = { version = "1", features = ["derive"] }
+serde.workspace = true
 serde_json = "1"
 smallvec = { version = "1", features = ["serde"] }
 thiserror = "1"
-toml = "1"
+toml.workspace = true
 
 common = { path = "../../common" }
 daemon = { path = "../../../daemon" }
