@@ -6,14 +6,14 @@ use core::cell::RefCell;
 use core::fmt::Debug;
 use core::mem;
 use hashbrown::HashMap;
+use libredox::protocol::{NsDup, NsPermissions};
 use log::{error, warn};
 use redox_path::RedoxPath;
 use redox_path::RedoxScheme;
 use redox_rt::proc::FdGuard;
-use redox_rt::protocol::{NsDup, NsPermissions};
 use redox_scheme::{
     CallerCtx, OpenResult, RequestKind, Response, SendFdRequest, SignalBehavior, Socket,
-    scheme::SchemeSync,
+    scheme::{SchemeState, SchemeSync},
 };
 use syscall::Stat;
 use syscall::dirent::{DirEntry, DirentBuf, DirentKind};
@@ -495,6 +495,7 @@ pub fn run(
     let socket = Socket::create_inner(scheme_creation_cap, false)
         .expect("failed to open init namespace scheme socket");
 
+    let mut state = SchemeState::new();
     let mut scheme = NamespaceScheme::new(&socket, schemes, FdGuard::new(scheme_creation_cap));
 
     // send namespace fd to bootstrap
@@ -523,7 +524,7 @@ pub fn run(
         };
         match req.kind() {
             RequestKind::Call(req) => {
-                let resp = req.handle_sync(&mut scheme);
+                let resp = req.handle_sync(&mut scheme, &mut state);
 
                 if !socket
                     .write_response(resp, SignalBehavior::Restart)

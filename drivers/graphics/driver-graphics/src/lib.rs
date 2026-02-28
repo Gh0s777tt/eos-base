@@ -19,7 +19,7 @@ use graphics_ipc::v1::CursorDamage;
 use graphics_ipc::v2::Damage;
 use inputd::{VtEvent, VtEventKind};
 use libredox::Fd;
-use redox_scheme::scheme::{register_scheme_inner, SchemeSync};
+use redox_scheme::scheme::{register_scheme_inner, SchemeState, SchemeSync};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP};
@@ -90,36 +90,8 @@ pub struct CursorPlane<C: CursorFramebuffer> {
 pub trait CursorFramebuffer {}
 
 pub struct GraphicsScheme<T: GraphicsAdapter> {
-    adapter: T,
-
-    scheme_name: String,
-    disable_graphical_debug: Option<File>,
-    socket: Socket,
-    objects: DrmObjects<T>,
-    standard_properties: StandardProperties,
-    next_id: usize,
-    handles: BTreeMap<usize, Handle<T>>,
-
-    active_vt: usize,
-    vts: HashMap<usize, VtState<T>>,
-}
-
-struct VtState<T: GraphicsAdapter> {
-    display_fbs: Vec<Arc<T::Framebuffer>>,
-    cursor_plane: Option<CursorPlane<T::Cursor>>,
-}
-
-enum Handle<T: GraphicsAdapter> {
-    V1Screen {
-        vt: usize,
-        screen: usize,
-    },
-    V2 {
-        vt: usize,
-        next_id: u32,
-        fbs: HashMap<u32, Arc<T::Framebuffer>>,
-    },
-    SchemeRoot,
+    inner: GraphicsSchemeInner<T>,
+    state: SchemeState,
 }
 
 impl<T: GraphicsAdapter> GraphicsScheme<T> {
@@ -153,7 +125,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
             adapter.probe_connector(&mut objects, &standard_properties, connector_id)
         }
 
-        let mut scheme = GraphicsScheme {
+        let mut inner = GraphicsSchemeInner {
             adapter,
             scheme_name,
             disable_graphical_debug,
@@ -166,41 +138,42 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
             vts: HashMap::new(),
         };
 
-        let cap_id = scheme
-            .scheme_root()
-            .expect("failed to get this scheme root");
-        register_scheme_inner(&scheme.socket, &scheme.scheme_name, cap_id)
+        let cap_id = inner.scheme_root().expect("failed to get this scheme root");
+        register_scheme_inner(&inner.socket, &inner.scheme_name, cap_id)
             .expect("failed to register graphics scheme root");
 
-        scheme
+        Self {
+            inner,
+            state: SchemeState::new(),
+        }
     }
 
     pub fn event_handle(&self) -> &Fd {
-        self.socket.inner()
+        self.inner.socket.inner()
     }
 
     pub fn adapter(&self) -> &T {
-        &self.adapter
+        &self.inner.adapter
     }
 
     pub fn adapter_mut(&mut self) -> &mut T {
-        &mut self.adapter
+        &mut self.inner.adapter
     }
 
     pub fn objects(&self) -> &DrmObjects<T> {
-        &self.objects
+        &self.inner.objects
     }
 
     pub fn objects_mut(&mut self) -> &mut DrmObjects<T> {
-        &mut self.objects
+        &mut self.inner.objects
     }
 
     pub fn adapter_and_objects_mut(&mut self) -> (&mut T, &mut DrmObjects<T>) {
-        (&mut self.adapter, &mut self.objects)
+        (&mut self.inner.adapter, &mut self.inner.objects)
     }
 
     pub fn standard_properties(&self) -> StandardProperties {
-        self.standard_properties
+        self.inner.standard_properties
     }
 
     pub fn handle_vt_event(&mut self, vt_event: VtEvent) {
@@ -212,21 +185,29 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                 // first time. This way the kernel graphical debug remains enabled if the
                 // userspace logging infrastructure doesn't start up because for example a
                 // kernel panic happened prior to it starting up or logd crashed.
-                if let Some(mut disable_graphical_debug) = self.disable_graphical_debug.take() {
+                if let Some(mut disable_graphical_debug) = self.inner.disable_graphical_debug.take()
+                {
                     let _ = disable_graphical_debug.write(&[1]);
                 }
 
-                self.active_vt = vt_event.vt;
+                self.inner.active_vt = vt_event.vt;
 
-                let vt_state =
-                    Self::get_or_create_vt(&mut self.adapter, &mut self.vts, vt_event.vt);
+                let vt_state = GraphicsSchemeInner::get_or_create_vt(
+                    &mut self.inner.adapter,
+                    &mut self.inner.vts,
+                    vt_event.vt,
+                );
 
                 for (display_id, fb) in vt_state.display_fbs.iter().enumerate() {
-                    Self::update_whole_screen(&mut self.adapter, display_id, fb);
+                    GraphicsSchemeInner::update_whole_screen(
+                        &mut self.inner.adapter,
+                        display_id,
+                        fb,
+                    );
                 }
 
                 if let Some(cursor_plane) = &vt_state.cursor_plane {
-                    self.adapter.handle_cursor(cursor_plane, true);
+                    self.inner.adapter.handle_cursor(cursor_plane, true);
                 }
             }
 
@@ -246,7 +227,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
     /// file.
     pub fn tick(&mut self) -> io::Result<()> {
         loop {
-            let request = match self.socket.next_request(SignalBehavior::Restart) {
+            let request = match self.inner.socket.next_request(SignalBehavior::Restart) {
                 Ok(Some(request)) => request,
                 Ok(None) => {
                     // Scheme likely got unmounted
@@ -258,13 +239,14 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
 
             match request.kind() {
                 RequestKind::Call(call) => {
-                    let response = call.handle_sync(self);
-                    self.socket
+                    let response = call.handle_sync(&mut self.inner, &mut self.state);
+                    self.inner
+                        .socket
                         .write_response(response, SignalBehavior::Restart)
                         .expect("driver-graphics: failed to write response");
                 }
                 RequestKind::OnClose { id } => {
-                    self.on_close(id);
+                    self.inner.on_close(id);
                 }
                 _ => (),
             }
@@ -272,20 +254,42 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
 
         Ok(())
     }
+}
 
-    fn update_whole_screen(adapter: &mut T, screen: usize, framebuffer: &T::Framebuffer) {
-        adapter.update_plane(
-            screen,
-            framebuffer,
-            Damage {
-                x: 0,
-                y: 0,
-                width: framebuffer.width(),
-                height: framebuffer.height(),
-            },
-        );
-    }
+struct GraphicsSchemeInner<T: GraphicsAdapter> {
+    adapter: T,
 
+    scheme_name: String,
+    disable_graphical_debug: Option<File>,
+    socket: Socket,
+    objects: DrmObjects<T>,
+    standard_properties: StandardProperties,
+    next_id: usize,
+    handles: BTreeMap<usize, Handle<T>>,
+
+    active_vt: usize,
+    vts: HashMap<usize, VtState<T>>,
+}
+
+struct VtState<T: GraphicsAdapter> {
+    display_fbs: Vec<Arc<T::Framebuffer>>,
+    cursor_plane: Option<CursorPlane<T::Cursor>>,
+}
+
+enum Handle<T: GraphicsAdapter> {
+    V1Screen {
+        vt: usize,
+        screen: usize,
+    },
+    V2 {
+        vt: usize,
+        next_id: u32,
+        fbs: HashMap<u32, Arc<T::Framebuffer>>,
+    },
+    SchemeRoot,
+}
+
+impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     fn get_or_create_vt<'a>(
         adapter: &mut T,
         vts: &'a mut HashMap<usize, VtState<T>>,
@@ -312,11 +316,24 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
             }
         })
     }
+
+    fn update_whole_screen(adapter: &mut T, screen: usize, framebuffer: &T::Framebuffer) {
+        adapter.update_plane(
+            screen,
+            framebuffer,
+            Damage {
+                x: 0,
+                y: 0,
+                width: framebuffer.width(),
+                height: framebuffer.height(),
+            },
+        );
+    }
 }
 
 const MAP_FAKE_OFFSET_MULTIPLIER: usize = 0x10_000_000;
 
-impl<T: GraphicsAdapter> SchemeSync for GraphicsScheme<T> {
+impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     fn scheme_root(&mut self) -> Result<usize> {
         let id = self.next_id;
         self.next_id += 1;
@@ -927,7 +944,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsScheme<T> {
     }
 }
 
-impl<T: GraphicsAdapter> GraphicsScheme<T> {
+impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     fn on_close(&mut self, id: usize) {
         self.handles.remove(&id);
     }

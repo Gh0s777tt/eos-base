@@ -37,7 +37,10 @@ use pcid_interface::irq_helpers::{
 };
 use pcid_interface::{PciFeature, PciFeatureInfo, PciFunctionHandle};
 
-use redox_scheme::{scheme::register_sync_scheme, RequestKind, SignalBehavior, Socket};
+use redox_scheme::{
+    scheme::{register_sync_scheme, SchemeState},
+    RequestKind, SignalBehavior, Socket,
+};
 
 use crate::xhci::{InterruptMethod, Xhci};
 
@@ -145,6 +148,7 @@ fn daemon_with_context_size<const N: usize>(
     let scheme_name = format!("usb.{}", name);
     let socket = Socket::create().expect("xhcid: failed to create usb scheme");
 
+    let mut state = SchemeState::new();
     let hci = Arc::new(
         Xhci::<N>::new(scheme_name.clone(), address, interrupt_method, pcid_handle)
             .expect("xhcid: failed to allocate device"),
@@ -170,7 +174,7 @@ fn daemon_with_context_size<const N: usize>(
 
         match request.kind() {
             RequestKind::Call(call_request) => {
-                let resp = call_request.handle_sync(&mut &*hci);
+                let resp = call_request.handle_sync(&mut &*hci, &mut state);
                 socket
                     .write_response(resp, SignalBehavior::Restart)
                     .expect("xhcid: failed to write scheme");

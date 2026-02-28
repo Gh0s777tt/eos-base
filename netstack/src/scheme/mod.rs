@@ -8,7 +8,7 @@ use crate::scheme::socket::{Handle, SchemeSocket, SocketScheme};
 use libredox::flag;
 use libredox::Fd;
 use redox_scheme::{
-    scheme::{IntoTag, Op, SchemeResponse, SchemeSync},
+    scheme::{IntoTag, Op, SchemeResponse, SchemeState, SchemeSync},
     CallerCtx, RequestKind, Response, SignalBehavior, Socket,
 };
 use smoltcp;
@@ -316,6 +316,7 @@ where
     SocketT: SchemeSocket + AnySocket<'static>,
 {
     scheme: socket::SocketScheme<SocketT>,
+    state: SchemeState,
     wait_queue: WaitQueue,
 }
 impl<SocketT> SchemeWrapper<SocketT>
@@ -334,6 +335,7 @@ where
                 .map_err(|e| {
                     Error::from_syscall_error(e, &format!("failed to initialize {} scheme", name))
                 })?,
+            state: SchemeState::new(),
             wait_queue: Vec::new(),
         })
     }
@@ -397,7 +399,8 @@ where
                     continue;
                 }
             };
-            let resp = match op.handle_sync_dont_consume(&caller, &mut self.scheme) {
+            let resp = match op.handle_sync_dont_consume(&caller, &mut self.scheme, &mut self.state)
+            {
                 SchemeResponse::Opened(Err(SyscallError {
                     errno: syscall::EWOULDBLOCK,
                 }))
@@ -433,6 +436,9 @@ where
                 }
                 SchemeResponse::Regular(r) => Response::new(r, op),
                 SchemeResponse::Opened(o) => Response::open_dup_like(o, op),
+                SchemeResponse::RegularAndNotifyOnDetach(status) => {
+                    Response::new_notify_on_detach(status, op)
+                }
             };
             let _ = self
                 .scheme
@@ -449,6 +455,7 @@ where
 
         // Notify non-blocking sockets
         let scheme = &mut self.scheme;
+        let state = &mut self.state;
 
         for (&fd, handle) in &mut scheme.handles {
             let Handle::File(file) = handle else {
@@ -469,7 +476,7 @@ where
         while i < queue.len() {
             let handle = &mut queue[i];
             let (op, caller) = &mut handle.packet;
-            let res = op.handle_sync_dont_consume(caller, scheme);
+            let res = op.handle_sync_dont_consume(caller, scheme, state);
 
             match res {
                 SchemeResponse::Opened(Err(SyscallError {
@@ -531,7 +538,19 @@ where
                             Error::from_syscall_error(e.into(), "failed to write response")
                         })?;
                 }
-            };
+                SchemeResponse::RegularAndNotifyOnDetach(status) => {
+                    let (op, _) = queue.swap_remove(i).packet;
+                    let _ = scheme
+                        .scheme_file
+                        .write_response(
+                            Response::new_notify_on_detach(status, op),
+                            SignalBehavior::Restart,
+                        )
+                        .map_err(|e| {
+                            Error::from_syscall_error(e.into(), "failed to write response")
+                        })?;
+                }
+            }
         }
 
         Ok(())

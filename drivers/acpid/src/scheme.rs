@@ -504,10 +504,8 @@ impl SchemeSync for AcpiScheme<'_, '_> {
 
         Ok(num_fds)
     }
-}
 
-impl AcpiScheme<'_, '_> {
-    pub fn on_close(&mut self, id: usize) {
+    fn on_close(&mut self, id: usize) {
         self.handles.remove(&id);
     }
 }

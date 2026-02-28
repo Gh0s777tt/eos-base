@@ -3,8 +3,8 @@ mod nodes;
 mod notifier;
 
 use redox_scheme::{
-    scheme::register_scheme_inner, scheme::SchemeSync, CallerCtx, OpenResult, RequestKind,
-    Response, SignalBehavior, Socket,
+    scheme::{register_scheme_inner, SchemeState, SchemeSync},
+    CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket,
 };
 use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
 use std::cell::RefCell;
@@ -325,17 +325,9 @@ impl NetCfgFile {
     }
 }
 
-enum Handle {
-    SchemeRoot,
-    File(NetCfgFile),
-}
-
 pub struct NetCfgScheme {
-    scheme_file: Socket,
-    next_fd: usize,
-    handles: BTreeMap<usize, Handle>,
-    root_node: CfgNodeRef,
-    notifier: NotifierRef,
+    inner: NetCfgSchemeInner,
+    state: SchemeState,
 }
 
 impl NetCfgScheme {
@@ -349,7 +341,7 @@ impl NetCfgScheme {
         let dns_config = Rc::new(RefCell::new(DNSConfig {
             name_server: Ipv4Address::new(8, 8, 8, 8),
         }));
-        let mut scheme = NetCfgScheme {
+        let mut inner = NetCfgSchemeInner {
             scheme_file,
             next_fd: 1,
             handles: BTreeMap::new(),
@@ -362,18 +354,21 @@ impl NetCfgScheme {
             ),
             notifier,
         };
-        let cap_id = scheme
+        let cap_id = inner
             .scheme_root()
             .map_err(|e| Error::from_syscall_error(e, "failed to get scheme root id"))?;
-        register_scheme_inner(&scheme.scheme_file, "netcfg", cap_id).map_err(|e| {
+        register_scheme_inner(&inner.scheme_file, "netcfg", cap_id).map_err(|e| {
             Error::from_syscall_error(e, "failed to register netcfg scheme to namespace")
         })?;
-        Ok(scheme)
+        Ok(Self {
+            inner,
+            state: SchemeState::new(),
+        })
     }
 
     pub fn on_scheme_event(&mut self) -> Result<Option<()>> {
         let result = loop {
-            let request = match self.scheme_file.next_request(SignalBehavior::Restart) {
+            let request = match self.inner.scheme_file.next_request(SignalBehavior::Restart) {
                 Ok(Some(req)) => req,
                 Ok(None) => {
                     break Some(());
@@ -394,7 +389,7 @@ impl NetCfgScheme {
             let req = match request.kind() {
                 RequestKind::Call(c) => c,
                 RequestKind::OnClose { id } => {
-                    self.on_close(id);
+                    self.inner.on_close(id);
                     continue;
                 }
                 _ => {
@@ -405,23 +400,39 @@ impl NetCfgScheme {
             let op = match req.op() {
                 Ok(op) => op,
                 Err(req) => {
-                    self.scheme_file.write_response(
+                    self.inner.scheme_file.write_response(
                         Response::err(syscall::EOPNOTSUPP, req),
                         SignalBehavior::Restart,
                     );
                     continue;
                 }
             };
-            let resp = op.handle_sync(caller, self);
+            let resp = op.handle_sync(caller, &mut self.inner, &mut self.state);
             let _ = self
+                .inner
                 .scheme_file
                 .write_response(resp, SignalBehavior::Restart)
                 .map_err(|e| Error::from_syscall_error(e.into(), "failed to write response"))?;
         };
-        self.notify_scheduled_fds();
+        self.inner.notify_scheduled_fds();
         Ok(result)
     }
+}
 
+enum Handle {
+    SchemeRoot,
+    File(NetCfgFile),
+}
+
+struct NetCfgSchemeInner {
+    scheme_file: Socket,
+    next_fd: usize,
+    handles: BTreeMap<usize, Handle>,
+    root_node: CfgNodeRef,
+    notifier: NotifierRef,
+}
+
+impl NetCfgSchemeInner {
     fn notify_scheduled_fds(&mut self) {
         let fds_to_notify = self.notifier.borrow_mut().get_notified_fds();
         for fd in fds_to_notify {
@@ -430,7 +441,7 @@ impl NetCfgScheme {
     }
 }
 
-impl SchemeSync for NetCfgScheme {
+impl SchemeSync for NetCfgSchemeInner {
     fn scheme_root(&mut self) -> SyscallResult<usize> {
         let id = self.next_fd;
         self.next_fd += 1;

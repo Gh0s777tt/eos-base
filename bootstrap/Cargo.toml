@@ -15,12 +15,12 @@ hashbrown = { version = "0.15", default-features = false, features = [
     "default-hasher",
 ] }
 linked_list_allocator = "0.10"
-libredox = { version = "0.1.12", default-features = false }
+libredox = { version = "0.1.14", default-features = false, features = ["protocol"] }
 log = { version = "0.4", default-features = false }
 plain = "0.2"
 redox-initfs = { path = "../initfs", default-features = false }
-redox_syscall = { version = "0.7.1", default-features = false }
-redox-scheme = { version = "0.9.1", default-features = false }
+redox_syscall = "0.7.3"
+redox-scheme = { version = "0.11.0", default-features = false }
 redox-path = "0.3.1"
 slab = { version = "0.4.9", default-features = false }
 arrayvec = { version = "0.7.6", default-features = false }

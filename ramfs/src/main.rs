@@ -3,7 +3,7 @@ use std::{env, process};
 mod filesystem;
 mod scheme;
 
-use redox_scheme::{RequestKind, SignalBehavior};
+use redox_scheme::{scheme::SchemeState, RequestKind, SignalBehavior};
 
 use self::scheme::Scheme;
 
@@ -16,6 +16,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
 
     let socket = redox_scheme::Socket::create().expect("ramfs: failed to create socket");
 
+    let mut state = SchemeState::new();
     let mut scheme = Scheme::new(scheme_name.clone()).expect("ramfs: failed to initialize scheme");
 
     let _ = daemon.ready_sync_scheme(&socket, &mut scheme);
@@ -31,7 +32,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
         };
         match request.kind() {
             RequestKind::Call(call) => {
-                let response = call.handle_sync(&mut scheme);
+                let response = call.handle_sync(&mut scheme, &mut state);
 
                 socket
                     .write_response(response, SignalBehavior::Restart)

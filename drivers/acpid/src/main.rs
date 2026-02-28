@@ -7,7 +7,7 @@ use std::sync::Arc;
 use ::acpi::aml::op_region::{RegionHandler, RegionSpace};
 use event::{EventFlags, RawEventQueue};
 use redox_scheme::{
-    scheme::{register_sync_scheme, SchemeSync},
+    scheme::{register_sync_scheme, SchemeState, SchemeSync},
     RequestKind, Response, SignalBehavior, Socket,
 };
 use syscall::{EAGAIN, EWOULDBLOCK};
@@ -85,6 +85,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let mut event_queue = RawEventQueue::new().expect("acpid: failed to create event queue");
     let socket = Socket::nonblock().expect("acpid: failed to create disk scheme");
 
+    let mut state = SchemeState::new();
     let mut scheme = self::scheme::AcpiScheme::new(&acpi_context, &socket);
 
     event_queue
@@ -129,7 +130,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                 };
                 match req.kind() {
                     RequestKind::Call(call) => {
-                        let response = call.handle_sync(&mut scheme);
+                        let response = call.handle_sync(&mut scheme, &mut state);
                         socket
                             .write_response(response, SignalBehavior::Restart)
                             .expect("acpid: failed to write response");

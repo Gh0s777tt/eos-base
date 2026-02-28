@@ -11,7 +11,7 @@ use std::task::Poll;
 use executor::LocalExecutor;
 use libredox::Fd;
 use partitionlib::{LogicalBlockSize, PartitionTable};
-use redox_scheme::scheme::{register_scheme_inner, SchemeAsync};
+use redox_scheme::scheme::{register_scheme_inner, SchemeAsync, SchemeState};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket};
 use syscall::dirent::DirentBuf;
 use syscall::schemev2::NewFdFlags;
@@ -254,6 +254,103 @@ impl<T: Disk> DiskWrapper<T> {
     }
 }
 
+pub struct DiskScheme<T> {
+    inner: DiskSchemeInner<T>,
+    state: SchemeState,
+}
+
+impl<T: Disk> DiskScheme<T> {
+    pub fn new(
+        daemon: Option<daemon::Daemon>,
+        scheme_name: String,
+        disks: BTreeMap<u32, T>,
+        executor: &impl ExecutorTrait,
+    ) -> Self {
+        assert!(scheme_name.starts_with("disk"));
+        let socket = Socket::nonblock().expect("failed to create disk scheme");
+
+        let mut inner = DiskSchemeInner {
+            scheme_name: scheme_name,
+            socket,
+            disks: disks
+                .into_iter()
+                .map(|(k, disk)| (k, DiskWrapper::new(disk, executor)))
+                .collect(),
+            next_id: 0,
+            handles: BTreeMap::new(),
+        };
+
+        let cap_id = inner.scheme_root().expect("failed to get this scheme root");
+        register_scheme_inner(&inner.socket, &inner.scheme_name, cap_id)
+            .expect("failed to register disk scheme root");
+
+        if let Some(daemon) = daemon {
+            daemon.ready();
+        }
+
+        Self {
+            inner,
+            state: SchemeState::new(),
+        }
+    }
+
+    pub fn event_handle(&self) -> &Fd {
+        self.inner.socket.inner()
+    }
+
+    /// Process pending and new requests.
+    ///
+    /// This needs to be called each time there is a new event on the scheme.
+    pub async fn tick(&mut self) -> io::Result<()> {
+        // Handle new scheme requests
+        loop {
+            let request = match self.inner.socket.next_request(SignalBehavior::Interrupt) {
+                Ok(Some(request)) => request,
+                Ok(None) => {
+                    // Scheme likely got unmounted
+                    // TODO: return this to caller instead
+                    std::process::exit(0);
+                }
+                Err(error) if error.errno == EWOULDBLOCK || error.errno == EAGAIN => break,
+                Err(err) if err.errno == EINTR => continue,
+                Err(err) => return Err(err.into()),
+            };
+
+            let response = match request.kind() {
+                RequestKind::Call(call_request) => {
+                    // TODO: Spawn a separate task for each scheme call. This would however require the
+                    // use of a smarter buffer pool (or direct IO, or a buffer per fd) in order to do
+                    // parallel IO. It might also require async-aware locks so that a close() is
+                    // correctly ordered wrt IO on the same fd.
+                    call_request
+                        .handle_async(&mut self.inner, &mut self.state)
+                        .await
+                }
+                RequestKind::SendFd(request) => Response::err(EOPNOTSUPP, request),
+                RequestKind::RecvFd(request) => Response::err(EOPNOTSUPP, request),
+                RequestKind::Cancellation(_cancellation_request) => {
+                    // FIXME implement cancellation
+                    continue;
+                }
+                RequestKind::MsyncMsg | RequestKind::MunmapMsg | RequestKind::MmapMsg => {
+                    unreachable!()
+                }
+                RequestKind::OnClose { id } => {
+                    self.inner.on_close(id);
+                    continue;
+                }
+                RequestKind::RecvFd(_) => continue,
+                RequestKind::OnDetach { .. } => continue,
+            };
+            self.inner
+                .socket
+                .write_response(response, SignalBehavior::Restart)?;
+        }
+
+        Ok(())
+    }
+}
+
 enum Handle {
     List(Vec<u8>),       // entries
     Disk(u32),           // disk num
@@ -261,7 +358,7 @@ enum Handle {
     SchemeRoot,
 }
 
-pub struct DiskScheme<T> {
+struct DiskSchemeInner<T> {
     scheme_name: String,
     socket: Socket,
     disks: BTreeMap<u32, DiskWrapper<T>>,
@@ -303,92 +400,7 @@ impl ExecutorTrait for TrivialExecutor {
     }
 }
 
-impl<T: Disk> DiskScheme<T> {
-    pub fn new(
-        daemon: Option<daemon::Daemon>,
-        scheme_name: String,
-        disks: BTreeMap<u32, T>,
-        executor: &impl ExecutorTrait,
-    ) -> Self {
-        assert!(scheme_name.starts_with("disk"));
-        let socket = Socket::nonblock().expect("failed to create disk scheme");
-
-        let mut scheme = Self {
-            scheme_name: scheme_name,
-            socket,
-            disks: disks
-                .into_iter()
-                .map(|(k, disk)| (k, DiskWrapper::new(disk, executor)))
-                .collect(),
-            next_id: 0,
-            handles: BTreeMap::new(),
-        };
-
-        let cap_id = scheme
-            .scheme_root()
-            .expect("failed to get this scheme root");
-        register_scheme_inner(&scheme.socket, &scheme.scheme_name, cap_id)
-            .expect("failed to register disk scheme root");
-
-        if let Some(daemon) = daemon {
-            daemon.ready();
-        }
-
-        scheme
-    }
-
-    pub fn event_handle(&self) -> &Fd {
-        self.socket.inner()
-    }
-
-    /// Process pending and new requests.
-    ///
-    /// This needs to be called each time there is a new event on the scheme.
-    pub async fn tick(&mut self) -> io::Result<()> {
-        // Handle new scheme requests
-        loop {
-            let request = match self.socket.next_request(SignalBehavior::Interrupt) {
-                Ok(Some(request)) => request,
-                Ok(None) => {
-                    // Scheme likely got unmounted
-                    // TODO: return this to caller instead
-                    std::process::exit(0);
-                }
-                Err(error) if error.errno == EWOULDBLOCK || error.errno == EAGAIN => break,
-                Err(err) if err.errno == EINTR => continue,
-                Err(err) => return Err(err.into()),
-            };
-
-            let response = match request.kind() {
-                RequestKind::Call(call_request) => {
-                    // TODO: Spawn a separate task for each scheme call. This would however require the
-                    // use of a smarter buffer pool (or direct IO, or a buffer per fd) in order to do
-                    // parallel IO. It might also require async-aware locks so that a close() is
-                    // correctly ordered wrt IO on the same fd.
-                    call_request.handle_async(self).await
-                }
-                RequestKind::SendFd(request) => Response::err(EOPNOTSUPP, request),
-                RequestKind::RecvFd(request) => Response::err(EOPNOTSUPP, request),
-                RequestKind::Cancellation(_cancellation_request) => {
-                    // FIXME implement cancellation
-                    continue;
-                }
-                RequestKind::MsyncMsg | RequestKind::MunmapMsg | RequestKind::MmapMsg => {
-                    unreachable!()
-                }
-                RequestKind::OnClose { id } => {
-                    self.on_close(id);
-                    continue;
-                }
-                RequestKind::RecvFd(_) => continue,
-            };
-            self.socket
-                .write_response(response, SignalBehavior::Restart)?;
-        }
-
-        Ok(())
-    }
-
+impl<T: Disk> DiskSchemeInner<T> {
     // Checks if any conflicting handles already exist
     fn check_locks(&self, disk_i: u32, part_i_opt: Option<u32>) -> Result<()> {
         for (_, handle) in self.handles.iter() {
@@ -419,7 +431,7 @@ impl<T: Disk> DiskScheme<T> {
     }
 }
 
-impl<T: Disk> SchemeAsync for DiskScheme<T> {
+impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
     fn scheme_root(&mut self) -> Result<usize> {
         let id = self.next_id;
         self.next_id += 1;
@@ -683,7 +695,7 @@ impl<T: Disk> SchemeAsync for DiskScheme<T> {
     }
 }
 
-impl<D: Disk> DiskScheme<D> {
+impl<D: Disk> DiskSchemeInner<D> {
     pub fn on_close(&mut self, id: usize) {
         let _ = self.handles.remove(&id);
     }

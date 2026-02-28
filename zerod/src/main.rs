@@ -1,4 +1,4 @@
-use redox_scheme::{RequestKind, SignalBehavior, Socket};
+use redox_scheme::{scheme::SchemeState, RequestKind, SignalBehavior, Socket};
 
 use scheme::ZeroScheme;
 
@@ -21,6 +21,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     };
 
     let socket = Socket::create().expect("zerod: failed to create zero scheme");
+    let mut state = SchemeState::new();
     let mut zero_scheme = ZeroScheme(ty);
 
     let _ = daemon.ready_sync_scheme(&socket, &mut zero_scheme);
@@ -36,7 +37,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
         };
         match request.kind() {
             RequestKind::Call(request) => {
-                let response = request.handle_sync(&mut zero_scheme);
+                let response = request.handle_sync(&mut zero_scheme, &mut state);
 
                 socket
                     .write_response(response, SignalBehavior::Restart)

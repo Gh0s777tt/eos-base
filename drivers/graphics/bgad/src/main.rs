@@ -2,7 +2,10 @@
 
 use inputd::ProducerHandle;
 use pcid_interface::PciFunctionHandle;
-use redox_scheme::{scheme::register_sync_scheme, RequestKind, SignalBehavior, Socket};
+use redox_scheme::{
+    scheme::{register_sync_scheme, SchemeState},
+    RequestKind, SignalBehavior, Socket,
+};
 
 use crate::bga::Bga;
 use crate::scheme::BgaScheme;
@@ -39,6 +42,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
     let mut bga = unsafe { Bga::new(bar) };
     log::debug!("BGA {}x{}", bga.width(), bga.height());
 
+    let mut state = SchemeState::new();
     let mut scheme = BgaScheme {
         bga,
         display: ProducerHandle::new().ok(),
@@ -62,7 +66,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
         };
         match request.kind() {
             RequestKind::Call(call) => {
-                let response = call.handle_sync(&mut scheme);
+                let response = call.handle_sync(&mut scheme, &mut state);
 
                 socket
                     .write_response(response, SignalBehavior::Restart)

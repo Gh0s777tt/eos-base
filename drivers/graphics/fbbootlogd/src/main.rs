@@ -13,7 +13,7 @@ use event::EventQueue;
 use inputd::ConsumerHandleEvent;
 use libredox::errno::EAGAIN;
 use orbclient::Event;
-use redox_scheme::{RequestKind, SignalBehavior, Socket};
+use redox_scheme::{scheme::SchemeState, RequestKind, SignalBehavior, Socket};
 
 use crate::scheme::FbbootlogScheme;
 
@@ -34,6 +34,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
 
     let socket = Socket::nonblock().expect("fbbootlogd: failed to create fbbootlog scheme");
 
+    let mut state = SchemeState::new();
     let mut scheme = FbbootlogScheme::new();
 
     event_queue
@@ -90,7 +91,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
 
                     match request.kind() {
                         RequestKind::Call(call) => {
-                            let response = call.handle_sync(&mut scheme);
+                            let response = call.handle_sync(&mut scheme, &mut state);
 
                             socket
                                 .write_response(response, SignalBehavior::Restart)
