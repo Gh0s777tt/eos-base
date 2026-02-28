@@ -63,6 +63,12 @@ impl SwitchRoot {
         unit_store: &mut UnitStore,
         config: &mut InitConfig,
     ) {
+        eprintln!(
+            "init: switchroot to {} {}",
+            self.prefix.display(),
+            self.etcdir.display()
+        );
+
         config
             .envs
             .insert("PATH".to_owned(), self.prefix.join("bin").into_os_string());
@@ -84,12 +90,7 @@ impl SwitchRoot {
     }
 }
 
-fn run(
-    unit: &UnitId,
-    pending_units: &mut VecDeque<UnitId>,
-    unit_store: &mut UnitStore,
-    config: &mut InitConfig,
-) -> Result<()> {
+fn run(unit: &UnitId, unit_store: &mut UnitStore, config: &mut InitConfig) -> Result<()> {
     let unit = unit_store.unit_mut(unit);
 
     match &unit.kind {
@@ -117,14 +118,6 @@ fn run(
                     unit.info.description.as_ref().unwrap_or(&unit.id.0),
                 );
             }
-        }
-        unit::UnitKind::SwitchRoot { switchroot } => {
-            eprintln!(
-                "init: switchroot to {} {}",
-                switchroot.prefix.display(),
-                switchroot.etcdir.display()
-            );
-            switchroot.clone().apply(pending_units, unit_store, config);
         }
     }
 
@@ -170,6 +163,7 @@ fn main() {
     }
 
     let runtime_target = UnitId("00_runtime.target".to_owned());
+    let initfs_target = UnitId("90_initfs.target".to_owned());
 
     'a: while let Some(unit) = pending_units.pop_front() {
         if let Some(condition_architecture) = &unit_store.unit(&unit).info.condition_architecture {
@@ -201,8 +195,16 @@ fn main() {
             }
         }
 
-        if let Err(err) = run(&unit, &mut pending_units, &mut unit_store, &mut init_config) {
+        if let Err(err) = run(&unit, &mut unit_store, &mut init_config) {
             eprintln!("init: failed to run {}: {}", unit.0, err);
+        }
+
+        if unit == initfs_target {
+            SwitchRoot {
+                prefix: PathBuf::from("/usr"),
+                etcdir: PathBuf::from("/etc"),
+            }
+            .apply(&mut pending_units, &mut unit_store, &mut init_config);
         }
     }
 

@@ -1,6 +1,0 @@
-[unit]
-requires_weak = ["50_rootfs.service"]
-
-[switchroot]
-prefix = "/usr"
-etcdir = "/etc"

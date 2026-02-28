@@ -4,7 +4,6 @@ use std::{fs, io};
 
 use serde::Deserialize;
 
-use crate::SwitchRoot;
 use crate::script::{Command, Script};
 use crate::service::Service;
 
@@ -97,7 +96,6 @@ pub enum UnitKind {
     LegacyScript { script: Script },
     Service { service: Service },
     Target {},
-    SwitchRoot { switchroot: SwitchRoot },
 }
 
 #[derive(Deserialize)]
@@ -111,13 +109,6 @@ struct SerializedService {
 #[serde(deny_unknown_fields)]
 struct SerializedTarget {
     unit: UnitInfo,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SerializedSwitchRoot {
-    unit: UnitInfo,
-    switchroot: SwitchRoot,
 }
 
 impl Unit {
@@ -172,17 +163,6 @@ impl Unit {
                 let target: SerializedTarget = toml::from_str(&config)
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                 (target.unit, UnitKind::Target {}, vec![])
-            }
-            Some("switchroot") => {
-                let switchroot: SerializedSwitchRoot = toml::from_str(&config)
-                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-                (
-                    switchroot.unit,
-                    UnitKind::SwitchRoot {
-                        switchroot: switchroot.switchroot,
-                    },
-                    vec![],
-                )
             }
             Some(_) => return Err(io::Error::other("invalid file extension")),
         };
