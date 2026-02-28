@@ -1,4 +1,4 @@
-use redox_rt::protocol::ProcMeta;
+use libredox::protocol::ProcMeta;
 use std::fmt::Debug;
 use std::{cmp, convert::TryInto, mem};
 use syscall::{error::*, Error};

@@ -6,8 +6,8 @@ use super::{
 };
 
 use libc::{ucred, AF_UNIX};
+use libredox::protocol::SocketCall;
 use rand::prelude::*;
-use redox_rt::protocol::SocketCall;
 use redox_scheme::{
     scheme::SchemeSync, CallerCtx, OpenResult, RecvFdRequest, Response, SendFdRequest,
     SignalBehavior, Socket as SchemeSocket,

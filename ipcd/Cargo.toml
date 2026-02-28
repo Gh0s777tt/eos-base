@@ -13,8 +13,5 @@ anyhow.workspace = true
 libc.workspace = true
 rand = { version = "0.8", features = ["small_rng"] }
 
-[target.'cfg(target_os = "redox")'.dependencies]
-redox-rt = { workspace = true, default-features = false }
-
 [lints]
 workspace = true

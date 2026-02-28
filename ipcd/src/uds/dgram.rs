@@ -6,9 +6,9 @@ use super::{
 };
 
 use libc::{AF_UNIX, SO_DOMAIN, SO_PASSCRED};
+use libredox::protocol::SocketCall;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
-use redox_rt::protocol::SocketCall;
 use redox_scheme::{
     scheme::SchemeSync, CallerCtx, OpenResult, RecvFdRequest, Response, SendFdRequest,
     SignalBehavior, Socket as SchemeSocket,

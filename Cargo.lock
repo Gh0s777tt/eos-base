@@ -889,11 +889,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "generic-rt"
-version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/relibc.git#02ac27bf4bf493b9a736f66dee681a0cece1c43d"
-
-[[package]]
 name = "getrandom"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -915,17 +910,6 @@ dependencies = [
  "r-efi",
  "wasip2",
  "wasip3",
-]
-
-[[package]]
-name = "goblin"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f27c1b4369c2cd341b5de549380158b105a04c331be5db9110eef7b6d2742134"
-dependencies = [
- "log",
- "plain",
- "scroll 0.11.0",
 ]
 
 [[package]]
@@ -1169,7 +1153,6 @@ dependencies = [
  "libc",
  "libredox",
  "rand 0.8.5",
- "redox-rt",
  "redox-scheme",
  "redox_event",
  "redox_syscall 0.7.3",
@@ -1476,7 +1459,7 @@ name = "partitionlib"
 version = "0.1.0"
 dependencies = [
  "gpt",
- "scroll 0.10.2",
+ "scroll",
  "uuid",
 ]
 
@@ -1823,27 +1806,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "redox-path"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "436d45c2b6a5b159d43da708e62b25be3a4a3d5550d654b72216ade4c4bfd717"
-
-[[package]]
-name = "redox-rt"
-version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/relibc.git#02ac27bf4bf493b9a736f66dee681a0cece1c43d"
-dependencies = [
- "bitflags 2.11.0",
- "generic-rt",
- "goblin",
- "ioslice",
- "libredox",
- "plain",
- "redox-path",
- "redox_syscall 0.7.3",
-]
-
-[[package]]
 name = "redox-scheme"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1872,7 +1834,6 @@ dependencies = [
  "libredox",
  "log",
  "redox-log",
- "redox-rt",
  "redox-scheme",
  "redox_event",
  "redox_syscall 0.7.3",
@@ -2057,16 +2018,7 @@ version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fda28d4b4830b807a8b43f7b0e6b5df875311b3e7621d84577188c175b6ec1ec"
 dependencies = [
- "scroll_derive 0.10.5",
-]
-
-[[package]]
-name = "scroll"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04c565b551bafbef4157586fa379538366e4385d42082f255bfd96e4fe8519da"
-dependencies = [
- "scroll_derive 0.11.1",
+ "scroll_derive",
 ]
 
 [[package]]
@@ -2078,17 +2030,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "scroll_derive"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1db149f81d46d2deba7cd3c50772474707729550221e69588478ebf9ada425ae"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]

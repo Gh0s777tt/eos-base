@@ -34,8 +34,5 @@ features = [
 ]
 #For debugging: "log", "verbose"
 
-[target.'cfg(target_os = "redox")'.dependencies]
-redox-rt = { workspace = true, default-features = false }
-
 [lints]
 workspace = true

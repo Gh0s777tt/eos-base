@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::str;
 
 use libredox::flag::CLOCK_MONOTONIC;
-use redox_rt::protocol::SocketCall;
+use libredox::protocol::SocketCall;
 use redox_scheme::{
     scheme::{register_scheme_inner, Op, SchemeSync},
     CallerCtx, OpenResult, Socket,
