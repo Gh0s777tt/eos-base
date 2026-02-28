@@ -50,6 +50,7 @@ impl InitConfig {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SwitchRoot {
     prefix: PathBuf,
     etcdir: PathBuf,
@@ -112,7 +113,7 @@ fn run(
         unit::UnitKind::Target {} => {
             if config.log_debug {
                 eprintln!(
-                    "Started target {}",
+                    "Reached target {}",
                     unit.info.description.as_ref().unwrap_or(&unit.id.0),
                 );
             }
@@ -171,6 +172,22 @@ fn main() {
     let runtime_target = UnitId("00_runtime.target".to_owned());
 
     'a: while let Some(unit) = pending_units.pop_front() {
+        if let Some(condition_architecture) = &unit_store.unit(&unit).info.condition_architecture {
+            if !condition_architecture
+                .iter()
+                .any(|arch| arch == std::env::consts::ARCH)
+            {
+                continue 'a;
+            }
+        }
+        if let Some(condition_board) = &unit_store.unit(&unit).info.condition_board {
+            if !condition_board
+                .iter()
+                .any(|board| Some(&**board) == option_env!("BOARD"))
+            {
+                continue 'a;
+            }
+        }
         if unit_store.unit(&unit).info.default_dependencies {
             if pending_units.contains(&runtime_target) {
                 pending_units.push_back(unit);

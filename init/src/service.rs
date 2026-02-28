@@ -6,6 +6,7 @@ use std::process::Command;
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Service {
     pub cmd: String,
     #[serde(default)]

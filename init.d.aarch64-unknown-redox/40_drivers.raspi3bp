@@ -1,2 +1,0 @@
-requires_weak 10_lived.service 20_graphics.target
-notify bcm2835-sdhcid

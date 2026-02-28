@@ -1,4 +1,0 @@
-requires_weak 10_lived.service 20_graphics.target
-notify ps2d
-notify RSDP_ADDR=$ RSDP_SIZE=$ hwd
-pcid-spawner --initfs
