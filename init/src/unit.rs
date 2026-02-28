@@ -77,12 +77,16 @@ pub struct Unit {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UnitInfo {
     pub description: Option<String>,
     #[serde(default = "true_bool")]
     pub default_dependencies: bool,
     #[serde(default)]
     pub requires_weak: Vec<UnitId>,
+    pub condition_architecture: Option<Vec<String>>,
+    // FIXME replace this with hwd reading from the devicetree
+    pub condition_board: Option<Vec<String>>,
 }
 
 fn true_bool() -> bool {
@@ -97,17 +101,20 @@ pub enum UnitKind {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SerializedService {
     unit: UnitInfo,
     service: Service,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SerializedTarget {
     unit: UnitInfo,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SerializedSwitchRoot {
     unit: UnitInfo,
     switchroot: SwitchRoot,
@@ -143,6 +150,8 @@ impl Unit {
                         description: None,
                         default_dependencies: true,
                         requires_weak,
+                        condition_architecture: None,
+                        condition_board: None,
                     },
                     UnitKind::LegacyScript { script },
                     warnings,

@@ -4,7 +4,7 @@ use std::{env, io, iter};
 use crate::service::{Service, ServiceType};
 use crate::unit::UnitId;
 
-fn subst_env<'a>(arg: &str) -> String {
+pub fn subst_env<'a>(arg: &str) -> String {
     if arg.starts_with('$') {
         env::var(&arg[1..]).unwrap_or(String::new())
     } else {

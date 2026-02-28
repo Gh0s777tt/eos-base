@@ -5,7 +5,10 @@ use std::process::Command;
 
 use serde::Deserialize;
 
+use crate::script::subst_env;
+
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Service {
     pub cmd: String,
     #[serde(default)]
@@ -31,7 +34,7 @@ pub enum ServiceType {
 impl Service {
     pub fn spawn(&self, base_envs: &BTreeMap<String, OsString>) {
         let mut command = Command::new(&self.cmd);
-        command.args(&self.args);
+        command.args(self.args.iter().map(|arg| subst_env(arg)));
         command.env_clear();
         for env in &self.inherit_envs {
             if let Some(value) = env::var_os(env) {

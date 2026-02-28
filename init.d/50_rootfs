@@ -1,2 +1,0 @@
-requires_weak 40_drivers
-REDOXFS_PASSWORD_ADDR=$ REDOXFS_PASSWORD_SIZE=$ redoxfs --uuid $REDOXFS_UUID file $REDOXFS_BLOCK
