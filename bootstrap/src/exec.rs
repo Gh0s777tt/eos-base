@@ -5,10 +5,10 @@ use core::ffi::CStr;
 use core::str::FromStr;
 use hashbrown::HashMap;
 
-use syscall::CallFlags;
 use syscall::data::{GlobalSchemes, KernelSchemeInfo};
 use syscall::flag::{O_CLOEXEC, O_RDONLY, O_STAT};
-use syscall::{EINTR, Error};
+use syscall::CallFlags;
+use syscall::{Error, EINTR};
 
 use redox_rt::proc::*;
 

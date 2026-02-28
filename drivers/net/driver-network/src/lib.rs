@@ -4,7 +4,7 @@ use std::{cmp, io};
 use libredox::flag::O_NONBLOCK;
 use libredox::Fd;
 use redox_scheme::{
-    scheme::{IntoTag, Op, SchemeResponse, SchemeSync},
+    scheme::{IntoTag, Op, SchemeResponse, SchemeState, SchemeSync},
     CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket,
 };
 use syscall::schemev2::NewFdFlags;
@@ -33,6 +33,7 @@ pub trait NetworkAdapter {
 
 pub struct NetworkScheme<T: NetworkAdapter> {
     scheme: NetworkSchemeInner<T>,
+    state: SchemeState,
     blocked: Vec<(Op, CallerCtx)>,
     socket: Socket,
 }
@@ -61,6 +62,7 @@ impl<T: NetworkAdapter> NetworkScheme<T> {
         daemon.ready();
         Self {
             scheme,
+            state: SchemeState::new(),
             blocked: Vec::new(),
             socket,
         }
@@ -91,7 +93,7 @@ impl<T: NetworkAdapter> NetworkScheme<T> {
         let mut i = 0;
         while i < self.blocked.len() {
             let (op, caller) = &mut self.blocked[i];
-            let res = op.handle_sync_dont_consume(caller, &mut self.scheme);
+            let res = op.handle_sync_dont_consume(caller, &mut self.scheme, &mut self.state);
             match res {
                 SchemeResponse::Opened(Err(Error {
                     errno: syscall::EWOULDBLOCK,
@@ -113,6 +115,16 @@ impl<T: NetworkAdapter> NetworkScheme<T> {
                     let _ = self
                         .socket
                         .write_response(Response::open_dup_like(o, op), SignalBehavior::Restart)
+                        .expect("driver-network: failed to write scheme");
+                }
+                SchemeResponse::RegularAndNotifyOnDetach(status) => {
+                    let (op, _) = self.blocked.remove(i);
+                    let _ = self
+                        .socket
+                        .write_response(
+                            Response::new_notify_on_detach(status, op),
+                            SignalBehavior::Restart,
+                        )
                         .expect("driver-network: failed to write scheme");
                 }
             }
@@ -160,7 +172,8 @@ impl<T: NetworkAdapter> NetworkScheme<T> {
                 }
             };
 
-            let resp = match op.handle_sync_dont_consume(&caller, &mut self.scheme) {
+            let resp = match op.handle_sync_dont_consume(&caller, &mut self.scheme, &mut self.state)
+            {
                 SchemeResponse::Opened(Err(Error {
                     errno: syscall::EWOULDBLOCK,
                 }))
@@ -172,6 +185,9 @@ impl<T: NetworkAdapter> NetworkScheme<T> {
                 }
                 SchemeResponse::Regular(r) => Response::new(r, op),
                 SchemeResponse::Opened(o) => Response::open_dup_like(o, op),
+                SchemeResponse::RegularAndNotifyOnDetach(status) => {
+                    Response::new_notify_on_detach(status, op)
+                }
             };
             let _ = self.socket.write_response(resp, SignalBehavior::Restart)?;
         }

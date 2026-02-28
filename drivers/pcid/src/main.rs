@@ -10,7 +10,10 @@ use pci_types::{
     Bar as TyBar, CommandRegister, EndpointHeader, HeaderType, PciAddress,
     PciHeader as TyPciHeader, PciPciBridgeHeader,
 };
-use redox_scheme::{scheme::register_sync_scheme, RequestKind, SignalBehavior};
+use redox_scheme::{
+    scheme::{register_sync_scheme, SchemeState},
+    RequestKind, SignalBehavior,
+};
 
 use crate::cfg_access::Pcie;
 use pcid_interface::{FullDeviceId, LegacyInterruptLine, PciBar, PciFunction, PciRom};
@@ -249,6 +252,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
     info!("PCI SG-BS:DV.F VEND:DEVI CL.SC.IN.RV");
 
+    let mut state = SchemeState::new();
     let mut scheme = scheme::PciScheme::new(pcie);
     let socket = redox_scheme::Socket::create().expect("failed to open pci scheme socket");
 
@@ -316,7 +320,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         };
         match request.kind() {
             RequestKind::Call(call) => {
-                let response = call.handle_sync(&mut scheme);
+                let response = call.handle_sync(&mut scheme, &mut state);
 
                 socket
                     .write_response(response, SignalBehavior::Restart)

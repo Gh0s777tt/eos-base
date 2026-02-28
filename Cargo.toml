@@ -76,14 +76,14 @@ exclude = ["bootstrap"]
 anyhow = "1"
 libc = "0.2.181"
 log = "0.4"
-libredox = "0.1.12"
+libredox = "0.1.14"
 orbclient = { git = "https://gitlab.redox-os.org/redox-os/orbclient" }
-redox_event = "0.4.3"
+redox_event = "0.4.6"
 redox-ioctl = { git = "https://gitlab.redox-os.org/redox-os/relibc.git" }
 redox-log = { git = "https://gitlab.redox-os.org/redox-os/redox-log.git" }
 redox-rt = { git = "https://gitlab.redox-os.org/redox-os/relibc.git", default-features = false }
-redox-scheme = "0.9.1"
-redox_syscall = "0.7.1"
+redox-scheme = "0.11.0"
+redox_syscall = "0.7.3"
 redox_termios = "0.1.3"
 serde = { version = "1", features = ["derive"] }
 toml = "1"

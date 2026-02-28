@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use inputd::{ControlEvent, VtEvent, VtEventKind};
 
 use libredox::errno::ESTALE;
-use redox_scheme::scheme::SchemeSync;
+use redox_scheme::scheme::{SchemeState, SchemeSync};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket};
 
 use orbclient::{Event, EventOption};
@@ -569,6 +569,7 @@ impl SchemeSync for InputScheme {
 fn deamon(daemon: daemon::SchemeDaemon) -> anyhow::Result<()> {
     // Create the ":input" scheme.
     let socket_file = Socket::create()?;
+    let mut state = SchemeState::new();
     let mut scheme = InputScheme::new();
 
     let _ = daemon.ready_sync_scheme(&socket_file, &mut scheme);
@@ -583,7 +584,7 @@ fn deamon(daemon: daemon::SchemeDaemon) -> anyhow::Result<()> {
         match request.kind() {
             RequestKind::Call(call_request) => {
                 socket_file.write_response(
-                    call_request.handle_sync(&mut scheme),
+                    call_request.handle_sync(&mut scheme, &mut state),
                     SignalBehavior::Restart,
                 )?;
             }

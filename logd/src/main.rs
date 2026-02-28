@@ -1,4 +1,7 @@
-use redox_scheme::{scheme::SchemeSync, RequestKind, Response, SignalBehavior, Socket};
+use redox_scheme::{
+    scheme::{SchemeState, SchemeSync},
+    RequestKind, Response, SignalBehavior, Socket,
+};
 use std::process;
 
 use crate::scheme::LogScheme;
@@ -8,6 +11,7 @@ mod scheme;
 fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     let socket = Socket::create().expect("logd: failed to create log scheme");
 
+    let mut state = SchemeState::new();
     let mut scheme = LogScheme::new(&socket);
 
     let _ = daemon.ready_sync_scheme(&socket, &mut scheme);
@@ -35,7 +39,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
             _ => continue,
         };
 
-        let response = request.handle_sync(&mut scheme);
+        let response = request.handle_sync(&mut scheme, &mut state);
         socket
             .write_response(response, SignalBehavior::Restart)
             .expect("logd: failed to write responses to log scheme");

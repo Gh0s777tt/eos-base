@@ -3,7 +3,7 @@ use inputd::ConsumerHandleEvent;
 use libredox::errno::{EAGAIN, EINTR};
 use orbclient::Event;
 use redox_scheme::{
-    scheme::{Op, SchemeResponse, SchemeSync},
+    scheme::{Op, SchemeResponse, SchemeState, SchemeSync},
     CallerCtx, RequestKind, Response, SignalBehavior, Socket,
 };
 use std::env;
@@ -44,6 +44,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
         )
         .expect("fbcond: failed to subscribe to scheme events");
 
+    let mut state = SchemeState::new();
     let mut scheme = FbconScheme::new(&vt_ids, &mut event_queue);
 
     let _ = daemon.ready_sync_scheme(&socket, &mut scheme);
@@ -58,16 +59,23 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     handle_event(
         &mut socket,
         &mut scheme,
+        &mut state,
         &mut blocked,
         VtIndex::SCHEMA_SENTINEL,
     );
     for vt_i in scheme.vts.keys().copied().collect::<Vec<_>>() {
-        handle_event(&mut socket, &mut scheme, &mut blocked, vt_i);
+        handle_event(&mut socket, &mut scheme, &mut state, &mut blocked, vt_i);
     }
 
     for event in event_queue {
         let event = event.expect("fbcond: failed to read event from event queue");
-        handle_event(&mut socket, &mut scheme, &mut blocked, event.user_data);
+        handle_event(
+            &mut socket,
+            &mut scheme,
+            &mut state,
+            &mut blocked,
+            event.user_data,
+        );
     }
 
     std::process::exit(0);
@@ -76,6 +84,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
 fn handle_event(
     socket: &mut Socket,
     scheme: &mut FbconScheme,
+    state: &mut SchemeState,
     blocked: &mut Vec<(Op, CallerCtx)>,
     event: VtIndex,
 ) {
@@ -108,7 +117,7 @@ fn handle_event(
                             continue;
                         }
                     };
-                    match op.handle_sync_dont_consume(&caller, scheme) {
+                    match op.handle_sync_dont_consume(&caller, scheme, state) {
                         SchemeResponse::Opened(Err(e)) | SchemeResponse::Regular(Err(e))
                             if libredox::error::Error::from(e).is_wouldblock()
                                 && !op.is_explicitly_nonblock() =>
@@ -128,7 +137,15 @@ fn handle_event(
                                 )
                                 .expect("fbcond: failed to write responses to fbcon scheme");
                         }
-                    };
+                        SchemeResponse::RegularAndNotifyOnDetach(status) => {
+                            let _ = socket
+                                .write_response(
+                                    Response::new_notify_on_detach(status, op),
+                                    SignalBehavior::Restart,
+                                )
+                                .expect("fbcond: failed to write scheme");
+                        }
+                    }
                 }
                 RequestKind::OnClose { id } => {
                     scheme.on_close(id);
@@ -179,7 +196,7 @@ fn handle_event(
             let (op, caller) = blocked
                 .get_mut(i)
                 .expect("vesad: Failed to get blocked request");
-            let resp = match op.handle_sync_dont_consume(&caller, scheme) {
+            let resp = match op.handle_sync_dont_consume(&caller, scheme, state) {
                 SchemeResponse::Opened(Err(e)) | SchemeResponse::Regular(Err(e))
                     if libredox::error::Error::from(e).is_wouldblock()
                         && !op.is_explicitly_nonblock() =>
@@ -194,6 +211,10 @@ fn handle_event(
                 SchemeResponse::Opened(o) => {
                     let (op, _) = blocked.remove(i);
                     Response::open_dup_like(o, op)
+                }
+                SchemeResponse::RegularAndNotifyOnDetach(status) => {
+                    let (op, _) = blocked.remove(i);
+                    Response::new_notify_on_detach(status, op)
                 }
             };
             let _ = socket

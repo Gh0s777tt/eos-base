@@ -3,17 +3,19 @@ use std::convert::{TryFrom, TryInto};
 use std::io::{Cursor, Seek};
 use std::iter;
 use std::os::unix::io::AsRawFd;
+use std::{mem, str};
 
 use syscall::dirent::{DirEntry, DirentBuf, DirentKind};
 use syscall::error::{
     EACCES, EBADF, EBADFD, EEXIST, EINVAL, EIO, EISDIR, ENOMEM, ENOSYS, ENOTDIR, ENOTEMPTY,
-    EOVERFLOW,
+    EOPNOTSUPP, EOVERFLOW, EPERM,
 };
 use syscall::flag::{
-    O_ACCMODE, O_CREAT, O_DIRECTORY, O_EXCL, O_RDONLY, O_RDWR, O_STAT, O_TRUNC, O_WRONLY,
+    StdFsCallKind, O_ACCMODE, O_CREAT, O_DIRECTORY, O_EXCL, O_RDONLY, O_RDWR, O_STAT, O_TRUNC,
+    O_WRONLY,
 };
 use syscall::schemev2::NewFdFlags;
-use syscall::{Error, EventFlags, Result, Stat, StatVfs, TimeSpec, ENOENT};
+use syscall::{Error, EventFlags, Result, Stat, StatVfs, StdFsCallMeta, TimeSpec, ENOENT};
 use syscall::{MODE_DIR, MODE_FILE, MODE_PERM, MODE_TYPE};
 
 use indexmap::IndexMap;
@@ -36,6 +38,7 @@ pub struct Scheme {
     filesystem: Filesystem,
     handles: HashMap<usize, Handle>,
     next_id: usize,
+    proc_creds_capability: libredox::Fd,
 }
 impl Scheme {
     /// Create the scheme, with the name being used for `fpath`.
@@ -45,6 +48,13 @@ impl Scheme {
             filesystem: Filesystem::new()?,
             handles: HashMap::new(),
             next_id: 0,
+            proc_creds_capability: {
+                libredox::Fd::open(
+                    "/scheme/proc/proc-creds-capability",
+                    libredox::flag::O_RDONLY,
+                    0,
+                )?
+            },
         })
     }
     /// Remove a directory entry, where the entry can be both a file or a directory. Used by `unlinkat`.
@@ -641,6 +651,48 @@ impl SchemeSync for Scheme {
 
         Ok(())
     }
+
+    fn std_fs_call(
+        &mut self,
+        id: usize,
+        kind: StdFsCallKind,
+        payload: &mut [u8],
+        metadata: StdFsCallMeta,
+        ctx: &CallerCtx,
+    ) -> Result<usize> {
+        match kind {
+            StdFsCallKind::Fchown => {
+                let (new_uid, new_gid) = (metadata.arg1 as u32, metadata.arg1 >> 32 as u32);
+                let (_pid, uid, gid) = get_uid_gid_from_pid(&self.proc_creds_capability, ctx.pid)?;
+                if uid != 0 && (uid != ctx.uid || gid != ctx.gid) {
+                    return Err(Error::new(EPERM));
+                }
+                self.fchown(id, new_uid, new_gid as u32, ctx).map(|_| 0)
+            }
+            /* TODO: Support Unlinkat using std_fs_call
+            Unlinkat => {
+                let path = unsafe { str::from_utf8_unchecked(payload) };
+                let flags = metadata.arg1;                {
+                    if !matches!(
+                        self.handles.get(&id).ok_or(Error::new(EBADF))?,
+                        Handle::SchemeRoot
+                    ) {
+                        return Err(Error::new(EACCES));
+                    }
+                }
+                let (_pid, uid, gid) = get_uid_gid_from_pid(&self.proc_creds_capability, ctx.pid)?;
+                self.remove_dentry(
+                    path,
+                    uid,
+                    gid,
+                    *flags as usize & syscall::AT_REMOVEDIR == syscall::AT_REMOVEDIR,
+                )
+                .map(|_| 0)
+            }
+            */
+            _ => Err(Error::new(EOPNOTSUPP)),
+        }
+    }
 }
 impl Scheme {
     pub fn on_close(&mut self, fd: usize) {
@@ -681,4 +733,33 @@ fn check_permissions(flags: usize, single_mode: u8) -> Result<()> {
         return Err(Error::new(EACCES));
     }
     Ok(())
+}
+
+fn get_uid_gid_from_pid(cap_fd: &libredox::Fd, target_pid: usize) -> Result<(u32, u32, u32)> {
+    let mut buffer = [0u8; mem::size_of::<libredox::protocol::ProcMeta>()];
+    let _ = libredox::call::get_proc_credentials(cap_fd.raw(), target_pid, &mut buffer).map_err(
+        |e| {
+            eprintln!(
+                "Failed to get process credentials for pid {}: {:?}",
+                target_pid, e
+            );
+            Error::new(EINVAL)
+        },
+    )?;
+    let mut cursor = 0;
+    let pid = read_u32(&buffer, cursor)?;
+    cursor += mem::size_of::<u32>() * 3;
+    let uid = read_u32(&buffer, cursor)?;
+    cursor += mem::size_of::<u32>() * 3;
+    let gid = read_u32(&buffer, cursor)?;
+    Ok((pid, uid, gid))
+}
+
+fn read_u32(buffer: &[u8], offset: usize) -> Result<u32> {
+    let bytes = buffer
+        .get(offset..offset + 4)
+        .and_then(|slice| slice.try_into().ok())
+        .ok_or_else(|| Error::new(EINVAL))?;
+
+    Ok(u32::from_le_bytes(bytes))
 }

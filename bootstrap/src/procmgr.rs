@@ -18,11 +18,11 @@ use arrayvec::ArrayString;
 use hashbrown::hash_map::{Entry, OccupiedEntry, VacantEntry};
 use hashbrown::{DefaultHashBuilder, HashMap, HashSet};
 
-use redox_rt::proc::FdGuard;
-use redox_rt::protocol::{
+use libredox::protocol::{
     ProcCall, ProcKillTarget, ProcMeta, RtSigInfo, SIGCHLD, SIGCONT, SIGHUP, SIGKILL, SIGSTOP,
     SIGTSTP, SIGTTIN, SIGTTOU, ThreadCall, WaitFlags,
 };
+use redox_rt::proc::FdGuard;
 use redox_scheme::scheme::{IntoTag, Op, OpCall};
 use redox_scheme::{
     CallerCtx, Id, OpenResult, Request, RequestKind, Response, SendFdRequest, SignalBehavior,

@@ -14,7 +14,8 @@ pub const MODE_READ: u16 = 0o4;
 use raw_cpuid::CpuId;
 
 use redox_scheme::{
-    scheme::SchemeSync, CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket,
+    scheme::{SchemeState, SchemeSync},
+    CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket,
 };
 use syscall::data::Stat;
 use syscall::flag::{EventFlags, O_CREAT, O_EXCL, O_RDONLY, O_RDWR, O_WRONLY};
@@ -467,6 +468,7 @@ impl SchemeSync for RandScheme {
 fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     let socket = Socket::create().expect("randd: failed to create rand scheme");
 
+    let mut state = SchemeState::new();
     let mut scheme = RandScheme::new();
 
     let _ = daemon.ready_sync_scheme(&socket, &mut scheme);
@@ -479,7 +481,7 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     {
         match request.kind() {
             RequestKind::Call(call) => {
-                let response = call.handle_sync(&mut scheme);
+                let response = call.handle_sync(&mut scheme, &mut state);
                 socket
                     .write_response(response, SignalBehavior::Restart)
                     .expect("error writing packet");

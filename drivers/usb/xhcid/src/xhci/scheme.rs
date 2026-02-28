@@ -33,8 +33,8 @@ use redox_scheme::{CallerCtx, OpenResult};
 use syscall::schemev2::NewFdFlags;
 use syscall::{
     Error, Result, Stat, EACCES, EBADF, EBADFD, EBADMSG, EINVAL, EIO, EISDIR, ENOENT, ENOSYS,
-    ENOTDIR, EPROTO, ESPIPE, MODE_CHR, MODE_DIR, MODE_FILE, O_DIRECTORY, O_RDWR, O_STAT, O_WRONLY,
-    SEEK_CUR, SEEK_END, SEEK_SET,
+    ENOTDIR, EOPNOTSUPP, EPROTO, ESPIPE, MODE_CHR, MODE_DIR, MODE_FILE, O_DIRECTORY, O_RDWR,
+    O_STAT, O_WRONLY, SEEK_CUR, SEEK_END, SEEK_SET,
 };
 
 use super::{port, usb};

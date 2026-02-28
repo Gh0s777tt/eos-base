@@ -9,7 +9,10 @@ use hashbrown::HashMap;
 use redox_initfs::{InitFs, Inode, InodeDir, InodeKind, InodeStruct, types::Timespec};
 
 use redox_rt::proc::FdGuard;
-use redox_scheme::{CallerCtx, OpenResult, RequestKind, scheme::SchemeSync};
+use redox_scheme::{
+    CallerCtx, OpenResult, RequestKind,
+    scheme::{SchemeState, SchemeSync},
+};
 
 use redox_scheme::{SignalBehavior, Socket};
 use syscall::PAGE_SIZE;
@@ -388,6 +391,7 @@ pub fn run(
     scheme_creation_cap: usize,
 ) -> ! {
     log::info!("bootstrap: starting initfs scheme");
+    let mut state = SchemeState::new();
     let mut scheme = InitFsScheme::new(bytes);
 
     let socket = Socket::create_inner(scheme_creation_cap, false)
@@ -421,7 +425,7 @@ pub fn run(
         };
         match req.kind() {
             RequestKind::Call(req) => {
-                let resp = req.handle_sync(&mut scheme);
+                let resp = req.handle_sync(&mut scheme, &mut state);
 
                 if !socket
                     .write_response(resp, SignalBehavior::Restart)
