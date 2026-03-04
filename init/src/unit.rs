@@ -20,36 +20,46 @@ impl UnitStore {
         }
     }
 
-    pub fn load_units(&mut self) -> (Vec<UnitId>, Vec<String>) {
-        let mut loaded_units = vec![];
-        let mut errors = vec![];
-
-        let entries = match config::config_for_dirs(&self.config_dirs) {
-            Ok(entries) => entries,
-            Err(err) => {
-                errors.push(format!(
-                    "failed to read configs from {}: {err}",
-                    self.config_dirs
-                        .iter()
-                        .map(|dir| dir.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-                return (loaded_units, errors);
-            }
+    fn load_single_unit(&mut self, unit_id: UnitId) -> (Option<UnitId>, Vec<String>) {
+        let Some(path) = self
+            .config_dirs
+            .iter()
+            .rev()
+            .map(|dir| dir.join(&unit_id.0))
+            .find(|path| path.exists())
+        else {
+            return (None, vec![format!("unit {} not found", unit_id.0)]);
         };
 
-        for entry in entries {
-            let (unit, new_errors) = match Unit::from_file(&entry) {
-                Ok(unit) => unit,
-                Err(err) => {
-                    errors.push(format!("{}: {err}", entry.display()));
-                    continue;
-                }
-            };
+        let (unit, errors) = match Unit::from_file(&path) {
+            Ok(unit) => unit,
+            Err(err) => {
+                return (None, vec![format!("{}: {err}", path.display())]);
+            }
+        };
+        assert_eq!(unit_id, unit.id);
+        self.units.insert(unit_id.clone(), unit);
+
+        (Some(unit_id), errors)
+    }
+
+    pub fn load_units(&mut self, root_unit: UnitId) -> (Vec<UnitId>, Vec<String>) {
+        let mut loaded_units = vec![];
+        let mut pending_units = vec![root_unit];
+        let mut errors = vec![];
+
+        while let Some(unit_id) = pending_units.pop() {
+            if self.units.contains_key(&unit_id) {
+                continue;
+            }
+            let (unit, new_errors) = self.load_single_unit(unit_id);
             errors.extend(new_errors);
-            loaded_units.push(unit.id.clone());
-            self.units.insert(unit.id.clone(), unit);
+            if let Some(unit) = unit {
+                loaded_units.push(unit.clone());
+                for dep in &self.unit(&unit).info.requires_weak {
+                    pending_units.push(dep.clone());
+                }
+            }
         }
 
         (loaded_units, errors)
