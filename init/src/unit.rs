@@ -21,25 +21,34 @@ impl UnitStore {
     }
 
     fn load_single_unit(&mut self, unit_id: UnitId, errors: &mut Vec<String>) -> Option<UnitId> {
+        let (filename, instance) = if let Some((base_service, rest)) = unit_id.0.split_once('@') {
+            let Some((instance, ext)) = rest.rsplit_once('.') else {
+                errors.push(format!("script {} can't be instanced", unit_id.0));
+                return None;
+            };
+            (format!("{base_service}@.{ext}"), Some(instance))
+        } else {
+            (unit_id.0.clone(), None)
+        };
+
         let Some(path) = self
             .config_dirs
             .iter()
             .rev()
-            .map(|dir| dir.join(&unit_id.0))
+            .map(|dir| dir.join(&filename))
             .find(|path| path.exists())
         else {
             errors.push(format!("unit {} not found", unit_id.0));
             return None;
         };
 
-        let unit = match Unit::from_file(&path, errors) {
+        let unit = match Unit::from_file(unit_id.clone(), &path, instance, errors) {
             Ok(unit) => unit,
             Err(err) => {
                 errors.push(format!("{}: {err}", path.display()));
                 return None;
             }
         };
-        assert_eq!(unit_id, unit.id);
         self.units.insert(unit_id.clone(), unit);
 
         Some(unit_id)
@@ -121,44 +130,70 @@ struct SerializedTarget {
     unit: UnitInfo,
 }
 
-impl Unit {
-    pub fn from_file(config_path: &Path, errors: &mut Vec<String>) -> io::Result<Self> {
-        let name = UnitId(
-            config_path
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_owned(),
-        );
+fn instance_toml(value: toml::Value, instance: &str) -> toml::Value {
+    match value {
+        toml::Value::Integer(_)
+        | toml::Value::Float(_)
+        | toml::Value::Boolean(_)
+        | toml::Value::Datetime(_) => value,
+        toml::Value::String(s) => toml::Value::String(s.replace("$INSTANCE", instance)),
+        toml::Value::Array(values) => toml::Value::Array(
+            values
+                .into_iter()
+                .map(|value| instance_toml(value, instance))
+                .collect(),
+        ),
+        toml::Value::Table(map) => toml::Value::Table(
+            map.into_iter()
+                .map(|(key, value)| (key, instance_toml(value, instance)))
+                .collect(),
+        ),
+    }
+}
 
+impl Unit {
+    pub fn from_file(
+        id: UnitId,
+        config_path: &Path,
+        instance: Option<&str>,
+        errors: &mut Vec<String>,
+    ) -> io::Result<Self> {
         let config = fs::read_to_string(config_path)?;
 
-        let (info, kind) = match config_path.extension().map(|ext| ext.to_str().unwrap()) {
-            None => {
-                let script = Script::from_str(&config, errors)?;
-                let mut requires_weak = vec![];
-                for command in &script.0 {
-                    match command {
-                        Command::RequiresWeak(deps) => {
-                            requires_weak.extend(deps.into_iter().cloned())
-                        }
-                        _ => {}
-                    }
+        let Some(ext) = config_path.extension().map(|ext| ext.to_str().unwrap()) else {
+            let script = Script::from_str(&config, errors)?;
+            let mut requires_weak = vec![];
+            for command in &script.0 {
+                match command {
+                    Command::RequiresWeak(deps) => requires_weak.extend(deps.into_iter().cloned()),
+                    _ => {}
                 }
-                (
-                    UnitInfo {
-                        description: None,
-                        default_dependencies: true,
-                        requires_weak,
-                        condition_architecture: None,
-                        condition_board: None,
-                    },
-                    UnitKind::LegacyScript { script },
-                )
             }
-            Some("service") => {
-                let service: SerializedService = toml::from_str(&config)
+            return Ok(Unit {
+                id,
+                info: UnitInfo {
+                    description: None,
+                    default_dependencies: true,
+                    requires_weak,
+                    condition_architecture: None,
+                    condition_board: None,
+                },
+                kind: UnitKind::LegacyScript { script },
+            });
+        };
+
+        let toml_value: toml::Value = toml::from_str(&config)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let toml_value = if let Some(instance) = instance {
+            instance_toml(toml_value, instance)
+        } else {
+            toml_value
+        };
+
+        let (info, kind) = match ext {
+            "service" => {
+                let service: SerializedService = toml_value
+                    .try_into()
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                 (
                     service.unit,
@@ -167,18 +202,15 @@ impl Unit {
                     },
                 )
             }
-            Some("target") => {
-                let target: SerializedTarget = toml::from_str(&config)
+            "target" => {
+                let target: SerializedTarget = toml_value
+                    .try_into()
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                 (target.unit, UnitKind::Target {})
             }
-            Some(_) => return Err(io::Error::other("invalid file extension")),
+            _ => return Err(io::Error::other("invalid file extension")),
         };
 
-        Ok(Unit {
-            id: name,
-            info,
-            kind,
-        })
+        Ok(Unit { id, info, kind })
     }
 }
