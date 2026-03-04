@@ -176,7 +176,6 @@ impl SchemeSync for InputScheme {
         let mut path_parts = path.split('/');
 
         let command = path_parts.next().ok_or(SysError::new(EINVAL))?;
-        let fd = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         let handle_ty = match command {
             "producer" => Handle::Producer,
@@ -273,6 +272,7 @@ impl SchemeSync for InputScheme {
 
         log::debug!("{path} channel has been opened");
 
+        let fd = self.next_id.fetch_add(1, Ordering::SeqCst);
         self.handles.insert(fd, handle_ty);
         Ok(OpenResult::ThisScheme {
             number: fd,
