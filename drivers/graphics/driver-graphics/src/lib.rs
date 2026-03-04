@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::mem;
 use std::mem::transmute;
+use std::os::fd::BorrowedFd;
 use std::sync::Arc;
 
 use drm_sys::{
@@ -17,7 +18,7 @@ use drm_sys::{
 };
 use graphics_ipc::v1::CursorDamage;
 use graphics_ipc::v2::Damage;
-use inputd::{VtEvent, VtEventKind};
+use inputd::{DisplayHandle, VtEventKind};
 use libredox::Fd;
 use redox_scheme::scheme::{register_scheme_inner, SchemeState, SchemeSync};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
@@ -91,11 +92,12 @@ pub trait CursorFramebuffer {}
 
 pub struct GraphicsScheme<T: GraphicsAdapter> {
     inner: GraphicsSchemeInner<T>,
+    inputd_handle: DisplayHandle,
     state: SchemeState,
 }
 
 impl<T: GraphicsAdapter> GraphicsScheme<T> {
-    pub fn new(mut adapter: T, scheme_name: String) -> Self {
+    pub fn new(mut adapter: T, scheme_name: String, early: bool) -> Self {
         assert!(scheme_name.starts_with("display"));
         let socket = Socket::nonblock().expect("failed to create graphics scheme");
 
@@ -142,14 +144,25 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
         register_scheme_inner(&inner.socket, &inner.scheme_name, cap_id)
             .expect("failed to register graphics scheme root");
 
+        let display_handle = if early {
+            DisplayHandle::new_early(&inner.scheme_name).unwrap()
+        } else {
+            DisplayHandle::new(&inner.scheme_name).unwrap()
+        };
+
         Self {
             inner,
+            inputd_handle: display_handle,
             state: SchemeState::new(),
         }
     }
 
     pub fn event_handle(&self) -> &Fd {
         self.inner.socket.inner()
+    }
+
+    pub fn inputd_event_handle(&self) -> BorrowedFd<'_> {
+        self.inputd_handle.inner()
     }
 
     pub fn adapter(&self) -> &T {
@@ -176,43 +189,50 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
         self.inner.standard_properties
     }
 
-    pub fn handle_vt_event(&mut self, vt_event: VtEvent) {
-        match vt_event.kind {
-            VtEventKind::Activate => {
-                log::info!("activate {}", vt_event.vt);
+    pub fn handle_vt_events(&mut self) {
+        while let Some(vt_event) = self
+            .inputd_handle
+            .read_vt_event()
+            .expect("driver-graphics: failed to read display handle")
+        {
+            match vt_event.kind {
+                VtEventKind::Activate => {
+                    log::info!("activate {}", vt_event.vt);
 
-                // Disable the kernel graphical debug writing once switching vt's for the
-                // first time. This way the kernel graphical debug remains enabled if the
-                // userspace logging infrastructure doesn't start up because for example a
-                // kernel panic happened prior to it starting up or logd crashed.
-                if let Some(mut disable_graphical_debug) = self.inner.disable_graphical_debug.take()
-                {
-                    let _ = disable_graphical_debug.write(&[1]);
-                }
+                    // Disable the kernel graphical debug writing once switching vt's for the
+                    // first time. This way the kernel graphical debug remains enabled if the
+                    // userspace logging infrastructure doesn't start up because for example a
+                    // kernel panic happened prior to it starting up or logd crashed.
+                    if let Some(mut disable_graphical_debug) =
+                        self.inner.disable_graphical_debug.take()
+                    {
+                        let _ = disable_graphical_debug.write(&[1]);
+                    }
 
-                self.inner.active_vt = vt_event.vt;
+                    self.inner.active_vt = vt_event.vt;
 
-                let vt_state = GraphicsSchemeInner::get_or_create_vt(
-                    &mut self.inner.adapter,
-                    &mut self.inner.vts,
-                    vt_event.vt,
-                );
-
-                for (display_id, fb) in vt_state.display_fbs.iter().enumerate() {
-                    GraphicsSchemeInner::update_whole_screen(
+                    let vt_state = GraphicsSchemeInner::get_or_create_vt(
                         &mut self.inner.adapter,
-                        display_id,
-                        fb,
+                        &mut self.inner.vts,
+                        vt_event.vt,
                     );
+
+                    for (display_id, fb) in vt_state.display_fbs.iter().enumerate() {
+                        GraphicsSchemeInner::update_whole_screen(
+                            &mut self.inner.adapter,
+                            display_id,
+                            fb,
+                        );
+                    }
+
+                    if let Some(cursor_plane) = &vt_state.cursor_plane {
+                        self.inner.adapter.handle_cursor(cursor_plane, true);
+                    }
                 }
 
-                if let Some(cursor_plane) = &vt_state.cursor_plane {
-                    self.inner.adapter.handle_cursor(cursor_plane, true);
+                VtEventKind::Resize => {
+                    log::warn!("driver-graphics: resize is not implemented yet")
                 }
-            }
-
-            VtEventKind::Resize => {
-                log::warn!("driver-graphics: resize is not implemented yet")
             }
         }
     }

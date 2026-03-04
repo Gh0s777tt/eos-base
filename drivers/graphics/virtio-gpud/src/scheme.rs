@@ -10,7 +10,6 @@ use driver_graphics::{
 use drm_sys::{DRM_MODE_DPMS_ON, DRM_MODE_TYPE_PREFERRED};
 use graphics_ipc::v1::Damage;
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
-use inputd::DisplayHandle;
 
 use syscall::{EINVAL, PAGE_SIZE};
 
@@ -560,7 +559,7 @@ impl<'a> GpuScheme {
         cursor_queue: Arc<Queue<'a>>,
         transport: Arc<dyn Transport>,
         has_edid: bool,
-    ) -> Result<(GraphicsScheme<VirtGpuAdapter<'a>>, DisplayHandle), Error> {
+    ) -> Result<GraphicsScheme<VirtGpuAdapter<'a>>, Error> {
         let adapter = VirtGpuAdapter {
             config,
             control_queue,
@@ -570,8 +569,6 @@ impl<'a> GpuScheme {
             displays: vec![],
         };
 
-        let scheme = GraphicsScheme::new(adapter, "display.virtio-gpu".to_owned());
-        let handle = DisplayHandle::new("display.virtio-gpu").unwrap();
-        Ok((scheme, handle))
+        Ok(GraphicsScheme::new(adapter, "display.virtio-gpu".to_owned(), false))
     }
 }
