@@ -84,7 +84,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         };
     }
 
-    let mut inputd_display_handle = DisplayHandle::new_early("vesa").unwrap();
+    let mut inputd_display_handle = DisplayHandle::new_early("display.vesa").unwrap();
 
     let mut scheme = GraphicsScheme::new(FbAdapter { framebuffers }, "display.vesa".to_owned());
 

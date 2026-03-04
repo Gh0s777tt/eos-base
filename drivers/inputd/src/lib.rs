@@ -153,13 +153,13 @@ pub struct KeymapActivate {
 pub struct DisplayHandle(File);
 
 impl DisplayHandle {
-    pub fn new<S: Into<String>>(device_name: S) -> io::Result<Self> {
-        let path = format!("/scheme/input/handle/display/{}", device_name.into());
+    pub fn new<S: Into<String>>(scheme_name: S) -> io::Result<Self> {
+        let path = format!("/scheme/input/handle/{}", scheme_name.into());
         Ok(Self(File::open(path)?))
     }
 
-    pub fn new_early<S: Into<String>>(device_name: S) -> io::Result<Self> {
-        let path = format!("/scheme/input/handle_early/display/{}", device_name.into());
+    pub fn new_early<S: Into<String>>(scheme_name: S) -> io::Result<Self> {
+        let path = format!("/scheme/input/handle_early/{}", scheme_name.into());
         Ok(Self(File::open(path)?))
     }
 

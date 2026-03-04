@@ -571,7 +571,7 @@ impl<'a> GpuScheme {
         };
 
         let scheme = GraphicsScheme::new(adapter, "display.virtio-gpu".to_owned());
-        let handle = DisplayHandle::new("virtio-gpu").unwrap();
+        let handle = DisplayHandle::new("display.virtio-gpu").unwrap();
         Ok((scheme, handle))
     }
 }

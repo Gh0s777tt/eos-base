@@ -35,7 +35,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
 
     let irq_file = pci_allocate_interrupt_vector(&mut pcid_handle, "ihdgd");
 
-    let mut inputd_display_handle = DisplayHandle::new(format!("ihdg.{}", name)).unwrap();
+    let mut inputd_display_handle = DisplayHandle::new(format!("display.ihdg.{}", name)).unwrap();
 
     let mut scheme = GraphicsScheme::new(device, format!("display.ihdg.{}", name));
 
