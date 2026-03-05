@@ -4,7 +4,6 @@ use std::{fs, io};
 
 use serde::Deserialize;
 
-use crate::SwitchRoot;
 use crate::script::{Command, Script};
 use crate::service::Service;
 
@@ -21,39 +20,58 @@ impl UnitStore {
         }
     }
 
-    pub fn load_units(&mut self) -> (Vec<UnitId>, Vec<String>) {
-        let mut loaded_units = vec![];
-        let mut errors = vec![];
-
-        let entries = match config::config_for_dirs(&self.config_dirs) {
-            Ok(entries) => entries,
-            Err(err) => {
-                errors.push(format!(
-                    "failed to read configs from {}: {err}",
-                    self.config_dirs
-                        .iter()
-                        .map(|dir| dir.display().to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-                return (loaded_units, errors);
-            }
+    fn load_single_unit(&mut self, unit_id: UnitId, errors: &mut Vec<String>) -> Option<UnitId> {
+        let (filename, instance) = if let Some((base_service, rest)) = unit_id.0.split_once('@') {
+            let Some((instance, ext)) = rest.rsplit_once('.') else {
+                errors.push(format!("script {} can't be instanced", unit_id.0));
+                return None;
+            };
+            (format!("{base_service}@.{ext}"), Some(instance))
+        } else {
+            (unit_id.0.clone(), None)
         };
 
-        for entry in entries {
-            let (unit, new_errors) = match Unit::from_file(&entry) {
-                Ok(unit) => unit,
-                Err(err) => {
-                    errors.push(format!("{}: {err}", entry.display()));
-                    continue;
+        let Some(path) = self
+            .config_dirs
+            .iter()
+            .rev()
+            .map(|dir| dir.join(&filename))
+            .find(|path| path.exists())
+        else {
+            errors.push(format!("unit {} not found", unit_id.0));
+            return None;
+        };
+
+        let unit = match Unit::from_file(unit_id.clone(), &path, instance, errors) {
+            Ok(unit) => unit,
+            Err(err) => {
+                errors.push(format!("{}: {err}", path.display()));
+                return None;
+            }
+        };
+        self.units.insert(unit_id.clone(), unit);
+
+        Some(unit_id)
+    }
+
+    pub fn load_units(&mut self, root_unit: UnitId, errors: &mut Vec<String>) -> Vec<UnitId> {
+        let mut loaded_units = vec![];
+        let mut pending_units = vec![root_unit];
+
+        while let Some(unit_id) = pending_units.pop() {
+            if self.units.contains_key(&unit_id) {
+                continue;
+            }
+            let unit = self.load_single_unit(unit_id, errors);
+            if let Some(unit) = unit {
+                loaded_units.push(unit.clone());
+                for dep in &self.unit(&unit).info.requires_weak {
+                    pending_units.push(dep.clone());
                 }
-            };
-            errors.extend(new_errors);
-            loaded_units.push(unit.id.clone());
-            self.units.insert(unit.id.clone(), unit);
+            }
         }
 
-        (loaded_units, errors)
+        loaded_units
     }
 
     pub fn unit(&self, unit: &UnitId) -> &Unit {
@@ -97,7 +115,6 @@ pub enum UnitKind {
     LegacyScript { script: Script },
     Service { service: Service },
     Target {},
-    SwitchRoot { switchroot: SwitchRoot },
 }
 
 #[derive(Deserialize)]
@@ -113,87 +130,87 @@ struct SerializedTarget {
     unit: UnitInfo,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SerializedSwitchRoot {
-    unit: UnitInfo,
-    switchroot: SwitchRoot,
+fn instance_toml(value: toml::Value, instance: &str) -> toml::Value {
+    match value {
+        toml::Value::Integer(_)
+        | toml::Value::Float(_)
+        | toml::Value::Boolean(_)
+        | toml::Value::Datetime(_) => value,
+        toml::Value::String(s) => toml::Value::String(s.replace("$INSTANCE", instance)),
+        toml::Value::Array(values) => toml::Value::Array(
+            values
+                .into_iter()
+                .map(|value| instance_toml(value, instance))
+                .collect(),
+        ),
+        toml::Value::Table(map) => toml::Value::Table(
+            map.into_iter()
+                .map(|(key, value)| (key, instance_toml(value, instance)))
+                .collect(),
+        ),
+    }
 }
 
 impl Unit {
-    pub fn from_file(config_path: &Path) -> io::Result<(Self, Vec<String>)> {
-        let name = UnitId(
-            config_path
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_owned(),
-        );
-
+    pub fn from_file(
+        id: UnitId,
+        config_path: &Path,
+        instance: Option<&str>,
+        errors: &mut Vec<String>,
+    ) -> io::Result<Self> {
         let config = fs::read_to_string(config_path)?;
 
-        let (info, kind, errors) = match config_path.extension().map(|ext| ext.to_str().unwrap()) {
-            None => {
-                let (script, warnings) = Script::from_str(&config)?;
-                let mut requires_weak = vec![];
-                for command in &script.0 {
-                    match command {
-                        Command::RequiresWeak(deps) => {
-                            requires_weak.extend(deps.into_iter().cloned())
-                        }
-                        _ => {}
-                    }
+        let Some(ext) = config_path.extension().map(|ext| ext.to_str().unwrap()) else {
+            let script = Script::from_str(&config, errors)?;
+            let mut requires_weak = vec![];
+            for command in &script.0 {
+                match command {
+                    Command::RequiresWeak(deps) => requires_weak.extend(deps.into_iter().cloned()),
+                    _ => {}
                 }
-                (
-                    UnitInfo {
-                        description: None,
-                        default_dependencies: true,
-                        requires_weak,
-                        condition_architecture: None,
-                        condition_board: None,
-                    },
-                    UnitKind::LegacyScript { script },
-                    warnings,
-                )
             }
-            Some("service") => {
-                let service: SerializedService = toml::from_str(&config)
+            return Ok(Unit {
+                id,
+                info: UnitInfo {
+                    description: None,
+                    default_dependencies: true,
+                    requires_weak,
+                    condition_architecture: None,
+                    condition_board: None,
+                },
+                kind: UnitKind::LegacyScript { script },
+            });
+        };
+
+        let toml_value: toml::Value = toml::from_str(&config)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let toml_value = if let Some(instance) = instance {
+            instance_toml(toml_value, instance)
+        } else {
+            toml_value
+        };
+
+        let (info, kind) = match ext {
+            "service" => {
+                let service: SerializedService = toml_value
+                    .try_into()
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                 (
                     service.unit,
                     UnitKind::Service {
                         service: service.service,
                     },
-                    vec![],
                 )
             }
-            Some("target") => {
-                let target: SerializedTarget = toml::from_str(&config)
+            "target" => {
+                let target: SerializedTarget = toml_value
+                    .try_into()
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-                (target.unit, UnitKind::Target {}, vec![])
+                (target.unit, UnitKind::Target {})
             }
-            Some("switchroot") => {
-                let switchroot: SerializedSwitchRoot = toml::from_str(&config)
-                    .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-                (
-                    switchroot.unit,
-                    UnitKind::SwitchRoot {
-                        switchroot: switchroot.switchroot,
-                    },
-                    vec![],
-                )
-            }
-            Some(_) => return Err(io::Error::other("invalid file extension")),
+            _ => return Err(io::Error::other("invalid file extension")),
         };
 
-        Ok((
-            Unit {
-                id: name,
-                info,
-                kind,
-            },
-            errors,
-        ))
+        Ok(Unit { id, info, kind })
     }
 }
