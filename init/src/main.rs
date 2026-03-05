@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
 use std::io::Result;
@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
 
+use crate::scheduler::Scheduler;
 use crate::script::Command;
 use crate::unit::{Unit, UnitId, UnitStore};
 
+mod scheduler;
 mod script;
 mod service;
 mod unit;
@@ -55,12 +57,7 @@ struct SwitchRoot {
 }
 
 impl SwitchRoot {
-    fn apply(
-        self,
-        pending_units: &mut VecDeque<UnitId>,
-        unit_store: &mut UnitStore,
-        config: &mut InitConfig,
-    ) {
+    fn apply(self, scheduler: &mut Scheduler, unit_store: &mut UnitStore, config: &mut InitConfig) {
         eprintln!(
             "init: switchroot to {} {}",
             self.prefix.display(),
@@ -82,20 +79,12 @@ impl SwitchRoot {
 
         if self.prefix == Path::new("/scheme/initfs") {
             let unit_id = UnitId("00_runtime.target".to_owned());
-            let mut errors = vec![];
-            let loaded_units = unit_store.load_units(unit_id.clone(), &mut errors);
-            pending_units.extend(loaded_units);
-            for error in errors {
-                eprintln!("init: {error}");
-            }
+            scheduler.schedule_start_and_report_errors(unit_store, unit_id.clone());
             unit_store.set_runtime_target(unit_id);
         }
 
-        let mut errors = vec![];
-
         if let Some(target) = self.target {
-            let loaded_units = unit_store.load_units(target, &mut errors);
-            pending_units.extend(loaded_units);
+            scheduler.schedule_start_and_report_errors(unit_store, target);
         } else {
             let entries = match config::config_for_dirs(&unit_store.config_dirs) {
                 Ok(entries) => entries,
@@ -113,16 +102,11 @@ impl SwitchRoot {
                 }
             };
             for entry in entries {
-                let loaded_units = unit_store.load_units(
+                scheduler.schedule_start_and_report_errors(
+                    unit_store,
                     UnitId(entry.file_name().unwrap().to_str().unwrap().to_owned()),
-                    &mut errors,
                 );
-                pending_units.extend(loaded_units);
             }
-        }
-
-        for error in errors {
-            eprintln!("init: {error}");
         }
     }
 }
@@ -187,16 +171,14 @@ fn run_command(cmd: Command, config: &mut InitConfig) {
 fn main() {
     let mut init_config = InitConfig::new();
     let mut unit_store = UnitStore::new();
-    let mut pending_units = VecDeque::new();
-
-    let initfs_target = UnitId("90_initfs.target".to_owned());
+    let mut scheduler = Scheduler::new();
 
     SwitchRoot {
         prefix: Path::new("/scheme/initfs").to_owned(),
         etcdir: Path::new("/scheme/initfs/etc").to_owned(),
-        target: Some(initfs_target.clone()),
+        target: Some(UnitId("90_initfs.target".to_owned())),
     }
-    .apply(&mut pending_units, &mut unit_store, &mut init_config);
+    .apply(&mut scheduler, &mut unit_store, &mut init_config);
 
     let mut command = std::process::Command::new("logd");
     command.env_clear().envs(&init_config.envs);
@@ -205,31 +187,17 @@ fn main() {
         eprintln!("init: failed to switch stdio to '/scheme/log': {err}");
     }
 
-    'a: while let Some(unit) = pending_units.pop_front() {
-        if !unit_store.unit(&unit).conditions_met() {
-            continue 'a;
-        }
-        for dep in &unit_store.unit(&unit).info.requires_weak {
-            if pending_units.contains(dep) {
-                pending_units.push_back(unit);
-                continue 'a;
-            }
-        }
+    scheduler.step(&mut unit_store, &mut init_config);
 
-        if let Err(err) = run(unit_store.unit_mut(&unit), &mut init_config) {
-            eprintln!("init: failed to run {}: {}", unit.0, err);
-        }
-
-        if unit == initfs_target {
-            SwitchRoot {
-                prefix: PathBuf::from("/usr"),
-                etcdir: PathBuf::from("/etc"),
-                // FIXME make target non-optional once there is a multi-user.target unit
-                target: None, //UnitId("multi-user.target".to_owned()),
-            }
-            .apply(&mut pending_units, &mut unit_store, &mut init_config);
-        }
+    SwitchRoot {
+        prefix: PathBuf::from("/usr"),
+        etcdir: PathBuf::from("/etc"),
+        // FIXME make target non-optional once there is a multi-user.target unit
+        target: None, //UnitId("multi-user.target".to_owned()),
     }
+    .apply(&mut scheduler, &mut unit_store, &mut init_config);
+
+    scheduler.step(&mut unit_store, &mut init_config);
 
     libredox::call::setrens(0, 0).expect("init: failed to enter null namespace");
 
