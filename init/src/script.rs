@@ -15,9 +15,8 @@ pub fn subst_env<'a>(arg: &str) -> String {
 pub struct Script(pub Vec<Command>);
 
 impl Script {
-    pub fn from_str(config: &str) -> io::Result<(Script, Vec<String>)> {
+    pub fn from_str(config: &str, errors: &mut Vec<String>) -> io::Result<Script> {
         let mut cmds = vec![];
-        let mut errors = vec![];
 
         for line_raw in config.lines() {
             let line = line_raw.trim();
@@ -33,7 +32,7 @@ impl Script {
             }
         }
 
-        Ok((Script(cmds), errors))
+        Ok(Script(cmds))
     }
 }
 

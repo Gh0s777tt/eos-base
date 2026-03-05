@@ -20,7 +20,7 @@ impl UnitStore {
         }
     }
 
-    fn load_single_unit(&mut self, unit_id: UnitId) -> (Option<UnitId>, Vec<String>) {
+    fn load_single_unit(&mut self, unit_id: UnitId, errors: &mut Vec<String>) -> Option<UnitId> {
         let Some(path) = self
             .config_dirs
             .iter()
@@ -28,32 +28,32 @@ impl UnitStore {
             .map(|dir| dir.join(&unit_id.0))
             .find(|path| path.exists())
         else {
-            return (None, vec![format!("unit {} not found", unit_id.0)]);
+            errors.push(format!("unit {} not found", unit_id.0));
+            return None;
         };
 
-        let (unit, errors) = match Unit::from_file(&path) {
+        let unit = match Unit::from_file(&path, errors) {
             Ok(unit) => unit,
             Err(err) => {
-                return (None, vec![format!("{}: {err}", path.display())]);
+                errors.push(format!("{}: {err}", path.display()));
+                return None;
             }
         };
         assert_eq!(unit_id, unit.id);
         self.units.insert(unit_id.clone(), unit);
 
-        (Some(unit_id), errors)
+        Some(unit_id)
     }
 
-    pub fn load_units(&mut self, root_unit: UnitId) -> (Vec<UnitId>, Vec<String>) {
+    pub fn load_units(&mut self, root_unit: UnitId, errors: &mut Vec<String>) -> Vec<UnitId> {
         let mut loaded_units = vec![];
         let mut pending_units = vec![root_unit];
-        let mut errors = vec![];
 
         while let Some(unit_id) = pending_units.pop() {
             if self.units.contains_key(&unit_id) {
                 continue;
             }
-            let (unit, new_errors) = self.load_single_unit(unit_id);
-            errors.extend(new_errors);
+            let unit = self.load_single_unit(unit_id, errors);
             if let Some(unit) = unit {
                 loaded_units.push(unit.clone());
                 for dep in &self.unit(&unit).info.requires_weak {
@@ -62,7 +62,7 @@ impl UnitStore {
             }
         }
 
-        (loaded_units, errors)
+        loaded_units
     }
 
     pub fn unit(&self, unit: &UnitId) -> &Unit {
@@ -122,7 +122,7 @@ struct SerializedTarget {
 }
 
 impl Unit {
-    pub fn from_file(config_path: &Path) -> io::Result<(Self, Vec<String>)> {
+    pub fn from_file(config_path: &Path, errors: &mut Vec<String>) -> io::Result<Self> {
         let name = UnitId(
             config_path
                 .file_name()
@@ -134,9 +134,9 @@ impl Unit {
 
         let config = fs::read_to_string(config_path)?;
 
-        let (info, kind, errors) = match config_path.extension().map(|ext| ext.to_str().unwrap()) {
+        let (info, kind) = match config_path.extension().map(|ext| ext.to_str().unwrap()) {
             None => {
-                let (script, warnings) = Script::from_str(&config)?;
+                let script = Script::from_str(&config, errors)?;
                 let mut requires_weak = vec![];
                 for command in &script.0 {
                     match command {
@@ -155,7 +155,6 @@ impl Unit {
                         condition_board: None,
                     },
                     UnitKind::LegacyScript { script },
-                    warnings,
                 )
             }
             Some("service") => {
@@ -166,24 +165,20 @@ impl Unit {
                     UnitKind::Service {
                         service: service.service,
                     },
-                    vec![],
                 )
             }
             Some("target") => {
                 let target: SerializedTarget = toml::from_str(&config)
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-                (target.unit, UnitKind::Target {}, vec![])
+                (target.unit, UnitKind::Target {})
             }
             Some(_) => return Err(io::Error::other("invalid file extension")),
         };
 
-        Ok((
-            Unit {
-                id: name,
-                info,
-                kind,
-            },
-            errors,
-        ))
+        Ok(Unit {
+            id: name,
+            info,
+            kind,
+        })
     }
 }

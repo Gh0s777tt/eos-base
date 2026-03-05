@@ -83,17 +83,14 @@ impl SwitchRoot {
             self.etcdir.join("init.d"),
         ];
 
-        let (loaded_units, errors) = unit_store.load_units(UnitId("00_runtime.target".to_owned()));
-        for error in errors {
-            eprintln!("init: {error}");
-        }
+        let mut errors = vec![];
+
+        let loaded_units =
+            unit_store.load_units(UnitId("00_runtime.target".to_owned()), &mut errors);
         pending_units.extend(loaded_units);
 
         if let Some(target) = self.target {
-            let (loaded_units, errors) = unit_store.load_units(target);
-            for error in errors {
-                eprintln!("init: {error}");
-            }
+            let loaded_units = unit_store.load_units(target, &mut errors);
             pending_units.extend(loaded_units);
         } else {
             let entries = match config::config_for_dirs(&unit_store.config_dirs) {
@@ -112,14 +109,16 @@ impl SwitchRoot {
                 }
             };
             for entry in entries {
-                let (loaded_units, errors) = unit_store.load_units(UnitId(
-                    entry.file_name().unwrap().to_str().unwrap().to_owned(),
-                ));
-                for error in errors {
-                    eprintln!("init: {error}");
-                }
+                let loaded_units = unit_store.load_units(
+                    UnitId(entry.file_name().unwrap().to_str().unwrap().to_owned()),
+                    &mut errors,
+                );
                 pending_units.extend(loaded_units);
             }
+        }
+
+        for error in errors {
+            eprintln!("init: {error}");
         }
     }
 }
