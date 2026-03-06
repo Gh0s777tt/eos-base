@@ -29,7 +29,6 @@ use redox_scheme::{
     Socket, Tag,
 };
 use slab::Slab;
-use syscall::data::GlobalSchemes;
 use syscall::schemev2::NewFdFlags;
 use syscall::{
     CallFlags, ContextStatus, ContextVerb, CtxtStsBuf, EACCES, EAGAIN, EBADF, EBADFD, ECANCELED,
@@ -39,8 +38,6 @@ use syscall::{
     sig_bit,
 };
 
-use crate::KernelSchemeMap;
-
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 enum VirtualId {
     KernelId(Id),
@@ -48,12 +45,7 @@ enum VirtualId {
     InternalId(u64),
 }
 
-pub fn run(
-    write_fd: FdGuard,
-    auth: FdGuard,
-    kernel_schemes: KernelSchemeMap,
-    scheme_creation_cap: FdGuard,
-) -> ! {
+pub fn run(write_fd: FdGuard, auth: FdGuard, event: FdGuard, scheme_creation_cap: FdGuard) -> ! {
     let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), true)
         .expect("failed to open proc scheme socket");
     drop(scheme_creation_cap);
@@ -61,14 +53,8 @@ pub fn run(
     // TODO?
     let socket_ident = socket.inner().raw();
 
-    let queue = RawEventQueue::new(
-        kernel_schemes
-            .get(GlobalSchemes::Event)
-            .expect("failed to get event fd")
-            .as_raw_fd(),
-    )
-    .expect("failed to create event queue");
-    drop(kernel_schemes);
+    let queue = RawEventQueue::new(event.as_raw_fd()).expect("failed to create event queue");
+    drop(event);
 
     queue
         .subscribe(socket.inner().raw(), socket_ident, EventFlags::EVENT_READ)

@@ -148,8 +148,13 @@ pub fn main() -> ! {
         &this_thr_fd,
         scheme_creation_cap,
         kernel_schemes,
-        |write_fd, scheme_creation_cap, auth, kernel_schemes| {
-            crate::procmgr::run(write_fd, auth, kernel_schemes, scheme_creation_cap)
+        |write_fd, scheme_creation_cap, auth, mut kernel_schemes| {
+            let event = kernel_schemes
+                .0
+                .remove(&GlobalSchemes::Event)
+                .expect("failed to get event fd");
+            drop(kernel_schemes);
+            crate::procmgr::run(write_fd, auth, event, scheme_creation_cap)
         },
     );
 
