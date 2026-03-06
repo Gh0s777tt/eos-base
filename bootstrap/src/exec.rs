@@ -4,11 +4,12 @@ use alloc::vec::Vec;
 use core::ffi::CStr;
 use core::str::FromStr;
 use hashbrown::HashMap;
+use redox_scheme::Socket;
 
+use syscall::CallFlags;
 use syscall::data::{GlobalSchemes, KernelSchemeInfo};
 use syscall::flag::{O_CLOEXEC, O_RDONLY, O_STAT};
-use syscall::CallFlags;
-use syscall::{Error, EINTR};
+use syscall::{EINTR, Error};
 
 use redox_rt::proc::*;
 
@@ -49,20 +50,15 @@ pub fn main() -> ! {
     };
     let scheme_creation_cap = unsafe {
         let base_ptr = cursor as *const u8;
-        let cap = *(base_ptr as *const usize);
-        cap
+        FdGuard::new(*(base_ptr as *const usize))
     };
 
-    let kernel_schemes = KernelSchemeMap::new(kernel_scheme_infos);
+    let mut kernel_schemes = KernelSchemeMap::new(kernel_scheme_infos);
 
-    let auth = FdGuard::new(
-        *kernel_schemes
-            .get(GlobalSchemes::Proc)
-            .expect("failed to get proc fd"),
-    );
-    let pipe_fd = *kernel_schemes
-        .get(GlobalSchemes::Pipe)
-        .expect("failed to get pipe fd");
+    let auth = kernel_schemes
+        .0
+        .remove(&GlobalSchemes::Proc)
+        .expect("failed to get proc fd");
 
     let this_thr_fd = auth
         .dup(b"cur-context")
@@ -75,9 +71,10 @@ pub fn main() -> ! {
     let mut envs = {
         let fd = FdGuard::new(
             syscall::openat(
-                *kernel_schemes
+                kernel_schemes
                     .get(GlobalSchemes::Sys)
-                    .expect("failed to get sys fd"),
+                    .expect("failed to get sys fd")
+                    .as_raw_fd(),
                 "env",
                 O_RDONLY | O_CLOEXEC,
                 0,
@@ -126,12 +123,14 @@ pub fn main() -> ! {
         (*(core::ptr::addr_of!(__initfs_header) as *const redox_initfs::types::Header)).initfs_size
     };
 
-    let initfs_fd = spawn(
+    let (scheme_creation_cap, auth, kernel_schemes, initfs_fd) = spawn(
         "initfs daemon",
-        &auth,
+        auth,
         &this_thr_fd,
-        pipe_fd,
-        |write_fd| unsafe {
+        scheme_creation_cap,
+        kernel_schemes,
+        false,
+        |write_fd, socket, _, _| unsafe {
             // Creating a reference to NULL is UB. Mask the UB for now using black_box.
             // FIXME use a raw pointer and inline asm for reading instead for the initfs header.
             let initfs_start = core::ptr::addr_of!(__initfs_header);
@@ -140,45 +139,65 @@ pub fn main() -> ! {
             crate::initfs::run(
                 core::slice::from_raw_parts(initfs_start, initfs_length),
                 write_fd,
-                &kernel_schemes,
-                scheme_creation_cap,
+                socket,
             );
         },
     );
 
-    let proc_fd = spawn(
+    let (scheme_creation_cap, auth, kernel_schemes, proc_fd) = spawn(
         "process manager",
-        &auth,
+        auth,
         &this_thr_fd,
-        pipe_fd,
-        |write_fd| crate::procmgr::run(write_fd, &auth, &kernel_schemes, scheme_creation_cap),
-    );
-
-    let initns_fd = spawn(
-        "init namespace manager",
-        &auth,
-        &this_thr_fd,
-        pipe_fd,
-        move |write_fd| {
-            let mut schemes = HashMap::default();
-            for (scheme, fd) in kernel_schemes.0.into_iter() {
-                schemes.insert(scheme.as_str().to_string(), Arc::new(FdGuard::new(fd)));
-            }
-            schemes.insert("proc".to_string(), Arc::new(FdGuard::new(proc_fd)));
-            schemes.insert("initfs".to_string(), Arc::new(FdGuard::new(initfs_fd)));
-
-            crate::initnsmgr::run(write_fd, schemes, scheme_creation_cap)
+        scheme_creation_cap,
+        kernel_schemes,
+        true,
+        |write_fd, socket, auth, mut kernel_schemes| {
+            let event = kernel_schemes
+                .0
+                .remove(&GlobalSchemes::Event)
+                .expect("failed to get event fd");
+            drop(kernel_schemes);
+            crate::procmgr::run(write_fd, socket, auth, event)
         },
     );
 
-    let (init_proc_fd, init_thr_fd) = unsafe { make_init(proc_fd) };
+    let scheme_creation_cap_dup = scheme_creation_cap
+        .dup(b"")
+        .expect("failed to dup scheme creation cap");
+    let (_, _, _, initns_fd) = spawn(
+        "init namespace manager",
+        auth,
+        &this_thr_fd,
+        scheme_creation_cap,
+        kernel_schemes,
+        false,
+        |write_fd, socket, _, kernel_schemes| {
+            let mut schemes = HashMap::default();
+            for (scheme, fd) in kernel_schemes.0.into_iter() {
+                schemes.insert(scheme.as_str().to_string(), Arc::new(fd));
+            }
+            schemes.insert(
+                "proc".to_string(),
+                // A bit dirty, but necessary as the parent process still needs access to it. Rust
+                // doesn't know that the fd got cloned by fork.
+                Arc::new(FdGuard::new(proc_fd.as_raw_fd())),
+            );
+            schemes.insert("initfs".to_string(), Arc::new(initfs_fd));
+
+            crate::initnsmgr::run(write_fd, socket, schemes, scheme_creation_cap_dup)
+        },
+    );
+
+    let (init_proc_fd, init_thr_fd) = unsafe { make_init(proc_fd.take()) };
     // from this point, this_thr_fd is no longer valid
 
     const CWD: &[u8] = b"/scheme/initfs";
-    let cwd_fd =
-        FdGuard::new(syscall::openat(initfs_fd, "", O_STAT, 0).expect("failed to open cwd fd"))
-            .to_upper()
-            .unwrap();
+    let cwd_fd = FdGuard::new(
+        syscall::openat(initns_fd.as_raw_fd(), "/scheme/initfs", O_STAT, 0)
+            .expect("failed to open cwd fd"),
+    )
+    .to_upper()
+    .unwrap();
     let extrainfo = ExtraInfo {
         cwd: Some(CWD),
         sigprocmask: 0,
@@ -186,14 +205,15 @@ pub fn main() -> ! {
         umask: redox_rt::sys::get_umask(),
         thr_fd: init_thr_fd.as_raw_fd(),
         proc_fd: init_proc_fd.as_raw_fd(),
-        ns_fd: Some(initns_fd),
+        ns_fd: Some(initns_fd.take()),
         cwd_fd: Some(cwd_fd.as_raw_fd()),
     };
 
-    let path = "/bin/init";
+    let path = "/scheme/initfs/bin/init";
 
     let image_file = FdGuard::new(
-        syscall::openat(initfs_fd, path, O_RDONLY | O_CLOEXEC, 0).expect("failed to open init"),
+        syscall::openat(extrainfo.ns_fd.unwrap(), path, O_RDONLY | O_CLOEXEC, 0)
+            .expect("failed to open init"),
     )
     .to_upper()
     .unwrap();
@@ -220,7 +240,7 @@ pub fn main() -> ! {
     let interp_cstr = CStr::from_bytes_with_nul(&interp_path).expect("interpreter not valid C str");
     let interp_file = FdGuard::new(
         syscall::openat(
-            initns_fd, // initns, not initfs!
+            extrainfo.ns_fd.unwrap(), // initns, not initfs!
             interp_cstr.to_str().expect("interpreter not UTF-8"),
             O_RDONLY | O_CLOEXEC,
             0,
@@ -247,13 +267,24 @@ pub fn main() -> ! {
 
 pub(crate) fn spawn(
     name: &str,
-    auth: &FdGuard,
+    auth: FdGuard,
     this_thr_fd: &FdGuardUpper,
-    pipe_fd: usize,
-    inner: impl FnOnce(FdGuard) -> !,
-) -> usize {
+    scheme_creation_cap: FdGuard,
+    kernel_schemes: KernelSchemeMap,
+    nonblock: bool,
+    inner: impl FnOnce(FdGuard, Socket, FdGuard, KernelSchemeMap) -> !,
+) -> (FdGuard, FdGuard, KernelSchemeMap, FdGuard) {
     let read = FdGuard::new(
-        syscall::openat(pipe_fd, "", O_CLOEXEC, 0).expect("failed to open sync read pipe"),
+        syscall::openat(
+            kernel_schemes
+                .get(GlobalSchemes::Pipe)
+                .expect("failed to get pipe fd")
+                .as_raw_fd(),
+            "",
+            O_CLOEXEC,
+            0,
+        )
+        .expect("failed to open sync read pipe"),
     );
 
     // The write pipe will not inherit O_CLOEXEC, but is closed by the daemon later.
@@ -261,13 +292,22 @@ pub(crate) fn spawn(
         syscall::dup(read.as_raw_fd(), b"write").expect("failed to open sync write pipe"),
     );
 
-    match fork_impl(&ForkArgs::Init { this_thr_fd, auth }) {
+    match fork_impl(&ForkArgs::Init {
+        this_thr_fd,
+        auth: &auth,
+    }) {
         Err(err) => {
             panic!("Failed to fork in order to start {name}: {err}");
         }
         // Continue serving the scheme as the child.
         Ok(0) => {
             drop(read);
+
+            let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), nonblock)
+                .expect("failed to open proc scheme socket");
+            drop(scheme_creation_cap);
+
+            inner(write, socket, auth, kernel_schemes)
         }
         // Return in order to execute init, as the parent.
         Ok(_) => {
@@ -292,8 +332,12 @@ pub(crate) fn spawn(
                 }
             }
 
-            return new_fd;
+            (
+                scheme_creation_cap,
+                auth,
+                kernel_schemes,
+                FdGuard::new(new_fd),
+            )
         }
     }
-    inner(write)
 }

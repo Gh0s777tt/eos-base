@@ -489,14 +489,12 @@ where
 
 pub fn run(
     sync_pipe: FdGuard,
+    socket: Socket,
     schemes: HashMap<String, Arc<FdGuard>>,
-    scheme_creation_cap: usize,
+    scheme_creation_cap: FdGuard,
 ) -> ! {
-    let socket = Socket::create_inner(scheme_creation_cap, false)
-        .expect("failed to open init namespace scheme socket");
-
     let mut state = SchemeState::new();
-    let mut scheme = NamespaceScheme::new(&socket, schemes, FdGuard::new(scheme_creation_cap));
+    let mut scheme = NamespaceScheme::new(&socket, schemes, scheme_creation_cap);
 
     // send namespace fd to bootstrap
     let new_id = scheme.next_id;

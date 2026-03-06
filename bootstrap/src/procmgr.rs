@@ -29,7 +29,6 @@ use redox_scheme::{
     Socket, Tag,
 };
 use slab::Slab;
-use syscall::data::GlobalSchemes;
 use syscall::schemev2::NewFdFlags;
 use syscall::{
     CallFlags, ContextStatus, ContextVerb, CtxtStsBuf, EACCES, EAGAIN, EBADF, EBADFD, ECANCELED,
@@ -39,8 +38,6 @@ use syscall::{
     sig_bit,
 };
 
-use crate::KernelSchemeMap;
-
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 enum VirtualId {
     KernelId(Id),
@@ -48,31 +45,12 @@ enum VirtualId {
     InternalId(u64),
 }
 
-pub fn run(
-    write_fd: FdGuard,
-    auth: &FdGuard,
-    kernel_schemes: &KernelSchemeMap,
-    scheme_creation_cap: usize,
-) -> ! {
-    let socket =
-        Socket::create_inner(scheme_creation_cap, true).expect("failed to open proc scheme socket");
-    let _ = syscall::close(scheme_creation_cap);
-
+pub fn run(write_fd: FdGuard, socket: Socket, auth: FdGuard, event: FdGuard) -> ! {
     // TODO?
     let socket_ident = socket.inner().raw();
 
-    let queue = RawEventQueue::new(
-        *kernel_schemes
-            .get(GlobalSchemes::Event)
-            .expect("failed to get event fd"),
-    )
-    .expect("failed to create event queue");
-    for (scheme, fd) in kernel_schemes.0.iter() {
-        if *scheme == GlobalSchemes::Proc {
-            continue;
-        }
-        let _ = syscall::close(*fd);
-    }
+    let queue = RawEventQueue::new(event.as_raw_fd()).expect("failed to create event queue");
+    drop(event);
 
     queue
         .subscribe(socket.inner().raw(), socket_ident, EventFlags::EVENT_READ)
@@ -520,7 +498,7 @@ struct ProcScheme<'a> {
     next_id: ProcessId,
 
     queue: &'a RawEventQueue,
-    auth: &'a FdGuard,
+    auth: FdGuard,
 }
 #[derive(Debug, Default)]
 struct Pgrp {
@@ -598,7 +576,7 @@ impl RawEventQueue {
 }
 
 impl<'a> ProcScheme<'a> {
-    pub fn new(auth: &'a FdGuard, queue: &'a RawEventQueue) -> ProcScheme<'a> {
+    pub fn new(auth: FdGuard, queue: &'a RawEventQueue) -> ProcScheme<'a> {
         ProcScheme {
             processes: HashMap::new(),
             groups: HashMap::new(),
@@ -745,7 +723,7 @@ impl<'a> ProcScheme<'a> {
         }));
         if let Err(err) = new_process
             .borrow_mut()
-            .sync_kernel_attrs(child_pid, self.auth)
+            .sync_kernel_attrs(child_pid, &self.auth)
         {
             log::warn!("Failed to set kernel attrs when forking: {err}");
         }
@@ -1611,7 +1589,7 @@ impl<'a> ProcScheme<'a> {
         if let Some(new_sgid) = new_sgid {
             proc.sgid = new_sgid;
         }
-        if let Err(err) = proc.sync_kernel_attrs(pid, self.auth) {
+        if let Err(err) = proc.sync_kernel_attrs(pid, &self.auth) {
             log::warn!("Failed to sync proc attrs in setresugid: {err}");
         }
         Ok(())
@@ -2393,7 +2371,7 @@ impl<'a> ProcScheme<'a> {
             .borrow_mut();
 
         proc.name = ArrayString::from_str(&new_name[..new_name.len().min(NAME_CAPAC)]).unwrap();
-        if let Err(err) = proc.sync_kernel_attrs(pid, self.auth) {
+        if let Err(err) = proc.sync_kernel_attrs(pid, &self.auth) {
             log::warn!("Failed to set kernel attrs when renaming proc: {err}");
         }
         Ok(())
