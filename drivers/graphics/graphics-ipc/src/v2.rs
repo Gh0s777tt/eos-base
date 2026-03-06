@@ -1,40 +1,14 @@
 use std::fs::File;
+use std::io;
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::AsRawFd;
-use std::{io, mem};
 
 use drm::control::connector::{self, State};
 use drm::control::Device as _;
 use drm::{ClientCapability, Device as _, DriverCapability};
+use syscall::CallFlags;
 
 pub use crate::common::Damage;
-
-extern "C" {
-    fn redox_sys_call_v0(
-        fd: usize,
-        payload: *mut u8,
-        payload_len: usize,
-        flags: usize,
-        metadata: *const u64,
-        metadata_len: usize,
-    ) -> usize;
-}
-
-unsafe fn sys_call<T>(
-    fd: &impl AsRawFd,
-    payload: &mut T,
-    flags: usize,
-    metadata: &[u64],
-) -> libredox::error::Result<usize> {
-    libredox::error::Error::demux(redox_sys_call_v0(
-        fd.as_raw_fd() as usize,
-        payload as *mut T as *mut u8,
-        mem::size_of::<T>(),
-        flags,
-        metadata.as_ptr(),
-        metadata.len(),
-    ))
-}
 
 /// A graphics handle using the v2 graphics API.
 ///
@@ -74,14 +48,17 @@ impl V2GraphicsHandle {
     }
 
     pub fn update_plane(&self, display_id: usize, fb_id: u32, damage: Damage) -> io::Result<()> {
-        let mut cmd = ipc::UpdatePlane {
+        let cmd = ipc::UpdatePlane {
             display_id,
             fb_id,
             damage,
         };
-        unsafe {
-            sys_call(&self.file, &mut cmd, 0, &[ipc::UPDATE_PLANE, 0, 0])?;
-        }
+        libredox::call::call_wo(
+            self.file.as_raw_fd() as usize,
+            unsafe { plain::as_bytes(&cmd) },
+            CallFlags::empty(),
+            &[ipc::UPDATE_PLANE, 0, 0],
+        )?;
         Ok(())
     }
 }

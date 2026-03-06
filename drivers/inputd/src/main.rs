@@ -176,7 +176,6 @@ impl SchemeSync for InputScheme {
         let mut path_parts = path.split('/');
 
         let command = path_parts.next().ok_or(SysError::new(EINVAL))?;
-        let fd = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         let handle_ty = match command {
             "producer" => Handle::Producer,
@@ -210,7 +209,7 @@ impl SchemeSync for InputScheme {
                 }
             }
             "handle" | "handle_early" => {
-                let display = path_parts.collect::<Vec<_>>().join(".");
+                let display = path_parts.next().ok_or(SysError::new(EINVAL))?;
 
                 let needs_handoff = match command {
                     "handle_early" => self.display.is_none(),
@@ -228,7 +227,7 @@ impl SchemeSync for InputScheme {
 
                 if needs_handoff {
                     self.has_new_events = true;
-                    self.display = Some(display.clone());
+                    self.display = Some(display.to_owned());
 
                     for handle in self.handles.values_mut() {
                         match handle {
@@ -259,7 +258,7 @@ impl SchemeSync for InputScheme {
                         vec![]
                     },
                     notified: false,
-                    device: display,
+                    device: display.to_owned(),
                     is_earlyfb: command == "handle_early",
                 }
             }
@@ -273,6 +272,7 @@ impl SchemeSync for InputScheme {
 
         log::debug!("{path} channel has been opened");
 
+        let fd = self.next_id.fetch_add(1, Ordering::SeqCst);
         self.handles.insert(fd, handle_ty);
         Ok(OpenResult::ThisScheme {
             number: fd,
