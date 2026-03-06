@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use core::ffi::CStr;
 use core::str::FromStr;
 use hashbrown::HashMap;
+use redox_scheme::Socket;
 
 use syscall::CallFlags;
 use syscall::data::{GlobalSchemes, KernelSchemeInfo};
@@ -128,7 +129,8 @@ pub fn main() -> ! {
         &this_thr_fd,
         scheme_creation_cap,
         kernel_schemes,
-        |write_fd, scheme_creation_cap, _, _| unsafe {
+        false,
+        |write_fd, socket, _, _| unsafe {
             // Creating a reference to NULL is UB. Mask the UB for now using black_box.
             // FIXME use a raw pointer and inline asm for reading instead for the initfs header.
             let initfs_start = core::ptr::addr_of!(__initfs_header);
@@ -137,7 +139,7 @@ pub fn main() -> ! {
             crate::initfs::run(
                 core::slice::from_raw_parts(initfs_start, initfs_length),
                 write_fd,
-                scheme_creation_cap,
+                socket,
             );
         },
     );
@@ -148,23 +150,28 @@ pub fn main() -> ! {
         &this_thr_fd,
         scheme_creation_cap,
         kernel_schemes,
-        |write_fd, scheme_creation_cap, auth, mut kernel_schemes| {
+        true,
+        |write_fd, socket, auth, mut kernel_schemes| {
             let event = kernel_schemes
                 .0
                 .remove(&GlobalSchemes::Event)
                 .expect("failed to get event fd");
             drop(kernel_schemes);
-            crate::procmgr::run(write_fd, auth, event, scheme_creation_cap)
+            crate::procmgr::run(write_fd, socket, auth, event)
         },
     );
 
+    let scheme_creation_cap_dup = scheme_creation_cap
+        .dup(b"")
+        .expect("failed to dup scheme creation cap");
     let (_, _, _, initns_fd) = spawn(
         "init namespace manager",
         auth,
         &this_thr_fd,
         scheme_creation_cap,
         kernel_schemes,
-        |write_fd, scheme_creation_cap, _, kernel_schemes| {
+        false,
+        |write_fd, socket, _, kernel_schemes| {
             let mut schemes = HashMap::default();
             for (scheme, fd) in kernel_schemes.0.into_iter() {
                 schemes.insert(scheme.as_str().to_string(), Arc::new(fd));
@@ -177,7 +184,7 @@ pub fn main() -> ! {
             );
             schemes.insert("initfs".to_string(), Arc::new(initfs_fd));
 
-            crate::initnsmgr::run(write_fd, schemes, scheme_creation_cap)
+            crate::initnsmgr::run(write_fd, socket, schemes, scheme_creation_cap_dup)
         },
     );
 
@@ -264,7 +271,8 @@ pub(crate) fn spawn(
     this_thr_fd: &FdGuardUpper,
     scheme_creation_cap: FdGuard,
     kernel_schemes: KernelSchemeMap,
-    inner: impl FnOnce(FdGuard, FdGuard, FdGuard, KernelSchemeMap) -> !,
+    nonblock: bool,
+    inner: impl FnOnce(FdGuard, Socket, FdGuard, KernelSchemeMap) -> !,
 ) -> (FdGuard, FdGuard, KernelSchemeMap, FdGuard) {
     let read = FdGuard::new(
         syscall::openat(
@@ -295,7 +303,11 @@ pub(crate) fn spawn(
         Ok(0) => {
             drop(read);
 
-            inner(write, scheme_creation_cap, auth, kernel_schemes)
+            let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), nonblock)
+                .expect("failed to open proc scheme socket");
+            drop(scheme_creation_cap);
+
+            inner(write, socket, auth, kernel_schemes)
         }
         // Return in order to execute init, as the parent.
         Ok(_) => {

@@ -382,14 +382,10 @@ impl SchemeSync for InitFsScheme {
     }
 }
 
-pub fn run(bytes: &'static [u8], sync_pipe: FdGuard, scheme_creation_cap: FdGuard) -> ! {
+pub fn run(bytes: &'static [u8], sync_pipe: FdGuard, socket: Socket) -> ! {
     log::info!("bootstrap: starting initfs scheme");
     let mut state = SchemeState::new();
     let mut scheme = InitFsScheme::new(bytes);
-
-    let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), false)
-        .expect("failed to open initfs scheme socket");
-    drop(scheme_creation_cap);
 
     // send open-capability to bootstrap
     let new_id = scheme.next_id();

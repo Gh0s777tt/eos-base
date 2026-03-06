@@ -489,12 +489,10 @@ where
 
 pub fn run(
     sync_pipe: FdGuard,
+    socket: Socket,
     schemes: HashMap<String, Arc<FdGuard>>,
     scheme_creation_cap: FdGuard,
 ) -> ! {
-    let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), false)
-        .expect("failed to open init namespace scheme socket");
-
     let mut state = SchemeState::new();
     let mut scheme = NamespaceScheme::new(&socket, schemes, scheme_creation_cap);
 

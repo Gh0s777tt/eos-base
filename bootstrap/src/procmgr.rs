@@ -45,11 +45,7 @@ enum VirtualId {
     InternalId(u64),
 }
 
-pub fn run(write_fd: FdGuard, auth: FdGuard, event: FdGuard, scheme_creation_cap: FdGuard) -> ! {
-    let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), true)
-        .expect("failed to open proc scheme socket");
-    drop(scheme_creation_cap);
-
+pub fn run(write_fd: FdGuard, socket: Socket, auth: FdGuard, event: FdGuard) -> ! {
     // TODO?
     let socket_ident = socket.inner().raw();
 
