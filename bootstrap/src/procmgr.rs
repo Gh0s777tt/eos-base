@@ -51,7 +51,7 @@ enum VirtualId {
 pub fn run(
     write_fd: FdGuard,
     auth: FdGuard,
-    kernel_schemes: &KernelSchemeMap,
+    kernel_schemes: KernelSchemeMap,
     scheme_creation_cap: FdGuard,
 ) -> ! {
     let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), true)
@@ -62,14 +62,13 @@ pub fn run(
     let socket_ident = socket.inner().raw();
 
     let queue = RawEventQueue::new(
-        *kernel_schemes
+        kernel_schemes
             .get(GlobalSchemes::Event)
-            .expect("failed to get event fd"),
+            .expect("failed to get event fd")
+            .as_raw_fd(),
     )
     .expect("failed to create event queue");
-    for fd in kernel_schemes.0.values() {
-        let _ = syscall::close(*fd);
-    }
+    drop(kernel_schemes);
 
     queue
         .subscribe(socket.inner().raw(), socket_ident, EventFlags::EVENT_READ)

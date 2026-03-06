@@ -29,6 +29,7 @@ extern crate alloc;
 use core::cell::UnsafeCell;
 
 use alloc::collections::btree_map::BTreeMap;
+use redox_rt::proc::FdGuard;
 use syscall::data::Map;
 use syscall::data::{GlobalSchemes, KernelSchemeInfo};
 use syscall::flag::MapFlags;
@@ -135,18 +136,18 @@ unsafe impl alloc::alloc::GlobalAlloc for Allocator {
     }
 }
 
-pub struct KernelSchemeMap(BTreeMap<GlobalSchemes, usize>);
+pub struct KernelSchemeMap(BTreeMap<GlobalSchemes, FdGuard>);
 impl KernelSchemeMap {
     fn new(kernel_scheme_infos: &[KernelSchemeInfo]) -> Self {
         let mut map = BTreeMap::new();
         for info in kernel_scheme_infos {
             if let Some(scheme_id) = GlobalSchemes::try_from_raw(info.scheme_id) {
-                map.insert(scheme_id, info.fd);
+                map.insert(scheme_id, FdGuard::new(info.fd));
             }
         }
         Self(map)
     }
-    fn get(&self, scheme: GlobalSchemes) -> Option<&usize> {
+    fn get(&self, scheme: GlobalSchemes) -> Option<&FdGuard> {
         self.0.get(&scheme)
     }
 }

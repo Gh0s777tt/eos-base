@@ -54,15 +54,10 @@ pub fn main() -> ! {
 
     let mut kernel_schemes = KernelSchemeMap::new(kernel_scheme_infos);
 
-    let auth = FdGuard::new(
-        kernel_schemes
-            .0
-            .remove(&GlobalSchemes::Proc)
-            .expect("failed to get proc fd"),
-    );
-    let pipe_fd = *kernel_schemes
-        .get(GlobalSchemes::Pipe)
-        .expect("failed to get pipe fd");
+    let auth = kernel_schemes
+        .0
+        .remove(&GlobalSchemes::Proc)
+        .expect("failed to get proc fd");
 
     let this_thr_fd = auth
         .dup(b"cur-context")
@@ -75,9 +70,10 @@ pub fn main() -> ! {
     let mut envs = {
         let fd = FdGuard::new(
             syscall::openat(
-                *kernel_schemes
+                kernel_schemes
                     .get(GlobalSchemes::Sys)
-                    .expect("failed to get sys fd"),
+                    .expect("failed to get sys fd")
+                    .as_raw_fd(),
                 "env",
                 O_RDONLY | O_CLOEXEC,
                 0,
@@ -126,13 +122,13 @@ pub fn main() -> ! {
         (*(core::ptr::addr_of!(__initfs_header) as *const redox_initfs::types::Header)).initfs_size
     };
 
-    let (scheme_creation_cap, auth, initfs_fd) = spawn(
+    let (scheme_creation_cap, auth, kernel_schemes, initfs_fd) = spawn(
         "initfs daemon",
         auth,
         &this_thr_fd,
         scheme_creation_cap,
-        pipe_fd,
-        |write_fd, scheme_creation_cap, _| unsafe {
+        kernel_schemes,
+        |write_fd, scheme_creation_cap, _, _| unsafe {
             // Creating a reference to NULL is UB. Mask the UB for now using black_box.
             // FIXME use a raw pointer and inline asm for reading instead for the initfs header.
             let initfs_start = core::ptr::addr_of!(__initfs_header);
@@ -141,33 +137,32 @@ pub fn main() -> ! {
             crate::initfs::run(
                 core::slice::from_raw_parts(initfs_start, initfs_length),
                 write_fd,
-                &kernel_schemes,
                 scheme_creation_cap,
             );
         },
     );
 
-    let (scheme_creation_cap, auth, proc_fd) = spawn(
+    let (scheme_creation_cap, auth, kernel_schemes, proc_fd) = spawn(
         "process manager",
         auth,
         &this_thr_fd,
         scheme_creation_cap,
-        pipe_fd,
-        |write_fd, scheme_creation_cap, auth| {
-            crate::procmgr::run(write_fd, auth, &kernel_schemes, scheme_creation_cap)
+        kernel_schemes,
+        |write_fd, scheme_creation_cap, auth, kernel_schemes| {
+            crate::procmgr::run(write_fd, auth, kernel_schemes, scheme_creation_cap)
         },
     );
 
-    let (_, _, initns_fd) = spawn(
+    let (_, _, _, initns_fd) = spawn(
         "init namespace manager",
         auth,
         &this_thr_fd,
         scheme_creation_cap,
-        pipe_fd,
-        |write_fd, scheme_creation_cap, _| {
+        kernel_schemes,
+        |write_fd, scheme_creation_cap, _, kernel_schemes| {
             let mut schemes = HashMap::default();
             for (scheme, fd) in kernel_schemes.0.into_iter() {
-                schemes.insert(scheme.as_str().to_string(), Arc::new(FdGuard::new(fd)));
+                schemes.insert(scheme.as_str().to_string(), Arc::new(fd));
             }
             schemes.insert(
                 "proc".to_string(),
@@ -263,11 +258,20 @@ pub(crate) fn spawn(
     auth: FdGuard,
     this_thr_fd: &FdGuardUpper,
     scheme_creation_cap: FdGuard,
-    pipe_fd: usize,
-    inner: impl FnOnce(FdGuard, FdGuard, FdGuard) -> !,
-) -> (FdGuard, FdGuard, FdGuard) {
+    kernel_schemes: KernelSchemeMap,
+    inner: impl FnOnce(FdGuard, FdGuard, FdGuard, KernelSchemeMap) -> !,
+) -> (FdGuard, FdGuard, KernelSchemeMap, FdGuard) {
     let read = FdGuard::new(
-        syscall::openat(pipe_fd, "", O_CLOEXEC, 0).expect("failed to open sync read pipe"),
+        syscall::openat(
+            kernel_schemes
+                .get(GlobalSchemes::Pipe)
+                .expect("failed to get pipe fd")
+                .as_raw_fd(),
+            "",
+            O_CLOEXEC,
+            0,
+        )
+        .expect("failed to open sync read pipe"),
     );
 
     // The write pipe will not inherit O_CLOEXEC, but is closed by the daemon later.
@@ -286,7 +290,7 @@ pub(crate) fn spawn(
         Ok(0) => {
             drop(read);
 
-            inner(write, scheme_creation_cap, auth)
+            inner(write, scheme_creation_cap, auth, kernel_schemes)
         }
         // Return in order to execute init, as the parent.
         Ok(_) => {
@@ -311,7 +315,12 @@ pub(crate) fn spawn(
                 }
             }
 
-            (scheme_creation_cap, auth, FdGuard::new(new_fd))
+            (
+                scheme_creation_cap,
+                auth,
+                kernel_schemes,
+                FdGuard::new(new_fd),
+            )
         }
     }
 }

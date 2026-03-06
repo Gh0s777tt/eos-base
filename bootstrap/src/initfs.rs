@@ -24,8 +24,6 @@ use syscall::error::*;
 use syscall::flag::*;
 use syscall::schemev2::NewFdFlags;
 
-use crate::KernelSchemeMap;
-
 enum Handle {
     Node(Node),
     SchemeRoot,
@@ -384,12 +382,7 @@ impl SchemeSync for InitFsScheme {
     }
 }
 
-pub fn run(
-    bytes: &'static [u8],
-    sync_pipe: FdGuard,
-    kernel_schemes: &KernelSchemeMap,
-    scheme_creation_cap: FdGuard,
-) -> ! {
+pub fn run(bytes: &'static [u8], sync_pipe: FdGuard, scheme_creation_cap: FdGuard) -> ! {
     log::info!("bootstrap: starting initfs scheme");
     let mut state = SchemeState::new();
     let mut scheme = InitFsScheme::new(bytes);
@@ -397,10 +390,6 @@ pub fn run(
     let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), false)
         .expect("failed to open initfs scheme socket");
     drop(scheme_creation_cap);
-
-    for fd in kernel_schemes.0.values() {
-        let _ = syscall::close(*fd);
-    }
 
     // send open-capability to bootstrap
     let new_id = scheme.next_id();
