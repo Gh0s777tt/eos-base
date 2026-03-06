@@ -163,26 +163,33 @@ pub fn main() -> ! {
         &this_thr_fd,
         scheme_creation_cap,
         pipe_fd,
-        move |write_fd, scheme_creation_cap| {
+        |write_fd, scheme_creation_cap| {
             let mut schemes = HashMap::default();
             for (scheme, fd) in kernel_schemes.0.into_iter() {
                 schemes.insert(scheme.as_str().to_string(), Arc::new(FdGuard::new(fd)));
             }
-            schemes.insert("proc".to_string(), Arc::new(FdGuard::new(proc_fd)));
-            schemes.insert("initfs".to_string(), Arc::new(FdGuard::new(initfs_fd)));
+            schemes.insert(
+                "proc".to_string(),
+                // A bit dirty, but necessary as the parent process still needs access to it. Rust
+                // doesn't know that the fd got cloned by fork.
+                Arc::new(FdGuard::new(proc_fd.as_raw_fd())),
+            );
+            schemes.insert("initfs".to_string(), Arc::new(initfs_fd));
 
             crate::initnsmgr::run(write_fd, schemes, scheme_creation_cap)
         },
     );
 
-    let (init_proc_fd, init_thr_fd) = unsafe { make_init(proc_fd) };
+    let (init_proc_fd, init_thr_fd) = unsafe { make_init(proc_fd.take()) };
     // from this point, this_thr_fd is no longer valid
 
     const CWD: &[u8] = b"/scheme/initfs";
-    let cwd_fd =
-        FdGuard::new(syscall::openat(initfs_fd, "", O_STAT, 0).expect("failed to open cwd fd"))
-            .to_upper()
-            .unwrap();
+    let cwd_fd = FdGuard::new(
+        syscall::openat(initns_fd.as_raw_fd(), "/scheme/initfs", O_STAT, 0)
+            .expect("failed to open cwd fd"),
+    )
+    .to_upper()
+    .unwrap();
     let extrainfo = ExtraInfo {
         cwd: Some(CWD),
         sigprocmask: 0,
@@ -190,14 +197,15 @@ pub fn main() -> ! {
         umask: redox_rt::sys::get_umask(),
         thr_fd: init_thr_fd.as_raw_fd(),
         proc_fd: init_proc_fd.as_raw_fd(),
-        ns_fd: Some(initns_fd),
+        ns_fd: Some(initns_fd.take()),
         cwd_fd: Some(cwd_fd.as_raw_fd()),
     };
 
-    let path = "/bin/init";
+    let path = "/scheme/initfs/bin/init";
 
     let image_file = FdGuard::new(
-        syscall::openat(initfs_fd, path, O_RDONLY | O_CLOEXEC, 0).expect("failed to open init"),
+        syscall::openat(extrainfo.ns_fd.unwrap(), path, O_RDONLY | O_CLOEXEC, 0)
+            .expect("failed to open init"),
     )
     .to_upper()
     .unwrap();
@@ -224,7 +232,7 @@ pub fn main() -> ! {
     let interp_cstr = CStr::from_bytes_with_nul(&interp_path).expect("interpreter not valid C str");
     let interp_file = FdGuard::new(
         syscall::openat(
-            initns_fd, // initns, not initfs!
+            extrainfo.ns_fd.unwrap(), // initns, not initfs!
             interp_cstr.to_str().expect("interpreter not UTF-8"),
             O_RDONLY | O_CLOEXEC,
             0,
@@ -256,7 +264,7 @@ pub(crate) fn spawn(
     scheme_creation_cap: FdGuard,
     pipe_fd: usize,
     inner: impl FnOnce(FdGuard, FdGuard) -> !,
-) -> (FdGuard, usize) {
+) -> (FdGuard, FdGuard) {
     let read = FdGuard::new(
         syscall::openat(pipe_fd, "", O_CLOEXEC, 0).expect("failed to open sync read pipe"),
     );
@@ -297,7 +305,7 @@ pub(crate) fn spawn(
                 }
             }
 
-            return (scheme_creation_cap, new_fd);
+            return (scheme_creation_cap, FdGuard::new(new_fd));
         }
     }
     inner(write, scheme_creation_cap)
