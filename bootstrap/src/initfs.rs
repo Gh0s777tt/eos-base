@@ -388,15 +388,15 @@ pub fn run(
     bytes: &'static [u8],
     sync_pipe: FdGuard,
     kernel_schemes: &KernelSchemeMap,
-    scheme_creation_cap: usize,
+    scheme_creation_cap: FdGuard,
 ) -> ! {
     log::info!("bootstrap: starting initfs scheme");
     let mut state = SchemeState::new();
     let mut scheme = InitFsScheme::new(bytes);
 
-    let socket = Socket::create_inner(scheme_creation_cap, false)
+    let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), false)
         .expect("failed to open initfs scheme socket");
-    let _ = syscall::close(scheme_creation_cap);
+    drop(scheme_creation_cap);
 
     for fd in kernel_schemes.0.values() {
         let _ = syscall::close(*fd);

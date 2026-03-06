@@ -5,10 +5,10 @@ use core::ffi::CStr;
 use core::str::FromStr;
 use hashbrown::HashMap;
 
+use syscall::CallFlags;
 use syscall::data::{GlobalSchemes, KernelSchemeInfo};
 use syscall::flag::{O_CLOEXEC, O_RDONLY, O_STAT};
-use syscall::CallFlags;
-use syscall::{Error, EINTR};
+use syscall::{EINTR, Error};
 
 use redox_rt::proc::*;
 
@@ -49,8 +49,7 @@ pub fn main() -> ! {
     };
     let scheme_creation_cap = unsafe {
         let base_ptr = cursor as *const u8;
-        let cap = *(base_ptr as *const usize);
-        cap
+        FdGuard::new(*(base_ptr as *const usize))
     };
 
     let kernel_schemes = KernelSchemeMap::new(kernel_scheme_infos);
@@ -126,12 +125,13 @@ pub fn main() -> ! {
         (*(core::ptr::addr_of!(__initfs_header) as *const redox_initfs::types::Header)).initfs_size
     };
 
-    let initfs_fd = spawn(
+    let (scheme_creation_cap, initfs_fd) = spawn(
         "initfs daemon",
         &auth,
         &this_thr_fd,
+        scheme_creation_cap,
         pipe_fd,
-        |write_fd| unsafe {
+        |write_fd, scheme_creation_cap| unsafe {
             // Creating a reference to NULL is UB. Mask the UB for now using black_box.
             // FIXME use a raw pointer and inline asm for reading instead for the initfs header.
             let initfs_start = core::ptr::addr_of!(__initfs_header);
@@ -146,20 +146,24 @@ pub fn main() -> ! {
         },
     );
 
-    let proc_fd = spawn(
+    let (scheme_creation_cap, proc_fd) = spawn(
         "process manager",
         &auth,
         &this_thr_fd,
+        scheme_creation_cap,
         pipe_fd,
-        |write_fd| crate::procmgr::run(write_fd, &auth, &kernel_schemes, scheme_creation_cap),
+        |write_fd, scheme_creation_cap| {
+            crate::procmgr::run(write_fd, &auth, &kernel_schemes, scheme_creation_cap)
+        },
     );
 
-    let initns_fd = spawn(
+    let (_, initns_fd) = spawn(
         "init namespace manager",
         &auth,
         &this_thr_fd,
+        scheme_creation_cap,
         pipe_fd,
-        move |write_fd| {
+        move |write_fd, scheme_creation_cap| {
             let mut schemes = HashMap::default();
             for (scheme, fd) in kernel_schemes.0.into_iter() {
                 schemes.insert(scheme.as_str().to_string(), Arc::new(FdGuard::new(fd)));
@@ -249,9 +253,10 @@ pub(crate) fn spawn(
     name: &str,
     auth: &FdGuard,
     this_thr_fd: &FdGuardUpper,
+    scheme_creation_cap: FdGuard,
     pipe_fd: usize,
-    inner: impl FnOnce(FdGuard) -> !,
-) -> usize {
+    inner: impl FnOnce(FdGuard, FdGuard) -> !,
+) -> (FdGuard, usize) {
     let read = FdGuard::new(
         syscall::openat(pipe_fd, "", O_CLOEXEC, 0).expect("failed to open sync read pipe"),
     );
@@ -292,8 +297,8 @@ pub(crate) fn spawn(
                 }
             }
 
-            return new_fd;
+            return (scheme_creation_cap, new_fd);
         }
     }
-    inner(write)
+    inner(write, scheme_creation_cap)
 }

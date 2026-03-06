@@ -52,11 +52,11 @@ pub fn run(
     write_fd: FdGuard,
     auth: &FdGuard,
     kernel_schemes: &KernelSchemeMap,
-    scheme_creation_cap: usize,
+    scheme_creation_cap: FdGuard,
 ) -> ! {
-    let socket =
-        Socket::create_inner(scheme_creation_cap, true).expect("failed to open proc scheme socket");
-    let _ = syscall::close(scheme_creation_cap);
+    let socket = Socket::create_inner(scheme_creation_cap.as_raw_fd(), true)
+        .expect("failed to open proc scheme socket");
+    drop(scheme_creation_cap);
 
     // TODO?
     let socket_ident = socket.inner().raw();
