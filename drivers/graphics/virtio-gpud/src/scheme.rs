@@ -569,6 +569,10 @@ impl<'a> GpuScheme {
             displays: vec![],
         };
 
-        Ok(GraphicsScheme::new(adapter, "display.virtio-gpu".to_owned(), false))
+        Ok(GraphicsScheme::new(
+            adapter,
+            "display.virtio-gpu".to_owned(),
+            false,
+        ))
     }
 }
