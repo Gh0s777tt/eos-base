@@ -117,10 +117,16 @@ pub fn main() -> ! {
     unsafe extern "C" {
         // The linker script will define this as the location of the initfs header.
         static __initfs_header: u8;
+
+        // The linker script will define this as the end of the executable (excluding initfs).
+        static __bss_end: u8;
     }
 
+    let initfs_start = core::ptr::addr_of!(__initfs_header);
     let initfs_length = unsafe {
-        (*(core::ptr::addr_of!(__initfs_header) as *const redox_initfs::types::Header)).initfs_size
+        (*(core::ptr::addr_of!(__initfs_header) as *const redox_initfs::types::Header))
+            .initfs_size
+            .get() as usize
     };
 
     let (scheme_creation_cap, auth, kernel_schemes, initfs_fd) = spawn(
@@ -131,11 +137,6 @@ pub fn main() -> ! {
         kernel_schemes,
         false,
         |write_fd, socket, _, _| unsafe {
-            // Creating a reference to NULL is UB. Mask the UB for now using black_box.
-            // FIXME use a raw pointer and inline asm for reading instead for the initfs header.
-            let initfs_start = core::ptr::addr_of!(__initfs_header);
-            let initfs_length = initfs_length.get() as usize;
-
             crate::initfs::run(
                 core::slice::from_raw_parts(initfs_start, initfs_length),
                 write_fd,
@@ -143,6 +144,18 @@ pub fn main() -> ! {
             );
         },
     );
+
+    // Unmap initfs data as only the initfs scheme implementation needs it.
+    unsafe {
+        let executable_end = core::ptr::addr_of!(__bss_end)
+            .add(core::ptr::addr_of!(__bss_end).align_offset(syscall::PAGE_SIZE));
+        syscall::funmap(
+            executable_end as usize,
+            initfs_length.next_multiple_of(syscall::PAGE_SIZE)
+                - (executable_end.offset_from(initfs_start) as usize),
+        )
+        .unwrap();
+    }
 
     let (scheme_creation_cap, auth, kernel_schemes, proc_fd) = spawn(
         "process manager",
