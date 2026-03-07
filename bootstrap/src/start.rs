@@ -82,7 +82,5 @@ pub unsafe extern "C" fn start() -> ! {
         .expect("mprotect failed for rest of memory");
     }
 
-    // FIXME make the initfs read-only
-
     crate::exec::main();
 }
