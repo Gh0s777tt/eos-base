@@ -1,6 +1,5 @@
 use driver_graphics::GraphicsScheme;
 use event::{user_data, EventQueue};
-use inputd::DisplayHandle;
 use pcid_interface::{irq_helpers::pci_allocate_interrupt_vector, PciFunctionHandle};
 use std::{
     io::{Read, Write},
@@ -35,9 +34,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
 
     let irq_file = pci_allocate_interrupt_vector(&mut pcid_handle, "ihdgd");
 
-    let mut inputd_display_handle = DisplayHandle::new(format!("display.ihdg.{}", name)).unwrap();
-
-    let mut scheme = GraphicsScheme::new(device, format!("display.ihdg.{}", name));
+    let mut scheme = GraphicsScheme::new(device, format!("display.ihdg.{}", name), false);
 
     user_data! {
         enum Source {
@@ -51,7 +48,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
         EventQueue::new().expect("ihdgd: failed to create event queue");
     event_queue
         .subscribe(
-            inputd_display_handle.inner().as_raw_fd() as usize,
+            scheme.inputd_event_handle().as_raw_fd() as usize,
             Source::Input,
             event::EventFlags::READ,
         )
@@ -81,14 +78,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
         .chain(event_queue.map(|e| e.expect("ihdgd: failed to get next event").user_data))
     {
         match event {
-            Source::Input => {
-                while let Some(vt_event) = inputd_display_handle
-                    .read_vt_event()
-                    .expect("ihdgd: failed to read display handle")
-                {
-                    scheme.handle_vt_event(vt_event);
-                }
-            }
+            Source::Input => scheme.handle_vt_events(),
             Source::Irq => {
                 let mut irq = [0; 8];
                 irq_file.irq_handle().read(&mut irq).unwrap();

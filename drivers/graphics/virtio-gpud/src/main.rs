@@ -525,7 +525,7 @@ fn deamon(deamon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow:
 
     device.transport.run_device();
 
-    let (mut scheme, mut inputd_handle) = scheme::GpuScheme::new(
+    let mut scheme = scheme::GpuScheme::new(
         config,
         control_queue.clone(),
         cursor_queue.clone(),
@@ -546,7 +546,7 @@ fn deamon(deamon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow:
         EventQueue::new().expect("virtio-gpud: failed to create event queue");
     event_queue
         .subscribe(
-            inputd_handle.inner().as_raw_fd() as usize,
+            scheme.inputd_event_handle().as_raw_fd() as usize,
             Source::Input,
             event::EventFlags::READ,
         )
@@ -572,14 +572,7 @@ fn deamon(deamon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow:
         .chain(event_queue.map(|e| e.expect("virtio-gpud: failed to get next event").user_data))
     {
         match event {
-            Source::Input => {
-                while let Some(vt_event) = inputd_handle
-                    .read_vt_event()
-                    .expect("virtio-gpud: failed to read display handle")
-                {
-                    scheme.handle_vt_event(vt_event);
-                }
-            }
+            Source::Input => scheme.handle_vt_events(),
             Source::Scheme => {
                 scheme
                     .tick()

@@ -19,7 +19,6 @@ driver-graphics = { path = "../driver-graphics" }
 graphics-ipc = { path = "../graphics-ipc" }
 virtio-core = { path = "../../virtio-core" }
 pcid = { path = "../../pcid" }
-inputd = { path = "../../inputd" }
 
 redox_event.workspace = true
 redox_syscall.workspace = true

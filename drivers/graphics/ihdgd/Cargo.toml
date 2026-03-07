@@ -20,7 +20,6 @@ common = { path = "../../common" }
 daemon = { path = "../../../daemon" }
 driver-graphics = { path = "../driver-graphics" }
 graphics-ipc = { path = "../graphics-ipc" }
-inputd = { path = "../../inputd" }
 pcid = { path = "../../pcid" }
 
 libredox.workspace = true

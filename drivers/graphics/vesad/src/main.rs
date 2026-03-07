@@ -3,7 +3,6 @@ extern crate syscall;
 
 use driver_graphics::GraphicsScheme;
 use event::{user_data, EventQueue};
-use inputd::DisplayHandle;
 use std::collections::HashMap;
 use std::env;
 use std::os::fd::AsRawFd;
@@ -84,9 +83,8 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         };
     }
 
-    let mut inputd_display_handle = DisplayHandle::new_early("display.vesa").unwrap();
-
-    let mut scheme = GraphicsScheme::new(FbAdapter { framebuffers }, "display.vesa".to_owned());
+    let mut scheme =
+        GraphicsScheme::new(FbAdapter { framebuffers }, "display.vesa".to_owned(), true);
 
     user_data! {
         enum Source {
@@ -99,7 +97,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         EventQueue::new().expect("vesad: failed to create event queue");
     event_queue
         .subscribe(
-            inputd_display_handle.inner().as_raw_fd() as usize,
+            scheme.inputd_event_handle().as_raw_fd() as usize,
             Source::Input,
             event::EventFlags::READ,
         )
@@ -122,14 +120,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         .chain(event_queue.map(|e| e.expect("vesad: failed to get next event").user_data))
     {
         match event {
-            Source::Input => {
-                while let Some(vt_event) = inputd_display_handle
-                    .read_vt_event()
-                    .expect("vesad: failed to read display handle")
-                {
-                    scheme.handle_vt_event(vt_event);
-                }
-            }
+            Source::Input => scheme.handle_vt_events(),
             Source::Scheme => {
                 scheme
                     .tick()
