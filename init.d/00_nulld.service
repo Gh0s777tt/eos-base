@@ -3,5 +3,6 @@ description = "/dev/null"
 default_dependencies = false
 
 [service]
-cmd = "nulld"
+cmd = "zerod"
+args = ["null"]
 type = { scheme = "null" }

@@ -14,10 +14,10 @@ fn main() {
 }
 
 fn daemon(daemon: daemon::SchemeDaemon) -> ! {
-    let ty = match &*std::env::args().next().unwrap() {
-        "nulld" => Ty::Null,
-        "zerod" => Ty::Zero,
-        _ => panic!("needs to be called as either nulld or zerod"),
+    let ty = match &*std::env::args().nth(1).unwrap() {
+        "null" => Ty::Null,
+        "zero" => Ty::Zero,
+        _ => panic!("needs to be called with either null or zero as argument"),
     };
 
     let socket = Socket::create().expect("zerod: failed to create zero scheme");
