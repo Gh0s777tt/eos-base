@@ -16,6 +16,15 @@ SECTIONS {
   .rodata : {
     __rodata_start = .;
     *(.rodata*)
+  }
+  .data.rel.ro : {
+    *(.data.rel.ro*)
+  }
+  .got : {
+    *(.got)
+  }
+  .got.plt : {
+    *(.got.plt)
     . = ALIGN(4096);
     __rodata_end = .;
   }
@@ -23,7 +32,6 @@ SECTIONS {
     __data_start = .;
     *(.data*)
     *(.sdata*)
-    *(.got*)
     . = ALIGN(4096);
     __data_end = .;
 
