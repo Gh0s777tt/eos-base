@@ -54,6 +54,9 @@ impl Namespace {
     fn get_scheme_fd(&self, scheme: &str) -> Option<&Arc<FdGuard>> {
         self.schemes.get(scheme)
     }
+    fn remove_scheme(&mut self, scheme: &str) -> Option<()> {
+        self.schemes.remove(scheme).map(|_| ())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -324,21 +327,27 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
     }
 
     fn unlinkat(&mut self, fd: usize, path: &str, flags: usize, ctx: &CallerCtx) -> Result<()> {
-        let ns_access = {
-            let handle = self.handles.get(&fd);
-            match handle {
-                Some(Handle::Access(access)) => Some(access),
-                _ => None,
-            }
-        }
-        .ok_or_else(|| {
+        let ns_access = self.get_ns_access(fd).ok_or_else(|| {
             error!("Namespace with ID {} not found", fd);
             Error::new(ENOENT)
         })?;
-        let ns = ns_access.namespace.borrow();
+        let mut ns = ns_access.namespace.borrow_mut();
 
         let redox_path = RedoxPath::from_absolute(path).ok_or(Error::new(EINVAL))?;
         let (scheme, reference) = redox_path.as_parts().ok_or(Error::new(EINVAL))?;
+        if reference.as_ref().is_empty() {
+            if !ns_access.has_permission(NsPermissions::DELETE) {
+                error!("Permission denied to remove scheme for namespace {}", fd);
+                return Err(Error::new(EACCES));
+            }
+            match ns.remove_scheme(scheme.as_ref()) {
+                Some(_) => return Ok(()),
+                None => {
+                    error!("Scheme {} not found in namespace", scheme);
+                    return Err(Error::new(ENODEV));
+                }
+            }
+        }
         let Some(cap_fd) = ns.get_scheme_fd(scheme.as_ref()) else {
             error!("Scheme {} not found in namespace", scheme);
             return Err(Error::new(ENODEV));
