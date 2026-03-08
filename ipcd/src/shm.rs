@@ -173,6 +173,24 @@ impl SchemeSync for ShmScheme {
 
         Ok(())
     }
+    fn fsize(&mut self, id: usize, _ctx: &CallerCtx) -> Result<u64> {
+        let path = self
+            .handles
+            .get(&id)
+            .and_then(Handle::as_shm)
+            .ok_or(Error::new(EBADF))?;
+        let size = match self
+            .maps
+            .get(path)
+            .expect("handle pointing to nothing")
+            .buffer
+        {
+            Some(ref map) => map.len(),
+            None => 0,
+        };
+
+        Ok(size as u64)
+    }
     fn ftruncate(&mut self, id: usize, len: u64, _ctx: &CallerCtx) -> Result<()> {
         let path = self
             .handles
