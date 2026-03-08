@@ -25,9 +25,8 @@ impl Handle {
 // TODO: Move to relibc
 const AT_REMOVEDIR: usize = 0x200;
 
-#[derive(Default)]
 pub struct ShmHandle {
-    buffer: Option<MmapGuard>,
+    buffer: MmapGuard,
     refs: usize,
     unlinked: bool,
 }
@@ -80,7 +79,11 @@ impl SchemeSync for ShmScheme {
                 if flags & syscall::O_CREAT == 0 {
                     return Err(Error::new(ENOENT));
                 }
-                e.insert(ShmHandle::default())
+                e.insert(ShmHandle {
+                    buffer: MmapGuard::new(),
+                    refs: 0,
+                    unlinked: false,
+                })
             }
         };
         entry.refs += 1;
@@ -154,15 +157,12 @@ impl SchemeSync for ShmScheme {
             .get(&id)
             .and_then(Handle::as_shm)
             .ok_or(Error::new(EBADF))?;
-        let size = match self
+        let size = self
             .maps
             .get(path)
             .expect("handle pointing to nothing")
             .buffer
-        {
-            Some(ref map) => map.len(),
-            None => 0,
-        };
+            .len();
 
         //TODO: fill in more items?
         *stat = Stat {
@@ -179,15 +179,12 @@ impl SchemeSync for ShmScheme {
             .get(&id)
             .and_then(Handle::as_shm)
             .ok_or(Error::new(EBADF))?;
-        let size = match self
+        let size = self
             .maps
             .get(path)
             .expect("handle pointing to nothing")
             .buffer
-        {
-            Some(ref map) => map.len(),
-            None => 0,
-        };
+            .len();
 
         Ok(size as u64)
     }
@@ -197,22 +194,11 @@ impl SchemeSync for ShmScheme {
             .get(&id)
             .and_then(Handle::as_shm)
             .ok_or(Error::new(EBADF))?;
-        match self
-            .maps
+        self.maps
             .get_mut(path)
             .expect("handle pointing to nothing")
             .buffer
-        {
-            Some(_) => {
-                //TODO: Reallocating is unsafe here as we are mixing ftruncate with mmap
-                //      which requires the memory to be contiguous.
-                Err(Error::new(EIO))
-            }
-            ref mut buf @ None => {
-                *buf = Some(MmapGuard::alloc(len as usize)?);
-                Ok(())
-            }
-        }
+            .grow_to(len as usize)
     }
     fn mmap_prep(
         &mut self,
@@ -227,27 +213,11 @@ impl SchemeSync for ShmScheme {
             .get(&id)
             .and_then(Handle::as_shm)
             .ok_or(Error::new(EBADF))?;
-        let total_size = offset as usize + size;
-        match self
-            .maps
+        self.maps
             .get_mut(path)
             .expect("handle pointing to nothing")
             .buffer
-        {
-            Some(ref mut buf) => {
-                // TODO: This will not work well if there's multiple segments!
-                let segment = buf.segments.first().ok_or_else(|| Error::new(ERANGE))?;
-                if total_size > segment.size {
-                    return Err(Error::new(ERANGE));
-                }
-                Ok(segment.base + offset as usize)
-            }
-            //TODO: this should be only handled by ftruncate
-            ref mut buf @ None => {
-                *buf = Some(MmapGuard::alloc(size)?);
-                Ok(buf.as_mut().unwrap().as_ptr() + offset as usize)
-            }
-        }
+            .mmap(offset as usize, size)
     }
     fn read(
         &mut self,
@@ -262,15 +232,11 @@ impl SchemeSync for ShmScheme {
             .get(&id)
             .and_then(Handle::as_shm)
             .ok_or(Error::new(EBADF))?;
-        match self
-            .maps
+        self.maps
             .get_mut(path)
             .expect("handle pointing to nothing")
             .buffer
-        {
-            Some(ref mut map) => map.read(offset as usize, buf),
-            None => Err(Error::new(ERANGE)),
-        }
+            .read(offset as usize, buf)
     }
     fn write(
         &mut self,
@@ -285,21 +251,11 @@ impl SchemeSync for ShmScheme {
             .get(&id)
             .and_then(Handle::as_shm)
             .ok_or(Error::new(EBADF))?;
-        match self
-            .maps
+        self.maps
             .get_mut(path)
             .expect("handle pointing to nothing")
             .buffer
-        {
-            Some(ref mut map) => map.write(offset as usize, buf),
-            //TODO: this should be only handled by ftruncate, but relaxed because it can grow
-            ref mut newmap @ None => {
-                let mut map = MmapGuard::alloc(PAGE_SIZE)?;
-                let size = map.write(offset as usize, buf)?;
-                *newmap = Some(map);
-                Ok(size)
-            }
-        }
+            .write(offset as usize, buf)
     }
 }
 
@@ -314,19 +270,16 @@ pub struct MmapGuard {
 }
 
 impl MmapGuard {
-    pub fn alloc(len: usize) -> Result<Self> {
-        let mut guard = Self {
+    pub fn new() -> Self {
+        Self {
             segments: Vec::new(),
             len: 0,
-        };
-        if len > 0 {
-            guard.grow_to(len)?;
         }
-        Ok(guard)
     }
 
     fn grow_to(&mut self, new_len: usize) -> Result<()> {
         if new_len <= self.total_capacity() {
+            // FIXME clear bytes after new_len
             self.len = new_len;
             return Ok(());
         }
@@ -363,9 +316,41 @@ impl MmapGuard {
         self.len
     }
 
-    /// TODO: Flatten multiple segment into one
-    pub fn as_ptr(&self) -> usize {
-        self.segments.first().map(|s| s.base).unwrap_or(0)
+    pub fn mmap(&mut self, offset: usize, size: usize) -> Result<usize> {
+        let total_size = offset + size;
+
+        if total_size
+            > self
+                .segments
+                .iter()
+                .map(|segment| segment.size)
+                .sum::<usize>()
+        {
+            return Err(Error::new(ERANGE));
+        }
+
+        if size == 0 {
+            return Ok(0);
+        }
+
+        let mut seg_offset = 0;
+        for segment in &self.segments {
+            if offset > seg_offset + segment.size {
+                seg_offset += segment.size;
+                continue;
+            }
+
+            if total_size > seg_offset + segment.size {
+                // Crossing two segments
+                // TODO: Handle mmap that cross segments. Likely needs kernel support.
+                eprintln!("shm: mmap across backing segments not supported");
+                return Err(Error::new(EINVAL));
+            }
+
+            return Ok(segment.base + (offset - seg_offset));
+        }
+
+        unreachable!()
     }
 
     pub fn read(&self, mut offset: usize, buf: &mut [u8]) -> Result<usize> {
