@@ -5,8 +5,8 @@ use std::{
     rc::Rc,
 };
 use syscall::{
-    data::Stat, error::*, schemev2::NewFdFlags, Error, Map, MapFlags, Result, MAP_PRIVATE,
-    PAGE_SIZE, PROT_READ, PROT_WRITE,
+    data::Stat, error::*, schemev2::NewFdFlags, Error, Map, MapFlags, MremapFlags, Result,
+    MAP_PRIVATE, PAGE_SIZE, PROT_READ, PROT_WRITE,
 };
 
 enum Handle {
@@ -259,20 +259,15 @@ impl SchemeSync for ShmScheme {
     }
 }
 
-pub struct MmapSegment {
-    base: usize,
-    size: usize,
-}
-
 pub struct MmapGuard {
-    segments: Vec<MmapSegment>,
+    base: *mut (),
     len: usize,
 }
 
 impl MmapGuard {
     pub fn new() -> Self {
         Self {
-            segments: Vec::new(),
+            base: core::ptr::null_mut(),
             len: 0,
         }
     }
@@ -288,28 +283,36 @@ impl MmapGuard {
         let page_count = needed.div_ceil(PAGE_SIZE);
         let alloc_size = page_count * PAGE_SIZE;
 
-        let base = unsafe {
-            syscall::fmap(
-                !0,
-                &Map {
-                    offset: 0,
-                    size: alloc_size,
-                    flags: MAP_PRIVATE | PROT_READ | PROT_WRITE,
-                    address: 0,
-                },
-            )
+        let new_base = unsafe {
+            if self.base.is_null() {
+                syscall::fmap(
+                    !0,
+                    &Map {
+                        offset: 0,
+                        size: alloc_size,
+                        flags: MAP_PRIVATE | PROT_READ | PROT_WRITE,
+                        address: 0,
+                    },
+                )
+            } else {
+                syscall::syscall5(
+                    syscall::SYS_MREMAP,
+                    self.base as usize,
+                    self.len.next_multiple_of(PAGE_SIZE),
+                    0,
+                    new_len.next_multiple_of(PAGE_SIZE),
+                    MremapFlags::empty().bits() | (PROT_READ | PROT_WRITE).bits(),
+                )
+            }
         }?;
 
-        self.segments.push(MmapSegment {
-            base,
-            size: alloc_size,
-        });
+        self.base = new_base as *mut ();
         self.len = new_len;
         Ok(())
     }
 
     fn total_capacity(&self) -> usize {
-        self.segments.iter().map(|s| s.size).sum()
+        self.len.next_multiple_of(PAGE_SIZE)
     }
 
     pub fn len(&self) -> usize {
@@ -319,13 +322,7 @@ impl MmapGuard {
     pub fn mmap(&mut self, offset: usize, size: usize) -> Result<usize> {
         let total_size = offset + size;
 
-        if total_size
-            > self
-                .segments
-                .iter()
-                .map(|segment| segment.size)
-                .sum::<usize>()
-        {
+        if total_size > self.len.next_multiple_of(PAGE_SIZE) {
             return Err(Error::new(ERANGE));
         }
 
@@ -333,95 +330,45 @@ impl MmapGuard {
             return Ok(0);
         }
 
-        let mut seg_offset = 0;
-        for segment in &self.segments {
-            if offset > seg_offset + segment.size {
-                seg_offset += segment.size;
-                continue;
-            }
-
-            if total_size > seg_offset + segment.size {
-                // Crossing two segments
-                // TODO: Handle mmap that cross segments. Likely needs kernel support.
-                eprintln!("shm: mmap across backing segments not supported");
-                return Err(Error::new(EINVAL));
-            }
-
-            return Ok(segment.base + (offset - seg_offset));
-        }
-
-        unreachable!()
+        Ok(self.base.addr() + offset)
     }
 
-    pub fn read(&self, mut offset: usize, buf: &mut [u8]) -> Result<usize> {
+    pub fn read(&self, offset: usize, buf: &mut [u8]) -> Result<usize> {
         if offset >= self.len {
+            // FIXME read as zeros
             return Ok(0);
         }
 
-        let mut bytes_read = 0;
-        let mut buf_idx = 0;
-        let to_read = cmp::min(buf.len(), self.len - offset);
-
-        for seg in &self.segments {
-            if offset < seg.size {
-                let chunk_size = cmp::min(seg.size - offset, to_read - bytes_read);
-                unsafe {
-                    let src = (seg.base as *const u8).add(offset);
-                    let dst = buf.as_mut_ptr().add(buf_idx);
-                    core::ptr::copy_nonoverlapping(src, dst, chunk_size);
-                }
-                bytes_read += chunk_size;
-                buf_idx += chunk_size;
-                offset = 0;
-            } else {
-                offset -= seg.size;
-            }
-            if bytes_read >= to_read {
-                break;
-            }
+        let to_read = cmp::min(self.len - offset, buf.len());
+        unsafe {
+            let src = (self.base as *const u8).add(offset);
+            let dst = buf.as_mut_ptr();
+            core::ptr::copy_nonoverlapping(src, dst, to_read);
         }
 
-        Ok(bytes_read)
+        Ok(to_read)
     }
 
     pub fn write(&mut self, offset: usize, buf: &[u8]) -> Result<usize> {
         let end = offset.checked_add(buf.len()).ok_or(Error::new(ERANGE))?;
+        self.grow_to(end)?;
 
-        if end > self.total_capacity() {
-            self.grow_to(end)?;
-        } else if end > self.len {
-            self.len = end;
+        let to_write = cmp::min(self.len - offset, buf.len());
+        unsafe {
+            let src = buf.as_ptr();
+            let dst = (self.base as *mut u8).add(offset);
+            core::ptr::copy_nonoverlapping(src, dst, to_write);
         }
 
-        let mut bytes_written = 0;
-        let mut current_offset = offset;
-
-        for seg in &self.segments {
-            if current_offset < seg.size {
-                let chunk_size = cmp::min(seg.size - current_offset, buf.len() - bytes_written);
-                unsafe {
-                    let src = buf.as_ptr().add(bytes_written);
-                    let dst = (seg.base as *mut u8).add(current_offset);
-                    core::ptr::copy_nonoverlapping(src, dst, chunk_size);
-                }
-                bytes_written += chunk_size;
-                current_offset = 0;
-            } else {
-                current_offset -= seg.size;
-            }
-            if bytes_written >= buf.len() {
-                break;
-            }
-        }
-
-        Ok(bytes_written)
+        Ok(to_write)
     }
 }
 
 impl Drop for MmapGuard {
     fn drop(&mut self) {
-        for seg in &self.segments {
-            let _ = unsafe { syscall::funmap(seg.base, seg.size) };
+        if !self.base.is_null() {
+            let _ =
+                unsafe { syscall::funmap(self.base.addr(), self.len.next_multiple_of(PAGE_SIZE)) };
         }
     }
 }
