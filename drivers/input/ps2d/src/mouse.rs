@@ -1,6 +1,7 @@
 use crate::controller::Ps2;
 use std::time::Duration;
 
+pub const RESET_RETRIES: usize = 10;
 pub const RESET_TIMEOUT: Duration = Duration::from_millis(1000);
 pub const COMMAND_TIMEOUT: Duration = Duration::from_millis(100);
 
@@ -125,6 +126,13 @@ pub enum MouseResult {
 
 impl MouseState {
     pub fn reset(&mut self, ps2: &mut Ps2) -> MouseResult {
+        if ps2.mouse_resets < RESET_RETRIES {
+            ps2.mouse_resets += 1;
+        } else {
+            log::error!("tried to reset mouse {} times, giving up", ps2.mouse_resets);
+            *self = MouseState::None;
+            return MouseResult::None;
+        }
         match ps2.mouse_command_async(MouseCommand::Reset as u8) {
             Ok(()) => {
                 *self = MouseState::Reset;
@@ -337,7 +345,6 @@ impl MouseState {
     }
 
     pub fn handle_timeout(&mut self, ps2: &mut Ps2) -> MouseResult {
-        let mut res = MouseResult::None;
         match *self {
             MouseState::None | MouseState::Streaming { .. } => MouseResult::None,
             MouseState::Init => {
@@ -346,13 +353,10 @@ impl MouseState {
             }
             MouseState::Reset => {
                 log::warn!("timeout waiting for mouse reset");
-                //TODO: retry reset?
-                *self = MouseState::None;
-                MouseResult::None
+                self.reset(ps2)
             }
             MouseState::Bat => {
                 log::warn!("timeout waiting for BAT completion");
-                //TODO: limit number of resets
                 self.reset(ps2)
             }
             MouseState::IdentifyTouchpad { .. } => {

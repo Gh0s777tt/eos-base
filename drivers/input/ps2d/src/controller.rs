@@ -102,6 +102,8 @@ pub struct Ps2 {
     data: Pio<u8>,
     status: ReadOnly<Pio<u8>>,
     command: WriteOnly<Pio<u8>>,
+    //TODO: keep in state instead
+    pub mouse_resets: usize,
 }
 
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
@@ -109,6 +111,8 @@ pub struct Ps2 {
     data: Mmio<u8>,
     status: ReadOnly<Mmio<u8>>,
     command: WriteOnly<Mmio<u8>>,
+    //TODO: keep in state instead
+    pub mouse_resets: usize,
 }
 
 impl Ps2 {
@@ -118,6 +122,7 @@ impl Ps2 {
             data: Pio::new(0x60),
             status: ReadOnly::new(Pio::new(0x64)),
             command: WriteOnly::new(Pio::new(0x64)),
+            mouse_resets: 0,
         }
     }
 
