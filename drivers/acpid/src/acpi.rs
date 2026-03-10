@@ -279,7 +279,7 @@ impl AmlSymbols {
     pub fn aml_context_mut(
         &mut self,
         pci_fd: Option<&libredox::Fd>,
-    ) -> &mut Interpreter<AmlPhysMemHandler> {
+    ) -> Result<&mut Interpreter<AmlPhysMemHandler>, AmlEvalError> {
         if self.aml_context.is_none() {
             match self.init(pci_fd) {
                 Ok(()) => (),
@@ -290,7 +290,7 @@ impl AmlSymbols {
         }
         self.aml_context
             .as_mut()
-            .expect("AML context not initialized")
+            .ok_or(AmlEvalError::NotInitialized)
     }
 
     pub fn symbols_cache(&self) -> &FxHashMap<String, String> {
@@ -306,7 +306,9 @@ impl AmlSymbols {
     }
 
     pub fn build_cache(&mut self, pci_fd: Option<&libredox::Fd>) {
-        let aml_context = self.aml_context_mut(pci_fd);
+        let Ok(aml_context) = self.aml_context_mut(pci_fd) else {
+            return;
+        };
 
         let mut symbol_list: Vec<(AmlName, String)> = Vec::with_capacity(5000);
 
@@ -364,6 +366,8 @@ pub enum AmlEvalError {
     SerializationError,
     #[error("Failed to deserialize")]
     DeserializationError,
+    #[error("AML not initialized")]
+    NotInitialized,
 }
 impl From<AmlError> for AmlEvalError {
     fn from(value: AmlError) -> Self {
@@ -393,7 +397,7 @@ impl AcpiContext {
         args: Vec<AmlSerdeValue>,
     ) -> Result<AmlSerdeValue, AmlEvalError> {
         let mut symbols = self.aml_symbols.write();
-        let interpreter = symbols.aml_context_mut(None);
+        let interpreter = symbols.aml_context_mut(None)?;
         interpreter.acquire_global_lock(16)?;
 
         let args = args
