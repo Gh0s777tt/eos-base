@@ -249,7 +249,7 @@ impl Ps2 {
                     warn!("keyboard incorrect result of set command: {command:?} {res:02X}");
                     return Ok(res);
                 }
-                x.write(data);
+                x.write(data)?;
                 x.read()
             },
         )

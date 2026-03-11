@@ -278,14 +278,12 @@ pub fn acquire_port_io_rights() -> Result<()> {
         fn redox_cur_thrfd_v0() -> usize;
     }
     let kernel_fd = syscall::dup(unsafe { redox_cur_thrfd_v0() }, b"open_via_dup")?;
-    let res = unsafe {
-        libredox::call::call_wo(
-            kernel_fd,
-            &[],
-            syscall::CallFlags::empty(),
-            &[ProcSchemeVerb::Iopl as u64],
-        )
-    };
+    let res = libredox::call::call_wo(
+        kernel_fd,
+        &[],
+        syscall::CallFlags::empty(),
+        &[ProcSchemeVerb::Iopl as u64],
+    );
     let _ = syscall::close(kernel_fd);
     res?;
     Ok(())
@@ -310,9 +308,7 @@ impl VirtaddrTranslationHandle {
     /// Translate physical => virtual.
     pub fn translate(&self, physical: usize) -> Result<usize> {
         let mut buf = physical.to_ne_bytes();
-        unsafe {
-            libredox::call::call_ro(self.fd.raw(), &mut buf, syscall::CallFlags::empty(), &[])?;
-        }
+        libredox::call::call_ro(self.fd.raw(), &mut buf, syscall::CallFlags::empty(), &[])?;
         Ok(usize::from_ne_bytes(buf))
     }
 }

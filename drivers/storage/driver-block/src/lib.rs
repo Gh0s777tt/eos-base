@@ -16,8 +16,8 @@ use redox_scheme::{CallerCtx, OpenResult, RequestKind, Response, SignalBehavior,
 use syscall::dirent::DirentBuf;
 use syscall::schemev2::NewFdFlags;
 use syscall::{
-    CallFlags, Error, Result, Stat, EACCES, EAGAIN, EBADF, EINTR, EINVAL, EISDIR, ENOENT, ENOLCK,
-    EOPNOTSUPP, EOVERFLOW, EWOULDBLOCK, MODE_DIR, MODE_FILE, O_DIRECTORY, O_STAT,
+    Error, Result, Stat, EACCES, EAGAIN, EBADF, EINTR, EINVAL, EISDIR, ENOENT, ENOLCK, EOPNOTSUPP,
+    EOVERFLOW, EWOULDBLOCK, MODE_DIR, MODE_FILE, O_DIRECTORY, O_STAT,
 };
 
 /// Split the read operation into a series of block reads.
@@ -339,7 +339,6 @@ impl<T: Disk> DiskScheme<T> {
                     self.inner.on_close(id);
                     continue;
                 }
-                RequestKind::RecvFd(_) => continue,
                 RequestKind::OnDetach { .. } => continue,
             };
             self.inner

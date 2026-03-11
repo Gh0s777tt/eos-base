@@ -551,12 +551,12 @@ impl XhciClientHandle {
         Ok(String::from_utf8(buf)?)
     }
     pub fn attach(&self) -> result::Result<(), XhciClientHandleError> {
-        let mut file = self.fd.openat("attach", libredox::flag::O_WRONLY, 0)?;
+        let file = self.fd.openat("attach", libredox::flag::O_WRONLY, 0)?;
         let _bytes_written = file.write(&[])?;
         Ok(())
     }
     pub fn detach(&self) -> result::Result<(), XhciClientHandleError> {
-        let mut file = self.fd.openat("detach", libredox::flag::O_WRONLY, 0)?;
+        let file = self.fd.openat("detach", libredox::flag::O_WRONLY, 0)?;
         let _bytes_written = file.write(&[])?;
         Ok(())
     }
@@ -569,7 +569,7 @@ impl XhciClientHandle {
         req: &ConfigureEndpointsReq,
     ) -> result::Result<(), XhciClientHandleError> {
         let json = serde_json::to_vec(req)?;
-        let mut file = self.fd.openat("configure", libredox::flag::O_WRONLY, 0)?;
+        let file = self.fd.openat("configure", libredox::flag::O_WRONLY, 0)?;
         let json_bytes_written = file.write(&json)?;
         if json_bytes_written != json.len() {
             return Err(XhciClientHandleError::InvalidResponse(Invalid(

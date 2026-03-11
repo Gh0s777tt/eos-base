@@ -200,7 +200,7 @@ impl SchemeSync for Sb16 {
         ctx: &CallerCtx,
     ) -> Result<OpenResult> {
         {
-            let mut handles = self.handles.lock();
+            let handles = self.handles.lock();
             let handle = handles.get(&dirfd).ok_or(Error::new(EBADF))?;
             if !matches!(handle, Handle::SchemeRoot) {
                 return Err(Error::new(EACCES));
