@@ -810,6 +810,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_handle(fb_handle_id(i));
                     Ok(0)
                 }),
+                ipc::MODE_ADD_FB => ipc::DrmModeFbCmd::with(payload, |mut data| {
+                    data.set_fb_id(fb_handle_id(id_index(data.handle())));
+                    Ok(0)
+                }),
                 ipc::MODE_CREATE_DUMB => ipc::DrmModeCreateDumb::with(payload, |mut data| {
                     if data.bpp() != 32 {
                         return Err(Error::new(EINVAL));
