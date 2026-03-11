@@ -291,17 +291,6 @@ impl Ps2 {
             }
         }
 
-        self.retry(format_args!("keyboard defaults"), 4, |x| {
-            // Set defaults and disable scanning
-            let b = x.keyboard_command(KeyboardCommand::SetDefaultsDisable)?;
-            if b != 0xFA {
-                error!("keyboard failed to set defaults: {:02X}", b);
-                return Err(Error::CommandRetry);
-            }
-
-            Ok(b)
-        })?;
-
         {
             // Set scancode set to 2
             let scancode_set = 2;
@@ -333,6 +322,19 @@ impl Ps2 {
                 | ConfigFlags::SECOND_DISABLED;
             self.set_config(config)?;
         }
+
+        // The keyboard seems to still collect bytes even when we disable
+        // the port, so we must disable the keyboard too
+        self.retry(format_args!("keyboard defaults"), 4, |x| {
+            // Set defaults and disable scanning
+            let b = x.keyboard_command(KeyboardCommand::SetDefaultsDisable)?;
+            if b != 0xFA {
+                error!("keyboard failed to set defaults: {:02X}", b);
+                return Err(Error::CommandRetry);
+            }
+
+            Ok(b)
+        })?;
 
         {
             // Perform the self test
