@@ -26,7 +26,7 @@ use syscall::schemev2::NewFdFlags;
 use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP};
 
 use crate::kms::connector::KmsConnector;
-use crate::kms::objects::{KmsCrtc, KmsObjectId, KmsObjects};
+use crate::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
 use crate::kms::properties::KmsPropertyKind;
 
 pub mod kms;
@@ -42,6 +42,7 @@ pub trait GraphicsAdapter: Sized + Debug {
     type Crtc: Debug;
 
     type Buffer: Buffer;
+    type Framebuffer: Framebuffer;
 
     fn name(&self) -> &'static [u8];
     fn desc(&self) -> &'static [u8];
@@ -65,7 +66,9 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn display_size(&self, display_id: usize) -> (u32, u32);
 
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer;
-    fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8;
+    fn map_dumb_buffer(&mut self, buffer: &Self::Buffer) -> *mut u8;
+
+    fn create_framebuffer(&mut self, buffer: &Self::Buffer) -> Self::Framebuffer;
 
     fn set_crtc(
         &mut self,
@@ -73,7 +76,7 @@ pub trait GraphicsAdapter: Sized + Debug {
         crtc: &Mutex<KmsCrtc<Self::Crtc>>,
         connectors: &[KmsObjectId],
         mode: Option<drm_mode_modeinfo>,
-        framebuffer: Option<&Self::Buffer>,
+        framebuffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
         damage: Damage,
     );
 
@@ -86,7 +89,10 @@ pub trait Buffer: Debug {
     fn height(&self) -> u32;
 }
 
-#[derive(Debug)]
+pub trait Framebuffer: Debug {}
+
+impl Framebuffer for () {}
+
 pub struct CursorPlane<C: Buffer> {
     pub x: i32,
     pub y: i32,
@@ -225,21 +231,29 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                     for (display_id, fb) in vt_state.display_fbs.iter().enumerate() {
                         let crtc = self.inner.objects.crtcs().nth(display_id).unwrap();
 
-                        let mode = fb.as_ref().map(|fb| {
-                            KmsConnector::<()>::modeinfo_for_size(fb.width(), fb.height())
+                        crtc.lock().unwrap().fb_id = fb.unwrap_or(KmsObjectId::INVALID);
+
+                        let fb = fb.map(|fb| {
+                            self.inner
+                                .objects
+                                .get_framebuffer(fb)
+                                .expect("removed framebuffers should be unset")
                         });
+
+                        let mode =
+                            fb.map(|fb| KmsConnector::<()>::modeinfo_for_size(fb.width, fb.height));
 
                         self.inner.adapter.set_crtc(
                             &self.inner.objects,
                             crtc,
                             &[self.inner.objects.connector_ids()[display_id]],
                             mode,
-                            fb.as_deref(),
+                            fb,
                             Damage {
                                 x: 0,
                                 y: 0,
-                                width: fb.as_deref().map_or(0, |fb| fb.width()),
-                                height: fb.as_deref().map_or(0, |fb| fb.height()),
+                                width: fb.map_or(0, |fb| fb.width),
+                                height: fb.map_or(0, |fb| fb.height),
                             },
                         );
                     }
@@ -313,7 +327,7 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
 }
 
 struct VtState<T: GraphicsAdapter> {
-    display_fbs: Vec<Option<Arc<T::Buffer>>>,
+    display_fbs: Vec<Option<KmsObjectId>>,
     cursor_plane: CursorPlane<T::Buffer>,
 }
 
@@ -454,14 +468,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             id & 0xFF
         }
 
-        fn fb_id(i: u32) -> u32 {
-            id_index(i) | (1 << 11)
-        }
-
-        fn fb_handle_id(i: u32) -> u32 {
-            id_index(i) | (1 << 12)
-        }
-
         fn plane_id(i: u32) -> u32 {
             id_index(i) | (1 << 13)
         }
@@ -504,7 +510,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_CARD_RES => ipc::DrmModeCardRes::with(payload, |mut data| {
-                    let count = self.adapter.display_count();
                     let conn_ids = self
                         .objects
                         .connector_ids()
@@ -523,10 +528,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         .iter()
                         .map(|id| id.0)
                         .collect::<Vec<_>>();
-                    let mut fb_ids = Vec::with_capacity(count);
-                    for i in 0..(count as u32) {
-                        fb_ids.push(fb_id(i));
-                    }
+                    let fb_ids = self
+                        .objects
+                        .fb_ids()
+                        .iter()
+                        .map(|id| id.0)
+                        .collect::<Vec<_>>();
                     data.set_fb_id_ptr(&fb_ids);
                     data.set_crtc_id_ptr(&crtc_ids);
                     data.set_connector_id_ptr(&conn_ids);
@@ -711,18 +718,71 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_GET_FB => ipc::DrmModeFbCmd::with(payload, |mut data| {
-                    let i = id_index(data.fb_id());
-                    let (width, height) = self.adapter.display_size(i as usize);
-                    data.set_width(width);
-                    data.set_height(height);
-                    data.set_pitch(width * 4); //TODO: stride
-                    data.set_bpp(32);
-                    data.set_depth(24);
-                    data.set_handle(fb_handle_id(i));
+                    let fb = self.objects.get_framebuffer(KmsObjectId(data.fb_id()))?;
+
+                    *next_id += 1;
+                    buffers.insert(*next_id, fb.buffer.clone());
+
+                    data.set_width(fb.width);
+                    data.set_height(fb.height);
+                    data.set_pitch(fb.pitch);
+                    data.set_bpp(fb.bpp);
+                    data.set_depth(fb.depth);
+                    data.set_handle(*next_id);
                     Ok(0)
                 }),
                 ipc::MODE_ADD_FB => ipc::DrmModeFbCmd::with(payload, |mut data| {
-                    data.set_fb_id(fb_handle_id(data.handle()));
+                    let buffer = buffers.get(&data.handle()).ok_or(Error::new(EINVAL))?;
+
+                    let fb = self.adapter.create_framebuffer(buffer);
+
+                    let id = self.objects.add_framebuffer(objects::KmsFramebuffer {
+                        width: data.width(),
+                        height: data.height(),
+                        pitch: data.pitch(),
+                        bpp: data.bpp(),
+                        depth: data.depth(),
+                        buffer: buffer.clone(),
+                        driver_data: fb,
+                    });
+
+                    data.set_fb_id(id.0);
+
+                    Ok(0)
+                }),
+                ipc::MODE_RM_FB => ipc::StandinForUint::with(payload, |data| {
+                    let fb_id = KmsObjectId(data.inner());
+                    self.objects.remove_framebuffer(fb_id)?;
+
+                    // Disable planes that use this framebuffer.
+                    for (vt, vt_data) in &mut self.vts {
+                        for (display_id, fb) in vt_data.display_fbs.iter_mut().enumerate() {
+                            if *fb != Some(fb_id) {
+                                continue;
+                            }
+                            *fb = None;
+
+                            if *vt != self.active_vt {
+                                continue;
+                            }
+                            let crtc = self.objects.crtcs().nth(display_id).unwrap();
+                            crtc.lock().unwrap().fb_id = KmsObjectId::INVALID;
+                            self.adapter.set_crtc(
+                                &self.objects,
+                                crtc,
+                                &[self.objects.connector_ids()[display_id]],
+                                None,
+                                None,
+                                Damage {
+                                    x: 0,
+                                    y: 0,
+                                    width: 0,
+                                    height: 0,
+                                },
+                            );
+                        }
+                    }
+
                     Ok(0)
                 }),
                 ipc::MODE_CREATE_DUMB => ipc::DrmModeCreateDumb::with(payload, |mut data| {
@@ -730,10 +790,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         return Err(Error::new(EINVAL));
                     }
 
-                    let fb = self.adapter.create_dumb_buffer(data.width(), data.height());
+                    let buffer = self.adapter.create_dumb_buffer(data.width(), data.height());
 
                     *next_id += 1;
-                    buffers.insert(*next_id, Arc::new(fb));
+                    buffers.insert(*next_id, Arc::new(buffer));
                     data.set_handle(*next_id as u32);
                     data.set_pitch(data.width() * 4);
                     data.set_size(u64::from(data.width()) * u64::from(data.height()) * 4);
@@ -777,8 +837,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 }),
                 ipc::MODE_GET_PLANE => ipc::DrmModeGetPlane::with(payload, |mut data| {
                     let i = id_index(data.plane_id());
-                    data.set_crtc_id(self.objects.crtc_ids()[i as usize].0);
-                    data.set_fb_id(fb_id(i));
+                    let crtc_id = self.objects.crtc_ids()[i as usize];
+                    let crtc = self.objects.get_crtc(crtc_id).unwrap();
+                    data.set_crtc_id(crtc_id.0);
+                    data.set_fb_id(crtc.lock().unwrap().fb_id.0);
                     data.set_possible_crtcs(1 << i);
                     data.set_format_type_ptr(&[DRM_FORMAT_ARGB8888]);
                     Ok(0)
@@ -833,13 +895,16 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_GET_FB2 => ipc::DrmModeFbCmd2::with(payload, |mut data| {
-                    let i = id_index(data.fb_id());
-                    let (width, height) = self.adapter.display_size(i as usize);
-                    data.set_width(width);
-                    data.set_height(height);
+                    let fb = self.objects.get_framebuffer(KmsObjectId(data.fb_id()))?;
+
+                    *next_id += 1;
+                    buffers.insert(*next_id, fb.buffer.clone());
+
+                    data.set_width(fb.width);
+                    data.set_height(fb.height);
                     data.set_pixel_format(DRM_FORMAT_ARGB8888);
-                    data.set_handles([fb_handle_id(i), 0, 0, 0]);
-                    data.set_pitches([width * 4, 0, 0, 0]);
+                    data.set_handles([*next_id, 0, 0, 0]);
+                    data.set_pitches([fb.width * 4, 0, 0, 0]);
                     data.set_offsets([0; 4]);
                     data.set_modifier([0; 4]);
                     Ok(0)
@@ -859,28 +924,30 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         return Err(Error::new(EINVAL));
                     };
 
-                    let framebuffer = if payload.fb_id == 0 {
+                    let fb = if payload.fb_id == 0 {
                         None
-                    } else if let Some(framebuffer) = buffers.get(&id_index(payload.fb_id)) {
-                        Some(framebuffer)
                     } else {
-                        return Err(Error::new(EINVAL));
+                        Some(self.objects.get_framebuffer(KmsObjectId(payload.fb_id))?)
                     };
 
-                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] =
-                        framebuffer.map(Arc::clone);
+                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] = if payload.fb_id == 0 {
+                        None
+                    } else {
+                        Some(KmsObjectId(payload.fb_id))
+                    };
 
                     if *vt == self.active_vt {
-                        let mode = framebuffer.as_ref().map(|fb| {
-                            KmsConnector::<()>::modeinfo_for_size(fb.width(), fb.height())
-                        });
+                        crtc.lock().unwrap().fb_id = KmsObjectId(payload.fb_id);
+
+                        let mode =
+                            fb.map(|fb| KmsConnector::<()>::modeinfo_for_size(fb.width, fb.height));
 
                         self.adapter.set_crtc(
                             &self.objects,
                             crtc,
                             &[self.objects.connector_ids()[display_id]],
                             mode,
-                            framebuffer.map(|fb| &**fb),
+                            fb,
                             payload.damage,
                         );
                     }

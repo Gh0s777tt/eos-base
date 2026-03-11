@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use drm_sys::{
     drm_mode_modeinfo, DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
-    DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_PROPERTY,
+    DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PROPERTY,
 };
 use syscall::{Error, Result, EINVAL};
 
@@ -19,6 +19,7 @@ pub struct KmsObjects<T: GraphicsAdapter> {
     pub(crate) connectors: Vec<KmsObjectId>,
     pub(crate) encoders: Vec<KmsObjectId>,
     crtcs: Vec<KmsObjectId>,
+    framebuffers: Vec<KmsObjectId>,
     pub(crate) objects: HashMap<KmsObjectId, Arc<KmsObjectData<T>>>,
     _marker: PhantomData<T>,
 }
@@ -30,6 +31,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             connectors: vec![],
             encoders: vec![],
             crtcs: vec![],
+            framebuffers: vec![],
             objects: HashMap::new(),
             _marker: PhantomData,
         }
@@ -91,6 +93,39 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 
     pub fn get_crtc(&self, id: KmsObjectId) -> Result<&Mutex<KmsCrtc<T::Crtc>>> {
+        self.get(id)
+    }
+
+    pub fn add_framebuffer(
+        &mut self,
+        fb: KmsFramebuffer<T::Framebuffer, T::Buffer>,
+    ) -> KmsObjectId {
+        let id = self.add(fb);
+        self.framebuffers.push(id);
+        id
+    }
+
+    pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
+        let kind = match self.objects.get(&id).map(|object| &**object) {
+            Some(KmsObjectData { kind, .. }) => kind,
+            _ => return Err(Error::new(EINVAL)),
+        };
+        let KmsObjectKind::Framebuffer(_) = **kind else {
+            return Err(Error::new(EINVAL));
+        };
+        self.objects.remove(&id).unwrap();
+
+        Ok(())
+    }
+
+    pub fn fb_ids(&self) -> &[KmsObjectId] {
+        &self.framebuffers
+    }
+
+    pub fn get_framebuffer(
+        &self,
+        id: KmsObjectId,
+    ) -> Result<&KmsFramebuffer<T::Framebuffer, T::Buffer>> {
         self.get(id)
     }
 }
@@ -158,6 +193,7 @@ define_object_kinds! { <T>
     Connector(Mutex<KmsConnector<T::Connector>>) = DRM_MODE_OBJECT_CONNECTOR,
     Encoder(KmsEncoder) = DRM_MODE_OBJECT_ENCODER,
     Property(KmsProperty) = DRM_MODE_OBJECT_PROPERTY,
+    Framebuffer(KmsFramebuffer<T::Framebuffer, T::Buffer>) = DRM_MODE_OBJECT_FB,
     Blob(KmsBlob) = DRM_MODE_OBJECT_BLOB,
 }
 
@@ -167,5 +203,16 @@ pub struct KmsCrtc<T> {
     pub fb_id: KmsObjectId,
     pub gamma_size: u32,
     pub mode: Option<drm_mode_modeinfo>,
+    pub driver_data: T,
+}
+
+#[derive(Debug)]
+pub struct KmsFramebuffer<T, Buf> {
+    pub width: u32,
+    pub height: u32,
+    pub pitch: u32,
+    pub bpp: u32,
+    pub depth: u32,
+    pub buffer: Arc<Buf>,
     pub driver_data: T,
 }
