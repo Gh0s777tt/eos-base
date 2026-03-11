@@ -193,7 +193,7 @@ impl Rtl8168 {
             mac_address: [0; 6],
         };
 
-        module.init();
+        module.init()?;
 
         Ok(module)
     }

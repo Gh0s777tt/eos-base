@@ -290,7 +290,7 @@ fn main() -> Result<()> {
     loop {
         //TODO: get frequency from device
         //TODO: use sleeps when accuracy is better: thread::sleep(time::Duration::from_millis(10));
-        let mut timer = time::Instant::now();
+        let timer = time::Instant::now();
         while timer.elapsed() < time::Duration::from_millis(1) {
             thread::yield_now();
         }
@@ -454,6 +454,4 @@ fn main() -> Result<()> {
 
         // log::trace!("took {}ms", timer.elapsed().as_millis())
     }
-
-    Ok(())
 }

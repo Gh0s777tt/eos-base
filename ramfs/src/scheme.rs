@@ -30,9 +30,6 @@ enum Handle {
     SchemeRoot,
 }
 
-// TODO: Move to relibc
-const AT_REMOVEDIR: usize = 0x200;
-
 pub struct Scheme {
     scheme_name: String,
     filesystem: Filesystem,

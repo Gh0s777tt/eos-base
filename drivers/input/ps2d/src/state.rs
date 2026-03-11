@@ -1,5 +1,5 @@
 use inputd::ProducerHandle;
-use log::{error, info, warn};
+use log::{error, warn};
 use orbclient::{ButtonEvent, KeyEvent, MouseEvent, MouseRelativeEvent, ScrollEvent};
 use std::{
     convert::TryInto,

@@ -65,7 +65,7 @@ pub fn spawn_irq_thread(irq_handle: &File, queue: &Arc<Queue<'static>>) {
             .subscribe(irq_fd as usize, 0, event::EventFlags::READ)
             .unwrap();
 
-        for event in event_queue.map(Result::unwrap) {
+        for _ in event_queue.map(Result::unwrap) {
             // Wake up the tasks waiting on the queue.
             for (_, task) in queue_copy.waker.lock().unwrap().iter() {
                 task.wake_by_ref();

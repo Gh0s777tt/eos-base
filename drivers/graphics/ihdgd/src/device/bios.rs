@@ -175,7 +175,7 @@ impl Bios {
 
         //TODO: read VBT from mailbox 3 RVDA (0x3BA) and RVDS (0x3C2) if missing in mailbox 4
         let vbt_addr = region.virt + 1024;
-        let mut vbt_header = unsafe { &*(vbt_addr as *const VbtHeader) };
+        let vbt_header = unsafe { &*(vbt_addr as *const VbtHeader) };
         vbt_header.dump();
 
         //TODO: check vbt checksum

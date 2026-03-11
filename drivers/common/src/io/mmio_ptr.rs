@@ -1,5 +1,3 @@
-use core::ptr;
-
 use super::Io;
 
 /// MMIO using pointer instead of wrapped type
@@ -35,11 +33,11 @@ where
     type Value = T;
 
     fn read(&self) -> T {
-        unsafe { ptr::read_volatile(self.ptr) }
+        unsafe { core::ptr::read_volatile(self.ptr) }
     }
 
     fn write(&mut self, value: T) {
-        unsafe { ptr::write_volatile(self.ptr, value) };
+        unsafe { core::ptr::write_volatile(self.ptr, value) };
     }
 }
 

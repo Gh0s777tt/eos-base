@@ -396,8 +396,7 @@ impl Display for KeymapKind {
             KeymapKind::Bepo => "bepo",
             KeymapKind::IT => "it",
         };
-        f.write_str(s);
-        Ok(())
+        f.write_str(s)
     }
 }
 
