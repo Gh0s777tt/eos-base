@@ -7,7 +7,9 @@ use driver_graphics::{
     modeinfo_for_size, CursorFramebuffer, CursorPlane, Framebuffer, GraphicsAdapter,
     GraphicsScheme, StandardProperties,
 };
-use drm_sys::{DRM_MODE_DPMS_ON, DRM_MODE_TYPE_PREFERRED};
+use drm_sys::{
+    DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON, DRM_MODE_TYPE_PREFERRED,
+};
 use graphics_ipc::v1::Damage;
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 
@@ -276,6 +278,8 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     fn get_cap(&self, cap: u32) -> syscall::Result<u64> {
         match cap {
             DRM_CAP_DUMB_BUFFER => Ok(1),
+            DRM_CAP_CURSOR_WIDTH => Ok(32),
+            DRM_CAP_CURSOR_HEIGHT => Ok(32),
             _ => Err(syscall::Error::new(EINVAL)),
         }
     }
