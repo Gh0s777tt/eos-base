@@ -79,7 +79,7 @@ drm-sys = "0.8.1"
 libc = "0.2.181"
 log = "0.4"
 libredox = "0.1.14"
-orbclient = { git = "https://gitlab.redox-os.org/redox-os/orbclient" }
+orbclient = "0.3.51"
 redox_event = "0.4.6"
 redox-ioctl = { git = "https://gitlab.redox-os.org/redox-os/relibc.git" }
 redox-log = { git = "https://gitlab.redox-os.org/redox-os/redox-log.git" }
