@@ -6,8 +6,7 @@ use std::ptr::{self, NonNull};
 
 use driver_graphics::objects::{DrmConnectorStatus, DrmObjectId, DrmObjects};
 use driver_graphics::{
-    modeinfo_for_size, CursorFramebuffer, CursorPlane, Framebuffer, GraphicsAdapter,
-    StandardProperties,
+    modeinfo_for_size, Buffer, CursorPlane, GraphicsAdapter, StandardProperties,
 };
 use drm_sys::DRM_MODE_DPMS_ON;
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
@@ -21,16 +20,10 @@ pub struct Connector {
     framebuffer_id: usize,
 }
 
-//TODO: use hardware cursor
-pub enum Cursor {}
-
-impl CursorFramebuffer for Cursor {}
-
 impl GraphicsAdapter for Device {
     type Connector = Connector;
 
-    type Framebuffer = DumbFb;
-    type Cursor = Cursor;
+    type Buffer = DumbFb;
 
     fn name(&self) -> &'static [u8] {
         b"ihdgd"
@@ -94,15 +87,15 @@ impl GraphicsAdapter for Device {
         )
     }
 
-    fn create_dumb_framebuffer(&mut self, width: u32, height: u32) -> Self::Framebuffer {
+    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
         DumbFb::new(width as usize, height as usize)
     }
 
-    fn map_dumb_framebuffer(&mut self, framebuffer: &Self::Framebuffer) -> *mut u8 {
+    fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8 {
         framebuffer.ptr.as_ptr().cast::<u8>()
     }
 
-    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Framebuffer, damage: Damage) {
+    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Buffer, damage: Damage) {
         framebuffer.sync(&mut self.framebuffers[display_id], damage)
     }
 
@@ -110,15 +103,15 @@ impl GraphicsAdapter for Device {
         false
     }
 
-    fn create_cursor_framebuffer(&mut self) -> Self::Cursor {
+    fn create_cursor_framebuffer(&mut self) -> Self::Buffer {
         unimplemented!("ihdgd does not support this function");
     }
 
-    fn map_cursor_framebuffer(&mut self, _cursor: &Self::Cursor) -> *mut u8 {
+    fn map_cursor_framebuffer(&mut self, _cursor: &Self::Buffer) -> *mut u8 {
         unimplemented!("ihdgd does not support this function");
     }
 
-    fn handle_cursor(&mut self, _cursor: &CursorPlane<Self::Cursor>, _dirty_fb: bool) {
+    fn handle_cursor(&mut self, _cursor: Option<&CursorPlane<Self::Buffer>>, _dirty_fb: bool) {
         unimplemented!("ihdgd does not support this function");
     }
 }
@@ -185,7 +178,7 @@ impl Drop for DumbFb {
     }
 }
 
-impl Framebuffer for DumbFb {
+impl Buffer for DumbFb {
     fn width(&self) -> u32 {
         self.width as u32
     }

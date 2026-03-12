@@ -39,8 +39,7 @@ pub struct StandardProperties {
 pub trait GraphicsAdapter: Sized + Debug {
     type Connector: Debug + 'static;
 
-    type Framebuffer: Framebuffer;
-    type Cursor: CursorFramebuffer;
+    type Buffer: Buffer;
 
     fn name(&self) -> &'static [u8];
     fn desc(&self) -> &'static [u8];
@@ -63,31 +62,30 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn display_count(&self) -> usize;
     fn display_size(&self, display_id: usize) -> (u32, u32);
 
-    fn create_dumb_framebuffer(&mut self, width: u32, height: u32) -> Self::Framebuffer;
-    fn map_dumb_framebuffer(&mut self, framebuffer: &Self::Framebuffer) -> *mut u8;
+    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer;
+    fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8;
 
-    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Framebuffer, damage: Damage);
+    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Buffer, damage: Damage);
 
     fn supports_hw_cursor(&self) -> bool;
-    fn create_cursor_framebuffer(&mut self) -> Self::Cursor;
-    fn map_cursor_framebuffer(&mut self, cursor: &Self::Cursor) -> *mut u8;
-    fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Cursor>, dirty_fb: bool);
+    fn create_cursor_framebuffer(&mut self) -> Self::Buffer;
+    fn map_cursor_framebuffer(&mut self, cursor: &Self::Buffer) -> *mut u8;
+    fn handle_cursor(&mut self, cursor: Option<&CursorPlane<Self::Buffer>>, dirty_fb: bool);
 }
 
-pub trait Framebuffer {
+pub trait Buffer {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
 }
 
-pub struct CursorPlane<C: CursorFramebuffer> {
+#[derive(Debug)]
+pub struct CursorPlane<C: Buffer> {
     pub x: i32,
     pub y: i32,
     pub hot_x: i32,
     pub hot_y: i32,
     pub framebuffer: C,
 }
-
-pub trait CursorFramebuffer {}
 
 pub struct GraphicsScheme<T: GraphicsAdapter> {
     inner: GraphicsSchemeInner<T>,
@@ -224,8 +222,10 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                         );
                     }
 
-                    if let Some(cursor_plane) = &vt_state.cursor_plane {
-                        self.inner.adapter.handle_cursor(cursor_plane, true);
+                    if self.inner.adapter.supports_hw_cursor() {
+                        self.inner
+                            .adapter
+                            .handle_cursor(vt_state.cursor_plane.as_ref(), true);
                     }
                 }
 
@@ -291,8 +291,8 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
 }
 
 struct VtState<T: GraphicsAdapter> {
-    display_fbs: Vec<Arc<T::Framebuffer>>,
-    cursor_plane: Option<CursorPlane<T::Cursor>>,
+    display_fbs: Vec<Arc<T::Buffer>>,
+    cursor_plane: Option<CursorPlane<T::Buffer>>,
 }
 
 enum Handle<T: GraphicsAdapter> {
@@ -304,7 +304,7 @@ enum Handle<T: GraphicsAdapter> {
     V2 {
         vt: usize,
         next_id: u32,
-        fbs: HashMap<u32, Arc<T::Framebuffer>>,
+        fbs: HashMap<u32, Arc<T::Buffer>>,
     },
     SchemeRoot,
 }
@@ -319,25 +319,17 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
             let mut display_fbs = vec![];
             for display_id in 0..adapter.display_count() {
                 let (width, height) = adapter.display_size(display_id);
-                display_fbs.push(Arc::new(adapter.create_dumb_framebuffer(width, height)));
+                display_fbs.push(Arc::new(adapter.create_dumb_buffer(width, height)));
             }
-
-            let cursor_plane = adapter.supports_hw_cursor().then(|| CursorPlane {
-                x: 0,
-                y: 0,
-                hot_x: 0,
-                hot_y: 0,
-                framebuffer: adapter.create_cursor_framebuffer(),
-            });
 
             VtState {
                 display_fbs,
-                cursor_plane,
+                cursor_plane: None,
             }
         })
     }
 
-    fn update_whole_screen(adapter: &mut T, screen: usize, framebuffer: &T::Framebuffer) {
+    fn update_whole_screen(adapter: &mut T, screen: usize, framebuffer: &T::Buffer) {
         adapter.update_plane(
             screen,
             framebuffer,
@@ -357,10 +349,17 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     ) -> Result<()> {
         let vt_state = self.vts.get_mut(&vt).unwrap();
 
-        let Some(cursor_plane) = &mut vt_state.cursor_plane else {
-            // Hardware cursor not supported
+        if !self.adapter.supports_hw_cursor() {
             return Err(Error::new(EINVAL));
-        };
+        }
+
+        let cursor_plane = vt_state.cursor_plane.get_or_insert_with(|| CursorPlane {
+            x: 0,
+            y: 0,
+            hot_x: 0,
+            hot_y: 0,
+            framebuffer: self.adapter.create_cursor_framebuffer(),
+        });
 
         cursor_plane.x = cursor_damage.x;
         cursor_plane.y = cursor_damage.y;
@@ -370,7 +369,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 return Ok(());
             }
 
-            self.adapter.handle_cursor(cursor_plane, false);
+            self.adapter.handle_cursor(Some(cursor_plane), false);
         } else {
             cursor_plane.hot_x = cursor_damage.hot_x;
             cursor_plane.hot_y = cursor_damage.hot_y;
@@ -405,7 +404,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 return Ok(());
             }
 
-            self.adapter.handle_cursor(cursor_plane, true);
+            self.adapter.handle_cursor(Some(cursor_plane), true);
         }
 
         return Ok(());
@@ -755,7 +754,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     let fb = self
                         .adapter
-                        .create_dumb_framebuffer(data.width(), data.height());
+                        .create_dumb_buffer(data.width(), data.height());
 
                     *next_id += 1;
                     fbs.insert(*next_id, Arc::new(fb));
@@ -910,7 +909,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             ),
             Handle::V1Screen { .. } | Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
         };
-        let ptr = T::map_dumb_framebuffer(&mut self.adapter, framebuffer);
+        let ptr = T::map_dumb_buffer(&mut self.adapter, framebuffer);
         Ok(unsafe { ptr.add(offset as usize) } as usize)
     }
 }

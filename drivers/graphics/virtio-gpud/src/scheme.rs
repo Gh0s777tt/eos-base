@@ -4,8 +4,8 @@ use std::sync::Arc;
 use common::{dma::Dma, sgl};
 use driver_graphics::objects::{DrmConnectorStatus, DrmObjectId, DrmObjects};
 use driver_graphics::{
-    modeinfo_for_size, CursorFramebuffer, CursorPlane, Framebuffer, GraphicsAdapter,
-    GraphicsScheme, StandardProperties,
+    modeinfo_for_size, Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme,
+    StandardProperties,
 };
 use drm_sys::{
     DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON, DRM_MODE_TYPE_PREFERRED,
@@ -44,7 +44,7 @@ pub struct VirtGpuFramebuffer<'a> {
     height: u32,
 }
 
-impl Framebuffer for VirtGpuFramebuffer<'_> {
+impl DrmBuffer for VirtGpuFramebuffer<'_> {
     fn width(&self) -> u32 {
         self.width
     }
@@ -70,13 +70,6 @@ impl Drop for VirtGpuFramebuffer<'_> {
     }
 }
 
-pub struct VirtGpuCursor {
-    resource_id: ResourceId,
-    sgl: sgl::Sgl,
-}
-
-impl CursorFramebuffer for VirtGpuCursor {}
-
 #[derive(Debug, Clone)]
 pub struct Display {
     enabled: bool,
@@ -93,6 +86,7 @@ pub struct VirtGpuAdapter<'a> {
     transport: Arc<dyn Transport>,
     has_edid: bool,
     displays: Vec<Display>,
+    hidden_cursor: Option<Arc<VirtGpuFramebuffer<'a>>>,
 }
 
 impl<'a> fmt::Debug for VirtGpuAdapter<'a> {
@@ -200,11 +194,18 @@ impl VirtGpuAdapter<'_> {
         Ok(response)
     }
 
-    fn update_cursor(&mut self, cursor: &VirtGpuCursor, x: i32, y: i32, hot_x: i32, hot_y: i32) {
+    fn update_cursor(
+        &mut self,
+        cursor: &VirtGpuFramebuffer,
+        x: i32,
+        y: i32,
+        hot_x: i32,
+        hot_y: i32,
+    ) {
         //Transfering cursor resource to host
         futures::executor::block_on(async {
             let transfer_request = Dma::new(XferToHost2d::new(
-                cursor.resource_id,
+                cursor.id,
                 GpuRect {
                     x: 0,
                     y: 0,
@@ -219,14 +220,7 @@ impl VirtGpuAdapter<'_> {
         });
 
         //Update the cursor position
-        let request = Dma::new(UpdateCursor::update_cursor(
-            x,
-            y,
-            hot_x,
-            hot_y,
-            cursor.resource_id,
-        ))
-        .unwrap();
+        let request = Dma::new(UpdateCursor::update_cursor(x, y, hot_x, hot_y, cursor.id)).unwrap();
         futures::executor::block_on(async {
             let command = ChainBuilder::new().chain(Buffer::new(&request)).build();
             self.cursor_queue.send(command).await;
@@ -241,13 +235,25 @@ impl VirtGpuAdapter<'_> {
             self.cursor_queue.send(command).await;
         });
     }
+
+    fn disable_cursor(&mut self) {
+        if self.hidden_cursor.is_none() {
+            let cursor = self.create_dumb_buffer(64, 64);
+            unsafe {
+                core::ptr::write_bytes(cursor.sgl.as_ptr() as *mut u8, 0, 64 * 64 * 4);
+            }
+            self.hidden_cursor = Some(Arc::new(cursor));
+        }
+        let hidden_cursor = self.hidden_cursor.as_ref().unwrap().clone();
+
+        self.update_cursor(&hidden_cursor, 0, 0, 0, 0);
+    }
 }
 
 impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     type Connector = VirtGpuConnector;
 
-    type Framebuffer = VirtGpuFramebuffer<'a>;
-    type Cursor = VirtGpuCursor;
+    type Buffer = VirtGpuFramebuffer<'a>;
 
     fn name(&self) -> &'static [u8] {
         b"virtio-gpud"
@@ -278,8 +284,8 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     fn get_cap(&self, cap: u32) -> syscall::Result<u64> {
         match cap {
             DRM_CAP_DUMB_BUFFER => Ok(1),
-            DRM_CAP_CURSOR_WIDTH => Ok(32),
-            DRM_CAP_CURSOR_HEIGHT => Ok(32),
+            DRM_CAP_CURSOR_WIDTH => Ok(64),
+            DRM_CAP_CURSOR_HEIGHT => Ok(64),
             _ => Err(syscall::Error::new(EINVAL)),
         }
     }
@@ -367,7 +373,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         )
     }
 
-    fn create_dumb_framebuffer(&mut self, width: u32, height: u32) -> Self::Framebuffer {
+    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
         futures::executor::block_on(async {
             let bpp = 32;
             let fb_size = width as usize * height as usize * bpp / 8;
@@ -426,11 +432,11 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         })
     }
 
-    fn map_dumb_framebuffer(&mut self, framebuffer: &Self::Framebuffer) -> *mut u8 {
+    fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8 {
         framebuffer.sgl.as_ptr()
     }
 
-    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Framebuffer, damage: Damage) {
+    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Buffer, damage: Damage) {
         futures::executor::block_on(async {
             let req = Dma::new(XferToHost2d::new(
                 framebuffer.id,
@@ -472,84 +478,31 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         true
     }
 
-    fn create_cursor_framebuffer(&mut self) -> VirtGpuCursor {
-        //Creating a new resource for the cursor
-        let fb_size = 64 * 64 * 4;
-        let sgl = sgl::Sgl::new(fb_size).unwrap();
-        let res_id = ResourceId::alloc();
-
-        futures::executor::block_on(async {
-            unsafe {
-                core::ptr::write_bytes(sgl.as_ptr() as *mut u8, 0, fb_size);
-            }
-
-            let resource_request =
-                Dma::new(ResourceCreate2d::new(res_id, ResourceFormat::Bgrx, 64, 64)).unwrap();
-
-            let header = self.send_request_fenced(resource_request).await.unwrap();
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
-
-            //Attaching cursor resource as backing storage
-            let mut mem_entries =
-                unsafe { Dma::zeroed_slice(sgl.chunks().len()).unwrap().assume_init() };
-            for (entry, chunk) in mem_entries.iter_mut().zip(sgl.chunks().iter()) {
-                *entry = MemEntry {
-                    address: chunk.phys as u64,
-                    length: chunk.length.next_multiple_of(PAGE_SIZE) as u32,
-                    padding: 0,
-                };
-            }
-
-            let attach_request =
-                Dma::new(AttachBacking::new(res_id, mem_entries.len() as u32)).unwrap();
-            let mut header = Dma::new(ControlHeader::default()).unwrap();
-            header.flags |= VIRTIO_GPU_FLAG_FENCE;
-            let command = ChainBuilder::new()
-                .chain(Buffer::new(&attach_request))
-                .chain(Buffer::new_unsized(&mem_entries))
-                .chain(Buffer::new(&header).flags(DescriptorFlags::WRITE_ONLY))
-                .build();
-
-            self.control_queue.send(command).await;
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
-
-            //Transfering cursor resource to host
-            let transfer_request = Dma::new(XferToHost2d::new(
-                res_id,
-                GpuRect {
-                    x: 0,
-                    y: 0,
-                    width: 64,
-                    height: 64,
-                },
-                0,
-            ))
-            .unwrap();
-            let header = self.send_request_fenced(transfer_request).await.unwrap();
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
-        });
-
-        VirtGpuCursor {
-            resource_id: res_id,
-            sgl,
-        }
+    fn create_cursor_framebuffer(&mut self) -> Self::Buffer {
+        self.create_dumb_buffer(64, 64)
     }
 
-    fn map_cursor_framebuffer(&mut self, cursor: &Self::Cursor) -> *mut u8 {
+    fn map_cursor_framebuffer(&mut self, cursor: &Self::Buffer) -> *mut u8 {
         cursor.sgl.as_ptr()
     }
 
-    fn handle_cursor(&mut self, cursor: &CursorPlane<VirtGpuCursor>, dirty_fb: bool) {
-        if dirty_fb {
-            self.update_cursor(
-                &cursor.framebuffer,
-                cursor.x,
-                cursor.y,
-                cursor.hot_x,
-                cursor.hot_y,
-            );
+    fn handle_cursor(&mut self, cursor: Option<&CursorPlane<Self::Buffer>>, dirty_fb: bool) {
+        if let Some(cursor) = cursor {
+            if dirty_fb {
+                self.update_cursor(
+                    &cursor.framebuffer,
+                    cursor.x,
+                    cursor.y,
+                    cursor.hot_x,
+                    cursor.hot_y,
+                );
+            } else {
+                self.move_cursor(cursor.x, cursor.y);
+            }
         } else {
-            self.move_cursor(cursor.x, cursor.y);
+            if dirty_fb {
+                self.disable_cursor();
+            }
         }
     }
 }
@@ -571,6 +524,7 @@ impl<'a> GpuScheme {
             transport,
             has_edid,
             displays: vec![],
+            hidden_cursor: None,
         };
 
         Ok(GraphicsScheme::new(

@@ -4,8 +4,7 @@ use std::ptr::{self, NonNull};
 
 use driver_graphics::objects::{DrmConnectorStatus, DrmObjectId, DrmObjects};
 use driver_graphics::{
-    modeinfo_for_size, CursorFramebuffer, CursorPlane, Framebuffer, GraphicsAdapter,
-    StandardProperties,
+    modeinfo_for_size, Buffer, CursorPlane, GraphicsAdapter, StandardProperties,
 };
 use drm_sys::DRM_MODE_DPMS_ON;
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
@@ -23,15 +22,10 @@ pub struct Connector {
     height: u32,
 }
 
-pub enum VesadCursor {}
-
-impl CursorFramebuffer for VesadCursor {}
-
 impl GraphicsAdapter for FbAdapter {
     type Connector = Connector;
 
-    type Framebuffer = GraphicScreen;
-    type Cursor = VesadCursor;
+    type Buffer = GraphicScreen;
 
     fn name(&self) -> &'static [u8] {
         b"vesad"
@@ -94,15 +88,15 @@ impl GraphicsAdapter for FbAdapter {
         )
     }
 
-    fn create_dumb_framebuffer(&mut self, width: u32, height: u32) -> Self::Framebuffer {
+    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
         GraphicScreen::new(width as usize, height as usize)
     }
 
-    fn map_dumb_framebuffer(&mut self, framebuffer: &Self::Framebuffer) -> *mut u8 {
+    fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8 {
         framebuffer.ptr.as_ptr().cast::<u8>()
     }
 
-    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Framebuffer, damage: Damage) {
+    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Buffer, damage: Damage) {
         framebuffer.sync(&mut self.framebuffers[display_id], damage)
     }
 
@@ -110,15 +104,15 @@ impl GraphicsAdapter for FbAdapter {
         false
     }
 
-    fn create_cursor_framebuffer(&mut self) -> VesadCursor {
+    fn create_cursor_framebuffer(&mut self) -> Self::Buffer {
         unimplemented!("Vesad does not support this function");
     }
 
-    fn map_cursor_framebuffer(&mut self, _cursor: &Self::Cursor) -> *mut u8 {
+    fn map_cursor_framebuffer(&mut self, _cursor: &Self::Buffer) -> *mut u8 {
         unimplemented!("Vesad does not support this function");
     }
 
-    fn handle_cursor(&mut self, _cursor: &CursorPlane<VesadCursor>, _dirty_fb: bool) {
+    fn handle_cursor(&mut self, _cursor: Option<&CursorPlane<Self::Buffer>>, _dirty_fb: bool) {
         unimplemented!("Vesad does not support this function");
     }
 }
@@ -216,7 +210,7 @@ impl Drop for GraphicScreen {
     }
 }
 
-impl Framebuffer for GraphicScreen {
+impl Buffer for GraphicScreen {
     fn width(&self) -> u32 {
         self.width as u32
     }
