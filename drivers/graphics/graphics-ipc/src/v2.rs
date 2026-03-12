@@ -5,7 +5,7 @@ use std::os::unix::io::AsRawFd;
 
 use drm::control::connector::{self, State};
 use drm::control::Device as _;
-use drm::{ClientCapability, Device as _, DriverCapability};
+use drm::{Device as _, DriverCapability};
 use syscall::CallFlags;
 
 pub use crate::common::Damage;
@@ -13,10 +13,8 @@ pub use crate::common::Damage;
 /// A graphics handle using the v2 graphics API.
 ///
 /// The v2 graphics API allows creating framebuffers on the fly, using them for page flipping and
-/// handles all displays using a single fd.
-///
-/// This API is not yet stable. Do not depend on it outside of the drivers repo until it has been
-/// stabilized.
+/// handles all displays using a single fd. This is basically a subset of the Linux DRM interface
+/// with a couple of custom ioctls in the place of the KMS ioctls that are missing.
 pub struct V2GraphicsHandle {
     file: File,
 }
@@ -33,7 +31,6 @@ impl drm::control::Device for V2GraphicsHandle {}
 impl V2GraphicsHandle {
     pub fn from_file(file: File) -> io::Result<Self> {
         let handle = V2GraphicsHandle { file };
-        handle.set_client_capability(ClientCapability::CursorPlaneHotspot, true)?;
         assert!(handle.get_driver_capability(DriverCapability::DumbBuffer)? == 1);
         Ok(handle)
     }
@@ -68,7 +65,7 @@ pub mod ipc {
 
     pub use redox_ioctl::drm::*;
 
-    // FIXME replace these with proper drm interfaces
+    // FIXME replace these with proper drm interfaces and update orbital
     pub const UPDATE_PLANE: u64 = 0x12345670;
     #[repr(C, packed)]
     pub struct UpdatePlane {
