@@ -10,8 +10,8 @@ use driver_graphics::{
     StandardProperties,
 };
 use drm_sys::DRM_MODE_DPMS_ON;
-use graphics_ipc::v1::Damage;
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
+use graphics_ipc::v2::Damage;
 use syscall::{error::EINVAL, PAGE_SIZE};
 
 use super::Device;

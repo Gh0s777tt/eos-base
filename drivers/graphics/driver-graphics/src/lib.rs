@@ -16,7 +16,6 @@ use drm_sys::{
     DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT,
     DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE, DRM_PROP_NAME_LEN,
 };
-use graphics_ipc::v1::CursorDamage;
 use graphics_ipc::v2::Damage;
 use inputd::{DisplayHandle, VtEventKind};
 use libredox::Fd;
@@ -297,6 +296,7 @@ struct VtState<T: GraphicsAdapter> {
 }
 
 enum Handle<T: GraphicsAdapter> {
+    // This only exists for compatibility with orbclient.
     V1Screen {
         vt: usize,
         screen: usize,
@@ -466,8 +466,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 return Err(Error::new(EINVAL));
             }
 
-            // Ensure the VT exists such that the rest of the methods can freely access it.
-            Self::get_or_create_vt(&mut self.adapter, &mut self.vts, vt);
+            if !self.vts.contains_key(&vt) {
+                return Err(Error::new(ENOENT));
+            }
 
             Handle::V1Screen { vt, screen: id }
         };
@@ -499,90 +500,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         };
         buf[..path.len()].copy_from_slice(path.as_bytes());
         Ok(path.len())
-    }
-
-    fn fsync(&mut self, id: usize, _ctx: &CallerCtx) -> syscall::Result<()> {
-        match self.handles.get(&id).ok_or(Error::new(EBADF))? {
-            Handle::V1Screen { vt, screen } => {
-                if *vt != self.active_vt {
-                    // This is a protection against background VT's spamming us with flush requests. We will
-                    // flush the framebuffer on the next VT switch anyway
-                    return Ok(());
-                }
-                Self::update_whole_screen(
-                    &mut self.adapter,
-                    *screen,
-                    &self.vts[vt].display_fbs[*screen],
-                );
-                Ok(())
-            }
-            Handle::V2 { .. } => Err(Error::new(EOPNOTSUPP)),
-            Handle::SchemeRoot => Err(Error::new(EOPNOTSUPP)),
-        }
-    }
-
-    fn read(
-        &mut self,
-        id: usize,
-        buf: &mut [u8],
-        _offset: u64,
-        _fcntl_flags: u32,
-        _ctx: &CallerCtx,
-    ) -> Result<usize> {
-        match self.handles.get(&id).ok_or(Error::new(EBADF))? {
-            Handle::V1Screen { .. } => {
-                //Currently read is only used for Orbital to check GPU cursor support
-                //and only expects a buf to pass a 0 or 1 flag
-                if self.adapter.supports_hw_cursor() {
-                    buf[0] = 1;
-                } else {
-                    buf[0] = 0;
-                }
-
-                Ok(1)
-            }
-            Handle::V2 { .. } => Err(Error::new(EOPNOTSUPP)),
-            Handle::SchemeRoot => Err(Error::new(EOPNOTSUPP)),
-        }
-    }
-
-    fn write(
-        &mut self,
-        id: usize,
-        buf: &[u8],
-        _offset: u64,
-        _fcntl_flags: u32,
-        _ctx: &CallerCtx,
-    ) -> Result<usize> {
-        match self.handles.get(&id).ok_or(Error::new(EBADF))? {
-            Handle::V1Screen { vt, screen } => {
-                if size_of_val(buf) == std::mem::size_of::<CursorDamage>() {
-                    let cursor_damage = unsafe { &*buf.as_ptr().cast::<CursorDamage>() };
-
-                    self.handle_cursor_update(*vt, cursor_damage)?;
-
-                    return Ok(buf.len());
-                }
-
-                if *vt != self.active_vt {
-                    // This is a protection against background VT's spamming us with flush requests. We will
-                    // flush the framebuffer on the next VT switch anyway
-                    return Ok(buf.len());
-                }
-
-                let vt_state = self.vts.get_mut(vt).unwrap();
-
-                assert_eq!(buf.len(), std::mem::size_of::<Damage>());
-                let damage = unsafe { *buf.as_ptr().cast::<Damage>() };
-
-                self.adapter
-                    .update_plane(*screen, &vt_state.display_fbs[*screen], damage);
-
-                Ok(buf.len())
-            }
-            Handle::V2 { .. } => Err(Error::new(EOPNOTSUPP)),
-            Handle::SchemeRoot => Err(Error::new(EOPNOTSUPP)),
-        }
     }
 
     fn call(
@@ -621,10 +538,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         }
 
         match self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
-            Handle::V1Screen { .. } => {
-                return Err(Error::new(EOPNOTSUPP));
-            }
-            Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
+            Handle::V1Screen { .. } | Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
             Handle::V2 { vt, next_id, fbs } => match metadata[0] {
                 ipc::VERSION => ipc::DrmVersion::with(payload, |mut data| {
                     data.set_version_major(1);
@@ -984,7 +898,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     ) -> syscall::Result<usize> {
         // log::trace!("KSMSG MMAP {} {:?} {} {}", id, _flags, _offset, _size);
         let (framebuffer, offset) = match self.handles.get(&id).ok_or(Error::new(EINVAL))? {
-            Handle::V1Screen { vt, screen } => (&self.vts[vt].display_fbs[*screen], offset),
             Handle::V2 {
                 vt: _,
                 next_id: _,
@@ -995,7 +908,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     .unwrap(),
                 offset & (MAP_FAKE_OFFSET_MULTIPLIER as u64 - 1),
             ),
-            Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
+            Handle::V1Screen { .. } | Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
         };
         let ptr = T::map_dumb_framebuffer(&mut self.adapter, framebuffer);
         Ok(unsafe { ptr.add(offset as usize) } as usize)

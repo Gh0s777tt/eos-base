@@ -7,8 +7,7 @@ use std::{cmp, io, mem, ptr};
 use drm::buffer::{Buffer, DrmFourcc};
 use drm::control::dumbbuffer::{DumbBuffer, DumbMapping};
 use drm::control::{framebuffer, Device};
-use graphics_ipc::v1::Damage;
-use graphics_ipc::v2::V2GraphicsHandle;
+use graphics_ipc::v2::{Damage, V2GraphicsHandle};
 use orbclient::FONT;
 
 pub struct V2DisplayMap {
