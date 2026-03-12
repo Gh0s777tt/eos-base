@@ -122,7 +122,7 @@ impl FbbootlogScheme {
         self.is_scrollback = true;
         self.scrollback_offset = cmp::min(
             self.scrollback_offset,
-            buffer_len - map.fb.size().1 as usize / 16 + spare_lines,
+            buffer_len - map.buffer.size().1 as usize / 16 + spare_lines,
         );
         let mut i = self.scrollback_offset;
         self.text_screen
@@ -135,9 +135,9 @@ impl FbbootlogScheme {
                     .write(map, &self.text_buffer.lines[i][..], &mut VecDeque::new());
             i += 1;
             let yd = (damage.y + damage.height) as usize;
-            if i == buffer_len || yd + spare_lines * 16 > map.fb.size().1 as usize {
+            if i == buffer_len || yd + spare_lines * 16 > map.buffer.size().1 as usize {
                 // render until end of screen
-                damage.height = map.fb.size().1 - damage.y;
+                damage.height = map.buffer.size().1 - damage.y;
                 total_damage = total_damage.merge(damage);
                 self.is_scrollback = i < buffer_len;
                 break;
@@ -146,7 +146,7 @@ impl FbbootlogScheme {
             }
         }
         map.display_handle
-            .update_plane(0, u32::from(map.fb.handle()), total_damage)
+            .update_plane(0, u32::from(map.buffer.handle()), total_damage)
             .unwrap();
     }
 
@@ -157,11 +157,11 @@ impl FbbootlogScheme {
             Ok((width, height)) => (width.into(), height.into()),
             Err(err) => {
                 eprintln!("fbbootlogd: failed to get display size: {}", err);
-                map.fb.size()
+                map.buffer.size()
             }
         };
 
-        if (width, height) != map.fb.size() {
+        if (width, height) != map.buffer.size() {
             match text_screen.resize(map, width, height) {
                 Ok(()) => eprintln!("fbbootlogd: mapped display"),
                 Err(err) => {
@@ -248,7 +248,7 @@ impl SchemeSync for FbbootlogScheme {
 
                 if let Some(map) = &self.display_map {
                     map.display_handle
-                        .update_plane(0, u32::from(map.fb.handle()), damage)
+                        .update_plane(0, u32::from(map.buffer.handle()), damage)
                         .unwrap();
                 }
             }

@@ -6,27 +6,31 @@ use std::{cmp, io, mem, ptr};
 
 use drm::buffer::{Buffer, DrmFourcc};
 use drm::control::dumbbuffer::{DumbBuffer, DumbMapping};
-use drm::control::Device;
+use drm::control::{framebuffer, Device};
 use graphics_ipc::v1::Damage;
 use graphics_ipc::v2::V2GraphicsHandle;
 use orbclient::FONT;
 
 pub struct V2DisplayMap {
     pub display_handle: V2GraphicsHandle,
-    pub fb: DumbBuffer,
+    pub fb: framebuffer::Handle,
+    pub buffer: DumbBuffer,
     mapping: DumbMapping<'static>,
 }
 
 impl V2DisplayMap {
     pub fn new(display_handle: V2GraphicsHandle, width: u32, height: u32) -> io::Result<Self> {
-        let mut fb = display_handle.create_dumb_buffer((width, height), DrmFourcc::Argb8888, 32)?;
+        let mut buffer =
+            display_handle.create_dumb_buffer((width, height), DrmFourcc::Argb8888, 32)?;
+        let fb = display_handle.add_framebuffer(&buffer, 24, 32)?;
 
-        let map = display_handle.map_dumb_buffer(&mut fb)?;
+        let map = display_handle.map_dumb_buffer(&mut buffer)?;
         let map = unsafe { mem::transmute::<DumbMapping<'_>, DumbMapping<'static>>(map) };
 
         Ok(Self {
             display_handle,
             fb,
+            buffer,
             mapping: map,
         })
     }
@@ -37,8 +41,8 @@ impl V2DisplayMap {
                 self.mapping.as_mut_ptr() as *mut u32,
                 self.mapping.len() / 4,
             ),
-            width: self.fb.size().0 as usize,
-            height: self.fb.size().1 as usize,
+            width: self.buffer.size().0 as usize,
+            height: self.buffer.size().1 as usize,
         }
     }
 }
@@ -324,7 +328,7 @@ impl TextScreen {
             }
         }
 
-        let old_fb = mem::replace(&mut map.fb, new_fb);
+        let old_fb = mem::replace(&mut map.buffer, new_fb);
         map.mapping = new_mapping;
 
         let _ = map.display_handle.destroy_dumb_buffer(old_fb);

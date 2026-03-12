@@ -69,11 +69,25 @@ pub mod ipc {
     pub use redox_ioctl::drm::*;
 
     // FIXME replace these with proper drm interfaces
-    pub const UPDATE_PLANE: u64 = 6;
+    pub const UPDATE_PLANE: u64 = 0x12345670;
     #[repr(C, packed)]
     pub struct UpdatePlane {
         pub display_id: usize,
         pub fb_id: u32,
         pub damage: Damage,
+    }
+
+    pub const UPDATE_CURSOR: u64 = 0x12345671;
+    #[derive(Debug, Copy, Clone)]
+    #[repr(C, packed)]
+    pub struct UpdateCursor {
+        pub header: u32,
+        pub x: i32,
+        pub y: i32,
+        pub hot_x: i32,
+        pub hot_y: i32,
+        pub width: i32,
+        pub height: i32,
+        pub cursor_img_bytes: [u32; 4096],
     }
 }
