@@ -10,8 +10,8 @@ use driver_graphics::{
 use drm_sys::{
     DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON, DRM_MODE_TYPE_PREFERRED,
 };
-use graphics_ipc::v1::Damage;
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
+use graphics_ipc::v2::Damage;
 
 use syscall::{EINVAL, PAGE_SIZE};
 
