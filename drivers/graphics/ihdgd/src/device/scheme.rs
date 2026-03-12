@@ -99,16 +99,8 @@ impl GraphicsAdapter for Device {
         framebuffer.sync(&mut self.framebuffers[display_id], damage)
     }
 
-    fn supports_hw_cursor(&self) -> bool {
-        false
-    }
-
-    fn create_cursor_framebuffer(&mut self) -> Self::Buffer {
-        unimplemented!("ihdgd does not support this function");
-    }
-
-    fn map_cursor_framebuffer(&mut self, _cursor: &Self::Buffer) -> *mut u8 {
-        unimplemented!("ihdgd does not support this function");
+    fn hw_cursor_size(&self) -> Option<(u32, u32)> {
+        None
     }
 
     fn handle_cursor(&mut self, _cursor: Option<&CursorPlane<Self::Buffer>>, _dirty_fb: bool) {

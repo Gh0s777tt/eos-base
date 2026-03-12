@@ -67,9 +67,7 @@ pub trait GraphicsAdapter: Sized + Debug {
 
     fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Buffer, damage: Damage);
 
-    fn supports_hw_cursor(&self) -> bool;
-    fn create_cursor_framebuffer(&mut self) -> Self::Buffer;
-    fn map_cursor_framebuffer(&mut self, cursor: &Self::Buffer) -> *mut u8;
+    fn hw_cursor_size(&self) -> Option<(u32, u32)>;
     fn handle_cursor(&mut self, cursor: Option<&CursorPlane<Self::Buffer>>, dirty_fb: bool);
 }
 
@@ -222,7 +220,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                         );
                     }
 
-                    if self.inner.adapter.supports_hw_cursor() {
+                    if self.inner.adapter.hw_cursor_size().is_some() {
                         self.inner
                             .adapter
                             .handle_cursor(vt_state.cursor_plane.as_ref(), true);
@@ -349,16 +347,16 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     ) -> Result<()> {
         let vt_state = self.vts.get_mut(&vt).unwrap();
 
-        if !self.adapter.supports_hw_cursor() {
+        let Some((width, height)) = self.adapter.hw_cursor_size() else {
             return Err(Error::new(EINVAL));
-        }
+        };
 
         let cursor_plane = vt_state.cursor_plane.get_or_insert_with(|| CursorPlane {
             x: 0,
             y: 0,
             hot_x: 0,
             hot_y: 0,
-            framebuffer: self.adapter.create_cursor_framebuffer(),
+            framebuffer: self.adapter.create_dumb_buffer(width, height),
         });
 
         cursor_plane.x = cursor_damage.x;
@@ -377,9 +375,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
             let w: i32 = cursor_damage.width;
             let h: i32 = cursor_damage.height;
             let cursor_image = cursor_damage.cursor_img_bytes;
-            let cursor_ptr = self
-                .adapter
-                .map_cursor_framebuffer(&cursor_plane.framebuffer);
+            let cursor_ptr = self.adapter.map_dumb_buffer(&cursor_plane.framebuffer);
 
             //Clear previous image from backing storage
             unsafe {
@@ -752,9 +748,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         return Err(Error::new(EINVAL));
                     }
 
-                    let fb = self
-                        .adapter
-                        .create_dumb_buffer(data.width(), data.height());
+                    let fb = self.adapter.create_dumb_buffer(data.width(), data.height());
 
                     *next_id += 1;
                     fbs.insert(*next_id, Arc::new(fb));
