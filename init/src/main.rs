@@ -136,10 +136,15 @@ fn run(unit: &UnitId, unit_store: &mut UnitStore, config: &mut InitConfig) -> Re
             }
         }
         unit::UnitKind::Service { service } => {
+            if config.skip_cmd.contains(&service.cmd) {
+                eprintln!("Skipping '{} {}'", service.cmd, service.args.join(" "));
+                return Ok(());
+            }
             if config.log_debug {
                 eprintln!(
-                    "Starting {}",
+                    "Starting {} ({})",
                     unit.info.description.as_ref().unwrap_or(&unit.id.0),
+                    service.cmd,
                 );
             }
             service.spawn(&config.envs);
