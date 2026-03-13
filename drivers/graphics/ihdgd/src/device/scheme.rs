@@ -146,6 +146,7 @@ impl DeviceFb {
     }
 }
 
+#[derive(Debug)]
 pub struct DumbFb {
     width: usize,
     height: usize,

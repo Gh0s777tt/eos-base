@@ -42,6 +42,17 @@ pub struct VirtGpuFramebuffer<'a> {
     height: u32,
 }
 
+impl<'a> fmt::Debug for VirtGpuFramebuffer<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VirtGpuFramebuffer")
+            .field("id", &self.id)
+            .field("sgl", &self.sgl)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish_non_exhaustive()
+    }
+}
+
 impl DrmBuffer for VirtGpuFramebuffer<'_> {
     fn width(&self) -> u32 {
         self.width

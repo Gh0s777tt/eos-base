@@ -179,6 +179,7 @@ impl FrameBuffer {
     }
 }
 
+#[derive(Debug)]
 pub struct GraphicScreen {
     width: usize,
     height: usize,

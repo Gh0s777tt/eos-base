@@ -77,7 +77,7 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn handle_cursor(&mut self, cursor: Option<&CursorPlane<Self::Buffer>>, dirty_fb: bool);
 }
 
-pub trait Buffer {
+pub trait Buffer: Debug {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
 }
