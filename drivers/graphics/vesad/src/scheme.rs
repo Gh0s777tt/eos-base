@@ -68,7 +68,8 @@ impl GraphicsAdapter for FbAdapter {
         _standard_properties: &StandardProperties,
         id: DrmObjectId,
     ) {
-        let connector = objects.get_connector_mut(id).unwrap();
+        let mut connector = objects.get_connector(id).unwrap().lock().unwrap();
+        let connector = &mut *connector;
         connector.connection = DrmConnectorStatus::Connected;
         connector.update_from_size(connector.driver_data.width, connector.driver_data.height);
     }

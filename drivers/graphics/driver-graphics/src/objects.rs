@@ -2,6 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::sync::{Arc, Mutex};
 
 use syscall::{Error, Result, EINVAL};
 
@@ -12,7 +13,7 @@ pub struct DrmObjects<T: GraphicsAdapter> {
     next_id: DrmObjectId,
     pub(crate) connectors: Vec<DrmObjectId>,
     pub(crate) encoders: Vec<DrmObjectId>,
-    pub(crate) objects: HashMap<DrmObjectId, DrmObjectData>,
+    pub(crate) objects: HashMap<DrmObjectId, Arc<DrmObjectData>>,
     _marker: PhantomData<T>,
 }
 
@@ -31,10 +32,10 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
         let id = self.next_id;
         self.objects.insert(
             id,
-            DrmObjectData {
+            Arc::new(DrmObjectData {
                 kind: Box::new(data),
-                properties: vec![],
-            },
+                properties: Mutex::new(vec![]),
+            }),
         );
         self.next_id.0 += 1;
 
@@ -44,15 +45,6 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
     pub(crate) fn get<U: DrmObject>(&self, id: DrmObjectId) -> Result<&U> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
         if let Some(object) = (&*object.kind as &dyn Any).downcast_ref::<U>() {
-            Ok(object)
-        } else {
-            Err(Error::new(EINVAL))
-        }
-    }
-
-    pub(crate) fn get_mut<U: DrmObject>(&mut self, id: DrmObjectId) -> Result<&mut U> {
-        let object = self.objects.get_mut(&id).ok_or(Error::new(EINVAL))?;
-        if let Some(object) = (&mut *object.kind as &mut dyn Any).downcast_mut::<U>() {
             Ok(object)
         } else {
             Err(Error::new(EINVAL))
@@ -81,7 +73,7 @@ impl From<DrmObjectId> for u64 {
 #[derive(Debug)]
 pub(crate) struct DrmObjectData {
     kind: Box<dyn DrmObject + 'static>,
-    pub(crate) properties: Vec<(DrmObjectId, u64)>,
+    pub(crate) properties: Mutex<Vec<(DrmObjectId, u64)>>,
 }
 
 pub trait DrmObject: Any + Debug {

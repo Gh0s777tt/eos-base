@@ -1,5 +1,6 @@
 use std::ffi::c_char;
 use std::fmt::Debug;
+use std::sync::Mutex;
 
 use drm_sys::{
     drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_OBJECT_CONNECTOR,
@@ -19,7 +20,7 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
         });
         self.encoders.push(encoder_id);
 
-        let connector_id = self.add(DrmConnector {
+        let connector_id = self.add(Mutex::new(DrmConnector {
             encoder_id,
             modes: vec![],
             connector_type: DRM_MODE_CONNECTOR_Unknown,
@@ -29,7 +30,7 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
             mm_height: 0,
             subpixel: DrmSubpixelOrder::Unknown,
             driver_data,
-        });
+        }));
         self.connectors.push(connector_id);
 
         connector_id
@@ -39,19 +40,16 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
         &self.connectors
     }
 
-    pub fn connectors(&self) -> impl Iterator<Item = &DrmConnector<T::Connector>> + use<'_, T> {
-        self.connectors.iter().map(|&id| self.get(id).unwrap())
+    pub fn connectors(
+        &self,
+    ) -> impl Iterator<Item = &Mutex<DrmConnector<T::Connector>>> + use<'_, T> {
+        self.connectors
+            .iter()
+            .map(|&id| self.get_connector(id).unwrap())
     }
 
-    pub fn get_connector(&self, id: DrmObjectId) -> Result<&DrmConnector<T::Connector>> {
+    pub fn get_connector(&self, id: DrmObjectId) -> Result<&Mutex<DrmConnector<T::Connector>>> {
         self.get(id)
-    }
-
-    pub fn get_connector_mut(
-        &mut self,
-        id: DrmObjectId,
-    ) -> Result<&mut DrmConnector<T::Connector>> {
-        self.get_mut(id)
     }
 
     pub fn encoder_ids(&self) -> &[DrmObjectId] {
@@ -177,7 +175,7 @@ pub enum DrmSubpixelOrder {
     None,
 }
 
-impl<T: Debug + 'static> DrmObject for DrmConnector<T> {
+impl<T: Debug + 'static> DrmObject for Mutex<DrmConnector<T>> {
     fn object_type(&self) -> u32 {
         DRM_MODE_OBJECT_CONNECTOR
     }

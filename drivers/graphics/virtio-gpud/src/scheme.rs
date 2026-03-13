@@ -308,7 +308,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         id: DrmObjectId,
     ) {
         futures::executor::block_on(async {
-            let connector = objects.get_connector_mut(id).unwrap();
+            let mut connector = objects.get_connector(id).unwrap().lock().unwrap();
             let display = &self.displays[connector.driver_data.display_id as usize];
 
             connector.connection = if display.enabled {
@@ -319,6 +319,8 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
             if self.has_edid {
                 connector.update_from_edid(&display.edid);
+
+                drop(connector);
 
                 let blob = objects.add_blob(display.edid.clone());
                 objects.set_object_property(id, standard_properties.edid, blob.into());

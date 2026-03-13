@@ -1,5 +1,6 @@
 use std::ffi::c_char;
 use std::fmt::Debug;
+use std::sync::Mutex;
 
 use drm_sys::{DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_PROPERTY, DRM_PROP_NAME_LEN};
 use syscall::{Error, Result, EINVAL};
@@ -62,20 +63,23 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
     pub fn add_object_property(&mut self, object: DrmObjectId, property: DrmObjectId, value: u64) {
         let object = self.objects.get_mut(&object).unwrap();
         // FIXME validate property uniqueness and value
-        object.properties.push((property, value));
+        object.properties.lock().unwrap().push((property, value));
     }
 
     pub fn set_object_property(&mut self, object: DrmObjectId, property: DrmObjectId, value: u64) {
         let object = self.objects.get_mut(&object).unwrap();
         // FIXME validate property existence and value
-        for (prop, val) in object.properties.iter_mut() {
+        for (prop, val) in object.properties.lock().unwrap().iter_mut() {
             if *prop == property {
                 *val = value;
             }
         }
     }
 
-    pub fn get_object_properties(&self, id: DrmObjectId) -> Result<&[(DrmObjectId, u64)]> {
+    pub fn get_object_properties(
+        &self,
+        id: DrmObjectId,
+    ) -> Result<&Mutex<Vec<(DrmObjectId, u64)>>> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
         Ok(&object.properties)
     }

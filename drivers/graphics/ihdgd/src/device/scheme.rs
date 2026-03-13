@@ -65,7 +65,7 @@ impl GraphicsAdapter for Device {
         _standard_properties: &StandardProperties,
         id: DrmObjectId,
     ) {
-        let connector = objects.get_connector_mut(id).unwrap();
+        let mut connector = objects.get_connector(id).unwrap().lock().unwrap();
         let framebuffer = &self.framebuffers[connector.driver_data.framebuffer_id];
         connector.connection = DrmConnectorStatus::Connected;
         connector.update_from_size(framebuffer.width as u32, framebuffer.height as u32);

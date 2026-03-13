@@ -609,12 +609,16 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     }
                     let connector = self
                         .objects
-                        .get_connector(DrmObjectId(data.connector_id()))?;
+                        .get_connector(DrmObjectId(data.connector_id()))?
+                        .lock()
+                        .unwrap();
                     data.set_encoders_ptr(&[connector.encoder_id.0]);
                     data.set_modes_ptr(&connector.modes);
                     let props = self
                         .objects
-                        .get_object_properties(DrmObjectId(data.connector_id()))?;
+                        .get_object_properties(DrmObjectId(data.connector_id()))?
+                        .lock()
+                        .unwrap();
                     data.set_props_ptr(&props.iter().map(|&(id, _)| id.0).collect::<Vec<_>>());
                     data.set_prop_values_ptr(
                         &props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
@@ -800,7 +804,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                         let props = self
                             .objects
-                            .get_object_properties(DrmObjectId(data.obj_id()))?;
+                            .get_object_properties(DrmObjectId(data.obj_id()))?
+                            .lock()
+                            .unwrap();
                         data.set_props_ptr(&props.iter().map(|&(id, _)| id.0).collect::<Vec<_>>());
                         data.set_prop_values_ptr(
                             &props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
