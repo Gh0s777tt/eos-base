@@ -66,9 +66,16 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
     }
 
     pub fn add_connector(&mut self, driver_data: T::Connector) -> DrmObjectId {
+        let encoder_id = self.add(DrmEncoder {
+            crtc_id: DrmObjectId::INVALID,
+            possible_crtcs: 0,
+            possible_clones: 0,
+        });
+        self.encoders.push(encoder_id);
+
         let connector_id = self.add(DrmConnector {
             modes: vec![],
-            encoder_id: DrmObjectId::INVALID,
+            encoder_id,
             connector_type: 0,
             connector_type_id: 0,
             connection: DrmConnectorStatus::Unknown,
@@ -78,15 +85,6 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
             driver_data,
         });
         self.connectors.push(connector_id);
-
-        let encoder_id = self.add(DrmEncoder {
-            crtc_id: DrmObjectId::INVALID,
-            possible_crtcs: 0,
-            possible_clones: 0,
-        });
-        self.encoders.push(encoder_id);
-
-        self.get_connector_mut(connector_id).unwrap().encoder_id = encoder_id;
 
         connector_id
     }
@@ -120,10 +118,6 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
 
     pub fn get_encoder(&self, id: DrmObjectId) -> Result<&DrmEncoder> {
         self.get(id)
-    }
-
-    pub fn get_encoder_mut(&mut self, id: DrmObjectId) -> Result<&mut DrmEncoder> {
-        self.get_mut(id)
     }
 }
 

@@ -39,8 +39,7 @@ pub struct StandardProperties {
 pub trait GraphicsAdapter: Sized + Debug {
     type Connector: Debug + 'static;
 
-    type Framebuffer: Framebuffer;
-    type Cursor: CursorFramebuffer;
+    type Buffer: Buffer;
 
     fn name(&self) -> &'static [u8];
     fn desc(&self) -> &'static [u8];
@@ -63,31 +62,33 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn display_count(&self) -> usize;
     fn display_size(&self, display_id: usize) -> (u32, u32);
 
-    fn create_dumb_framebuffer(&mut self, width: u32, height: u32) -> Self::Framebuffer;
-    fn map_dumb_framebuffer(&mut self, framebuffer: &Self::Framebuffer) -> *mut u8;
+    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer;
+    fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8;
 
-    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Framebuffer, damage: Damage);
+    fn update_plane(
+        &mut self,
+        display_id: usize,
+        framebuffer: Option<&Self::Buffer>,
+        damage: Damage,
+    );
 
-    fn supports_hw_cursor(&self) -> bool;
-    fn create_cursor_framebuffer(&mut self) -> Self::Cursor;
-    fn map_cursor_framebuffer(&mut self, cursor: &Self::Cursor) -> *mut u8;
-    fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Cursor>, dirty_fb: bool);
+    fn hw_cursor_size(&self) -> Option<(u32, u32)>;
+    fn handle_cursor(&mut self, cursor: Option<&CursorPlane<Self::Buffer>>, dirty_fb: bool);
 }
 
-pub trait Framebuffer {
+pub trait Buffer {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
 }
 
-pub struct CursorPlane<C: CursorFramebuffer> {
+#[derive(Debug)]
+pub struct CursorPlane<C: Buffer> {
     pub x: i32,
     pub y: i32,
     pub hot_x: i32,
     pub hot_y: i32,
     pub framebuffer: C,
 }
-
-pub trait CursorFramebuffer {}
 
 pub struct GraphicsScheme<T: GraphicsAdapter> {
     inner: GraphicsSchemeInner<T>,
@@ -217,15 +218,22 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                     );
 
                     for (display_id, fb) in vt_state.display_fbs.iter().enumerate() {
-                        GraphicsSchemeInner::update_whole_screen(
-                            &mut self.inner.adapter,
+                        self.inner.adapter.update_plane(
                             display_id,
-                            fb,
+                            fb.as_deref(),
+                            Damage {
+                                x: 0,
+                                y: 0,
+                                width: fb.as_deref().map_or(0, |fb| fb.width()),
+                                height: fb.as_deref().map_or(0, |fb| fb.height()),
+                            },
                         );
                     }
 
-                    if let Some(cursor_plane) = &vt_state.cursor_plane {
-                        self.inner.adapter.handle_cursor(cursor_plane, true);
+                    if self.inner.adapter.hw_cursor_size().is_some() {
+                        self.inner
+                            .adapter
+                            .handle_cursor(vt_state.cursor_plane.as_ref(), true);
                     }
                 }
 
@@ -291,8 +299,8 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
 }
 
 struct VtState<T: GraphicsAdapter> {
-    display_fbs: Vec<Arc<T::Framebuffer>>,
-    cursor_plane: Option<CursorPlane<T::Cursor>>,
+    display_fbs: Vec<Option<Arc<T::Buffer>>>,
+    cursor_plane: Option<CursorPlane<T::Buffer>>,
 }
 
 enum Handle<T: GraphicsAdapter> {
@@ -304,7 +312,7 @@ enum Handle<T: GraphicsAdapter> {
     V2 {
         vt: usize,
         next_id: u32,
-        fbs: HashMap<u32, Arc<T::Framebuffer>>,
+        fbs: HashMap<u32, Arc<T::Buffer>>,
     },
     SchemeRoot,
 }
@@ -315,39 +323,10 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
         vts: &'a mut HashMap<usize, VtState<T>>,
         vt: usize,
     ) -> &'a mut VtState<T> {
-        vts.entry(vt).or_insert_with(|| {
-            let mut display_fbs = vec![];
-            for display_id in 0..adapter.display_count() {
-                let (width, height) = adapter.display_size(display_id);
-                display_fbs.push(Arc::new(adapter.create_dumb_framebuffer(width, height)));
-            }
-
-            let cursor_plane = adapter.supports_hw_cursor().then(|| CursorPlane {
-                x: 0,
-                y: 0,
-                hot_x: 0,
-                hot_y: 0,
-                framebuffer: adapter.create_cursor_framebuffer(),
-            });
-
-            VtState {
-                display_fbs,
-                cursor_plane,
-            }
+        vts.entry(vt).or_insert_with(|| VtState {
+            display_fbs: vec![None; adapter.display_count()],
+            cursor_plane: None,
         })
-    }
-
-    fn update_whole_screen(adapter: &mut T, screen: usize, framebuffer: &T::Framebuffer) {
-        adapter.update_plane(
-            screen,
-            framebuffer,
-            Damage {
-                x: 0,
-                y: 0,
-                width: framebuffer.width(),
-                height: framebuffer.height(),
-            },
-        );
     }
 
     fn handle_cursor_update(
@@ -357,10 +336,17 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     ) -> Result<()> {
         let vt_state = self.vts.get_mut(&vt).unwrap();
 
-        let Some(cursor_plane) = &mut vt_state.cursor_plane else {
-            // Hardware cursor not supported
+        let Some((width, height)) = self.adapter.hw_cursor_size() else {
             return Err(Error::new(EINVAL));
         };
+
+        let cursor_plane = vt_state.cursor_plane.get_or_insert_with(|| CursorPlane {
+            x: 0,
+            y: 0,
+            hot_x: 0,
+            hot_y: 0,
+            framebuffer: self.adapter.create_dumb_buffer(width, height),
+        });
 
         cursor_plane.x = cursor_damage.x;
         cursor_plane.y = cursor_damage.y;
@@ -370,7 +356,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 return Ok(());
             }
 
-            self.adapter.handle_cursor(cursor_plane, false);
+            self.adapter.handle_cursor(Some(cursor_plane), false);
         } else {
             cursor_plane.hot_x = cursor_damage.hot_x;
             cursor_plane.hot_y = cursor_damage.hot_y;
@@ -378,9 +364,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
             let w: i32 = cursor_damage.width;
             let h: i32 = cursor_damage.height;
             let cursor_image = cursor_damage.cursor_img_bytes;
-            let cursor_ptr = self
-                .adapter
-                .map_cursor_framebuffer(&cursor_plane.framebuffer);
+            let cursor_ptr = self.adapter.map_dumb_buffer(&cursor_plane.framebuffer);
 
             //Clear previous image from backing storage
             unsafe {
@@ -405,7 +389,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 return Ok(());
             }
 
-            self.adapter.handle_cursor(cursor_plane, true);
+            self.adapter.handle_cursor(Some(cursor_plane), true);
         }
 
         return Ok(());
@@ -483,13 +467,8 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
         let path = match self.handles.get(&id).ok_or(Error::new(EBADF))? {
             Handle::V1Screen { vt, screen } => {
-                let framebuffer = &self.vts[vt].display_fbs[*screen];
-                format!(
-                    "{}:{vt}.{screen}/{}/{}",
-                    self.scheme_name,
-                    framebuffer.width(),
-                    framebuffer.height()
-                )
+                let (width, height) = self.adapter.display_size(*screen);
+                format!("{}:{vt}.{screen}/{width}/{height}", self.scheme_name)
             }
             Handle::V2 {
                 vt,
@@ -629,7 +608,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     }
                     let connector = self
                         .objects
-                        .get_connector_mut(DrmObjectId(data.connector_id()))?;
+                        .get_connector(DrmObjectId(data.connector_id()))?;
                     data.set_connection(connector.connection as u32);
                     data.set_modes_ptr(&connector.modes);
                     data.set_mm_width(connector.mm_width);
@@ -753,9 +732,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         return Err(Error::new(EINVAL));
                     }
 
-                    let fb = self
-                        .adapter
-                        .create_dumb_framebuffer(data.width(), data.height());
+                    let fb = self.adapter.create_dumb_buffer(data.width(), data.height());
 
                     *next_id += 1;
                     fbs.insert(*next_id, Arc::new(fb));
@@ -856,15 +833,23 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         return Err(Error::new(EINVAL));
                     }
 
-                    let Some(framebuffer) = fbs.get(&id_index(payload.fb_id)) else {
+                    let framebuffer = if payload.fb_id == 0 {
+                        None
+                    } else if let Some(framebuffer) = fbs.get(&id_index(payload.fb_id)) {
+                        Some(framebuffer)
+                    } else {
                         return Err(Error::new(EINVAL));
                     };
 
-                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] = framebuffer.clone();
+                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] =
+                        framebuffer.map(Arc::clone);
 
                     if *vt == self.active_vt {
-                        self.adapter
-                            .update_plane(display_id, framebuffer, payload.damage);
+                        self.adapter.update_plane(
+                            display_id,
+                            framebuffer.map(|fb| &**fb),
+                            payload.damage,
+                        );
                     }
 
                     Ok(size_of::<ipc::UpdatePlane>())
@@ -910,7 +895,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             ),
             Handle::V1Screen { .. } | Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
         };
-        let ptr = T::map_dumb_framebuffer(&mut self.adapter, framebuffer);
+        let ptr = T::map_dumb_buffer(&mut self.adapter, framebuffer);
         Ok(unsafe { ptr.add(offset as usize) } as usize)
     }
 }
