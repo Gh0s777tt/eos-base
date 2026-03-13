@@ -609,12 +609,8 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let connector = self
                         .objects
                         .get_connector(DrmObjectId(data.connector_id()))?;
-                    data.set_connection(connector.connection as u32);
-                    data.set_modes_ptr(&connector.modes);
-                    data.set_mm_width(connector.mm_width);
-                    data.set_mm_height(connector.mm_width);
-                    data.set_subpixel(connector.subpixel as u32);
                     data.set_encoders_ptr(&[connector.encoder_id.0]);
+                    data.set_modes_ptr(&connector.modes);
                     let props = self
                         .objects
                         .get_object_properties(DrmObjectId(data.connector_id()))?;
@@ -622,6 +618,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_prop_values_ptr(
                         &props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
                     );
+                    data.set_connector_type(data.connector_type());
+                    data.set_connector_type_id(data.connector_type_id());
+                    data.set_connection(connector.connection as u32);
+                    data.set_mm_width(connector.mm_width);
+                    data.set_mm_height(connector.mm_width);
+                    data.set_subpixel(connector.subpixel as u32);
                     Ok(0)
                 }),
                 ipc::MODE_GET_PROPERTY => ipc::DrmModeGetProperty::with(payload, |mut data| {

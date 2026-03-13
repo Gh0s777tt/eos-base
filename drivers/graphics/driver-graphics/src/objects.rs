@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-use drm_sys::{drm_mode_modeinfo, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_ENCODER};
+use drm_sys::{
+    drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_OBJECT_CONNECTOR,
+    DRM_MODE_OBJECT_ENCODER,
+};
 use syscall::{Error, Result, EINVAL};
 
 use crate::GraphicsAdapter;
@@ -69,15 +72,15 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
         let encoder_id = self.add(DrmEncoder {
             crtc_id: DrmObjectId::INVALID,
             possible_crtcs: 0,
-            possible_clones: 0,
+            possible_clones: 1 << self.encoders.len(),
         });
         self.encoders.push(encoder_id);
 
         let connector_id = self.add(DrmConnector {
-            modes: vec![],
             encoder_id,
-            connector_type: 0,
-            connector_type_id: 0,
+            modes: vec![],
+            connector_type: DRM_MODE_CONNECTOR_Unknown,
+            connector_type_id: self.connectors.len() as u32, // FIXME maybe pick unique id within connector type?
             connection: DrmConnectorStatus::Unknown,
             mm_width: 0,
             mm_height: 0,
@@ -146,8 +149,8 @@ pub trait DrmObject: Any + Debug {
 
 #[derive(Debug)]
 pub struct DrmConnector<T: Debug + 'static> {
-    pub modes: Vec<drm_mode_modeinfo>,
     pub encoder_id: DrmObjectId,
+    pub modes: Vec<drm_mode_modeinfo>,
     pub connector_type: u32,
     pub connector_type_id: u32,
     pub connection: DrmConnectorStatus,
