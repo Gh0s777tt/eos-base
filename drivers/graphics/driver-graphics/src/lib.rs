@@ -218,10 +218,15 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                     );
 
                     for (display_id, fb) in vt_state.display_fbs.iter().enumerate() {
-                        GraphicsSchemeInner::update_whole_screen(
-                            &mut self.inner.adapter,
+                        self.inner.adapter.update_plane(
                             display_id,
                             fb.as_deref(),
+                            Damage {
+                                x: 0,
+                                y: 0,
+                                width: fb.as_deref().map_or(0, |fb| fb.width()),
+                                height: fb.as_deref().map_or(0, |fb| fb.height()),
+                            },
                         );
                     }
 
@@ -322,19 +327,6 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
             display_fbs: vec![None; adapter.display_count()],
             cursor_plane: None,
         })
-    }
-
-    fn update_whole_screen(adapter: &mut T, screen: usize, framebuffer: Option<&T::Buffer>) {
-        adapter.update_plane(
-            screen,
-            framebuffer,
-            Damage {
-                x: 0,
-                y: 0,
-                width: framebuffer.map_or(0, |fb| fb.width()),
-                height: framebuffer.map_or(0, |fb| fb.height()),
-            },
-        );
     }
 
     fn handle_cursor_update(
