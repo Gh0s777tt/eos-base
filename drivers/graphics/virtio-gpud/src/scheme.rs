@@ -2,7 +2,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use common::{dma::Dma, sgl};
-use driver_graphics::objects::{DrmConnectorStatus, DrmObjectId, DrmObjects};
+use driver_graphics::connector::DrmConnectorStatus;
+use driver_graphics::objects::{DrmObjectId, DrmObjects};
 use driver_graphics::{
     modeinfo_for_size, Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme,
     StandardProperties,

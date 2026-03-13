@@ -4,7 +4,8 @@ use std::alloc::{self, Layout};
 use std::convert::TryInto;
 use std::ptr::{self, NonNull};
 
-use driver_graphics::objects::{DrmConnectorStatus, DrmObjectId, DrmObjects};
+use driver_graphics::connector::DrmConnectorStatus;
+use driver_graphics::objects::{DrmObjectId, DrmObjects};
 use driver_graphics::{
     modeinfo_for_size, Buffer, CursorPlane, GraphicsAdapter, StandardProperties,
 };

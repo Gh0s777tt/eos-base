@@ -27,6 +27,7 @@ use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EO
 use crate::objects::{DrmObjectId, DrmObjects};
 use crate::properties::DrmPropertyKind;
 
+pub mod connector;
 pub mod objects;
 pub mod properties;
 
