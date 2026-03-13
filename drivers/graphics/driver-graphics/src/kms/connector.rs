@@ -8,24 +8,24 @@ use drm_sys::{
 };
 use syscall::Result;
 
-use crate::objects::{DrmObject, DrmObjectId, DrmObjects};
+use crate::kms::objects::{KmsObject, KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
 
-impl<T: GraphicsAdapter> DrmObjects<T> {
-    pub fn add_connector(&mut self, driver_data: T::Connector) -> DrmObjectId {
-        let encoder_id = self.add(DrmEncoder {
-            crtc_id: DrmObjectId::INVALID,
+impl<T: GraphicsAdapter> KmsObjects<T> {
+    pub fn add_connector(&mut self, driver_data: T::Connector) -> KmsObjectId {
+        let encoder_id = self.add(KmsEncoder {
+            crtc_id: KmsObjectId::INVALID,
             possible_crtcs: 0,
             possible_clones: 1 << self.encoders.len(),
         });
         self.encoders.push(encoder_id);
 
-        let connector_id = self.add(Mutex::new(DrmConnector {
+        let connector_id = self.add(Mutex::new(KmsConnector {
             encoder_id,
             modes: vec![],
             connector_type: DRM_MODE_CONNECTOR_Unknown,
             connector_type_id: self.connectors.len() as u32, // FIXME maybe pick unique id within connector type?
-            connection: DrmConnectorStatus::Unknown,
+            connection: KmsConnectorStatus::Unknown,
             mm_width: 0,
             mm_height: 0,
             subpixel: DrmSubpixelOrder::Unknown,
@@ -36,45 +36,45 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
         connector_id
     }
 
-    pub fn connector_ids(&self) -> &[DrmObjectId] {
+    pub fn connector_ids(&self) -> &[KmsObjectId] {
         &self.connectors
     }
 
     pub fn connectors(
         &self,
-    ) -> impl Iterator<Item = &Mutex<DrmConnector<T::Connector>>> + use<'_, T> {
+    ) -> impl Iterator<Item = &Mutex<KmsConnector<T::Connector>>> + use<'_, T> {
         self.connectors
             .iter()
             .map(|&id| self.get_connector(id).unwrap())
     }
 
-    pub fn get_connector(&self, id: DrmObjectId) -> Result<&Mutex<DrmConnector<T::Connector>>> {
+    pub fn get_connector(&self, id: KmsObjectId) -> Result<&Mutex<KmsConnector<T::Connector>>> {
         self.get(id)
     }
 
-    pub fn encoder_ids(&self) -> &[DrmObjectId] {
+    pub fn encoder_ids(&self) -> &[KmsObjectId] {
         &self.encoders
     }
 
-    pub fn get_encoder(&self, id: DrmObjectId) -> Result<&DrmEncoder> {
+    pub fn get_encoder(&self, id: KmsObjectId) -> Result<&KmsEncoder> {
         self.get(id)
     }
 }
 
 #[derive(Debug)]
-pub struct DrmConnector<T: Debug + 'static> {
-    pub encoder_id: DrmObjectId,
+pub struct KmsConnector<T: Debug + 'static> {
+    pub encoder_id: KmsObjectId,
     pub modes: Vec<drm_mode_modeinfo>,
     pub connector_type: u32,
     pub connector_type_id: u32,
-    pub connection: DrmConnectorStatus,
+    pub connection: KmsConnectorStatus,
     pub mm_width: u32,
     pub mm_height: u32,
     pub subpixel: DrmSubpixelOrder,
     pub driver_data: T,
 }
 
-impl<T: Debug + 'static> DrmConnector<T> {
+impl<T: Debug + 'static> KmsConnector<T> {
     pub fn update_from_size(&mut self, width: u32, height: u32) {
         self.modes = vec![Self::modeinfo_for_size(width, height)];
     }
@@ -158,7 +158,7 @@ impl<T: Debug + 'static> DrmConnector<T> {
 
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
-pub enum DrmConnectorStatus {
+pub enum KmsConnectorStatus {
     Disconnected = 0,
     Connected = 1,
     Unknown = 2,
@@ -175,7 +175,7 @@ pub enum DrmSubpixelOrder {
     None,
 }
 
-impl<T: Debug + 'static> DrmObject for Mutex<DrmConnector<T>> {
+impl<T: Debug + 'static> KmsObject for Mutex<KmsConnector<T>> {
     fn object_type(&self) -> u32 {
         DRM_MODE_OBJECT_CONNECTOR
     }
@@ -183,13 +183,13 @@ impl<T: Debug + 'static> DrmObject for Mutex<DrmConnector<T>> {
 
 // FIXME can we represent connector and encoder using a single struct?
 #[derive(Debug)]
-pub struct DrmEncoder {
-    pub crtc_id: DrmObjectId,
+pub struct KmsEncoder {
+    pub crtc_id: KmsObjectId,
     pub possible_crtcs: u32,
     pub possible_clones: u32,
 }
 
-impl DrmObject for DrmEncoder {
+impl KmsObject for KmsEncoder {
     fn object_type(&self) -> u32 {
         DRM_MODE_OBJECT_ENCODER
     }

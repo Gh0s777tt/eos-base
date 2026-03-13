@@ -2,8 +2,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use common::{dma::Dma, sgl};
-use driver_graphics::connector::DrmConnectorStatus;
-use driver_graphics::objects::{DrmObjectId, DrmObjects};
+use driver_graphics::kms::connector::KmsConnectorStatus;
+use driver_graphics::kms::objects::{KmsObjectId, KmsObjects};
 use driver_graphics::{
     Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme, StandardProperties,
 };
@@ -277,7 +277,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         b"VirtIO GPU"
     }
 
-    fn init(&mut self, objects: &mut DrmObjects<Self>, standard_properties: &StandardProperties) {
+    fn init(&mut self, objects: &mut KmsObjects<Self>, standard_properties: &StandardProperties) {
         futures::executor::block_on(async {
             self.update_displays().await.unwrap();
         });
@@ -314,18 +314,18 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
     fn probe_connector(
         &mut self,
-        objects: &mut DrmObjects<Self>,
+        objects: &mut KmsObjects<Self>,
         standard_properties: &StandardProperties,
-        id: DrmObjectId,
+        id: KmsObjectId,
     ) {
         futures::executor::block_on(async {
             let mut connector = objects.get_connector(id).unwrap().lock().unwrap();
             let display = &self.displays[connector.driver_data.display_id as usize];
 
             connector.connection = if display.enabled {
-                DrmConnectorStatus::Connected
+                KmsConnectorStatus::Connected
             } else {
-                DrmConnectorStatus::Disconnected
+                KmsConnectorStatus::Disconnected
             };
 
             if self.has_edid {

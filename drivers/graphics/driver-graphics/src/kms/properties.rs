@@ -5,24 +5,24 @@ use std::sync::Mutex;
 use drm_sys::{DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_PROPERTY, DRM_PROP_NAME_LEN};
 use syscall::{Error, Result, EINVAL};
 
-use crate::objects::{DrmObject, DrmObjectId, DrmObjects};
+use crate::kms::objects::{KmsObject, KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
 
-impl<T: GraphicsAdapter> DrmObjects<T> {
+impl<T: GraphicsAdapter> KmsObjects<T> {
     pub fn add_property(
         &mut self,
         name: &str,
         immutable: bool,
         atomic: bool,
-        kind: DrmPropertyKind,
-    ) -> DrmObjectId {
+        kind: KmsPropertyKind,
+    ) -> KmsObjectId {
         if name.len() > DRM_PROP_NAME_LEN as usize {
             panic!("Property name {name} is too long");
         }
 
         match &kind {
-            DrmPropertyKind::Range(start, end) => assert!(start < end),
-            DrmPropertyKind::Enum(variants) => {
+            KmsPropertyKind::Range(start, end) => assert!(start < end),
+            KmsPropertyKind::Enum(variants) => {
                 // FIXME check duplicate variant numbers
                 for (variant_name, _) in variants {
                     if variant_name.len() > DRM_PROP_NAME_LEN as usize {
@@ -30,8 +30,8 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
                     }
                 }
             }
-            DrmPropertyKind::Blob => {}
-            DrmPropertyKind::Bitmask(bitmask_flags) => {
+            KmsPropertyKind::Blob => {}
+            KmsPropertyKind::Bitmask(bitmask_flags) => {
                 // FIXME check overlapping flag numbers
                 for (flag_name, _) in bitmask_flags {
                     if flag_name.len() > DRM_PROP_NAME_LEN as usize {
@@ -39,8 +39,8 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
                     }
                 }
             }
-            DrmPropertyKind::Object => {}
-            DrmPropertyKind::SignedRange(start, end) => assert!(start < end),
+            KmsPropertyKind::Object => {}
+            KmsPropertyKind::SignedRange(start, end) => assert!(start < end),
         }
 
         let mut name_bytes = [0; DRM_PROP_NAME_LEN as usize];
@@ -48,7 +48,7 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
             *to = from as c_char;
         }
 
-        self.add(DrmProperty {
+        self.add(KmsProperty {
             name: name_bytes,
             immutable,
             atomic,
@@ -56,17 +56,17 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
         })
     }
 
-    pub fn get_property(&self, id: DrmObjectId) -> Result<&DrmProperty> {
+    pub fn get_property(&self, id: KmsObjectId) -> Result<&KmsProperty> {
         self.get(id)
     }
 
-    pub fn add_object_property(&mut self, object: DrmObjectId, property: DrmObjectId, value: u64) {
+    pub fn add_object_property(&mut self, object: KmsObjectId, property: KmsObjectId, value: u64) {
         let object = self.objects.get_mut(&object).unwrap();
         // FIXME validate property uniqueness and value
         object.properties.lock().unwrap().push((property, value));
     }
 
-    pub fn set_object_property(&mut self, object: DrmObjectId, property: DrmObjectId, value: u64) {
+    pub fn set_object_property(&mut self, object: KmsObjectId, property: KmsObjectId, value: u64) {
         let object = self.objects.get_mut(&object).unwrap();
         // FIXME validate property existence and value
         for (prop, val) in object.properties.lock().unwrap().iter_mut() {
@@ -78,31 +78,31 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
 
     pub fn get_object_properties(
         &self,
-        id: DrmObjectId,
-    ) -> Result<&Mutex<Vec<(DrmObjectId, u64)>>> {
+        id: KmsObjectId,
+    ) -> Result<&Mutex<Vec<(KmsObjectId, u64)>>> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
         Ok(&object.properties)
     }
 
-    pub fn add_blob(&mut self, data: Vec<u8>) -> DrmObjectId {
-        self.add(DrmBlob { data })
+    pub fn add_blob(&mut self, data: Vec<u8>) -> KmsObjectId {
+        self.add(KmsBlob { data })
     }
 
-    pub fn get_blob(&self, id: DrmObjectId) -> Result<&[u8]> {
-        Ok(&self.get::<DrmBlob>(id)?.data)
+    pub fn get_blob(&self, id: KmsObjectId) -> Result<&[u8]> {
+        Ok(&self.get::<KmsBlob>(id)?.data)
     }
 }
 
 #[derive(Debug)]
-pub struct DrmProperty {
+pub struct KmsProperty {
     pub name: [c_char; DRM_PROP_NAME_LEN as usize],
     pub immutable: bool,
     pub atomic: bool,
-    pub kind: DrmPropertyKind,
+    pub kind: KmsPropertyKind,
 }
 
 #[derive(Debug)]
-pub enum DrmPropertyKind {
+pub enum KmsPropertyKind {
     Range(u64, u64),
     Enum(Vec<(&'static str, u64)>),
     Blob,
@@ -111,18 +111,18 @@ pub enum DrmPropertyKind {
     SignedRange(i64, i64),
 }
 
-impl DrmObject for DrmProperty {
+impl KmsObject for KmsProperty {
     fn object_type(&self) -> u32 {
         DRM_MODE_OBJECT_PROPERTY
     }
 }
 
 #[derive(Debug)]
-pub struct DrmBlob {
+pub struct KmsBlob {
     data: Vec<u8>,
 }
 
-impl DrmObject for DrmBlob {
+impl KmsObject for KmsBlob {
     fn object_type(&self) -> u32 {
         DRM_MODE_OBJECT_BLOB
     }
