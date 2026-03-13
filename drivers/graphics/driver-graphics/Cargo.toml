@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 drm-sys.workspace = true
+#TODO: edid is abandoned, fork it an maintain?
+edid = "0.3.0"
 log.workspace = true
 redox-scheme.workspace = true
 redox_syscall.workspace = true
