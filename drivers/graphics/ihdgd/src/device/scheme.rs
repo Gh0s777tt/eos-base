@@ -4,10 +4,9 @@ use std::alloc::{self, Layout};
 use std::convert::TryInto;
 use std::ptr::{self, NonNull};
 
-use driver_graphics::objects::{DrmConnectorStatus, DrmObjectId, DrmObjects};
-use driver_graphics::{
-    modeinfo_for_size, Buffer, CursorPlane, GraphicsAdapter, StandardProperties,
-};
+use driver_graphics::connector::DrmConnectorStatus;
+use driver_graphics::objects::{DrmObjectId, DrmObjects};
+use driver_graphics::{Buffer, CursorPlane, GraphicsAdapter, StandardProperties};
 use drm_sys::DRM_MODE_DPMS_ON;
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use graphics_ipc::v2::Damage;
@@ -69,10 +68,7 @@ impl GraphicsAdapter for Device {
         let connector = objects.get_connector_mut(id).unwrap();
         let framebuffer = &self.framebuffers[connector.driver_data.framebuffer_id];
         connector.connection = DrmConnectorStatus::Connected;
-        connector.modes = vec![modeinfo_for_size(
-            framebuffer.width as u32,
-            framebuffer.height as u32,
-        )];
+        connector.update_from_size(framebuffer.width as u32, framebuffer.height as u32);
         // FIXME fetch EDID
     }
 

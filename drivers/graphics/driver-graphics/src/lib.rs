@@ -11,10 +11,10 @@ use std::os::fd::BorrowedFd;
 use std::sync::Arc;
 
 use drm_sys::{
-    drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON,
-    DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND, DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK,
-    DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT,
-    DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE, DRM_PROP_NAME_LEN,
+    drm_mode_property_enum, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON, DRM_MODE_DPMS_STANDBY,
+    DRM_MODE_DPMS_SUSPEND, DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB,
+    DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE,
+    DRM_MODE_PROP_SIGNED_RANGE, DRM_PROP_NAME_LEN,
 };
 use graphics_ipc::v2::Damage;
 use inputd::{DisplayHandle, VtEventKind};
@@ -27,6 +27,7 @@ use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EO
 use crate::objects::{DrmObjectId, DrmObjects};
 use crate::properties::DrmPropertyKind;
 
+pub mod connector;
 pub mod objects;
 pub mod properties;
 
@@ -609,12 +610,8 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let connector = self
                         .objects
                         .get_connector(DrmObjectId(data.connector_id()))?;
-                    data.set_connection(connector.connection as u32);
-                    data.set_modes_ptr(&connector.modes);
-                    data.set_mm_width(connector.mm_width);
-                    data.set_mm_height(connector.mm_width);
-                    data.set_subpixel(connector.subpixel as u32);
                     data.set_encoders_ptr(&[connector.encoder_id.0]);
+                    data.set_modes_ptr(&connector.modes);
                     let props = self
                         .objects
                         .get_object_properties(DrmObjectId(data.connector_id()))?;
@@ -622,6 +619,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_prop_values_ptr(
                         &props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
                     );
+                    data.set_connector_type(data.connector_type());
+                    data.set_connector_type_id(data.connector_type_id());
+                    data.set_connection(connector.connection as u32);
+                    data.set_mm_width(connector.mm_width);
+                    data.set_mm_height(connector.mm_width);
+                    data.set_subpixel(connector.subpixel as u32);
                     Ok(0)
                 }),
                 ipc::MODE_GET_PROPERTY => ipc::DrmModeGetProperty::with(payload, |mut data| {
@@ -904,38 +907,4 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     fn on_close(&mut self, id: usize) {
         self.handles.remove(&id);
     }
-}
-
-pub fn modeinfo_for_size(width: u32, height: u32) -> drm_mode_modeinfo {
-    let mut modeinfo = drm_mode_modeinfo {
-        // The actual visible display size
-        hdisplay: width as u16,
-        vdisplay: height as u16,
-
-        // These are used to calculate the refresh rate
-        clock: 60 * width * height / 1000,
-        htotal: width as u16,
-        vtotal: height as u16,
-        vscan: 0,
-        vrefresh: 60,
-
-        type_: drm_sys::DRM_MODE_TYPE_PREFERRED | drm_sys::DRM_MODE_TYPE_DRIVER,
-        name: [0; 32],
-
-        // These only matter when modesetting physical display adapters. For
-        // those we should be able to parse the EDID blob.
-        hsync_start: width as u16,
-        hsync_end: width as u16,
-        hskew: 0,
-        vsync_start: height as u16,
-        vsync_end: height as u16,
-        flags: 0,
-    };
-
-    let name = format!("{width}x{height}").into_bytes();
-    for (to, from) in modeinfo.name.iter_mut().zip(name) {
-        *to = from as c_char;
-    }
-
-    modeinfo
 }

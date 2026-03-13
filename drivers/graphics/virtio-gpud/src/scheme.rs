@@ -2,14 +2,12 @@ use std::fmt;
 use std::sync::Arc;
 
 use common::{dma::Dma, sgl};
-use driver_graphics::objects::{DrmConnectorStatus, DrmObjectId, DrmObjects};
+use driver_graphics::connector::DrmConnectorStatus;
+use driver_graphics::objects::{DrmObjectId, DrmObjects};
 use driver_graphics::{
-    modeinfo_for_size, Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme,
-    StandardProperties,
+    Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme, StandardProperties,
 };
-use drm_sys::{
-    DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON, DRM_MODE_TYPE_PREFERRED,
-};
+use drm_sys::{DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON};
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use graphics_ipc::v2::Damage;
 
@@ -313,7 +311,6 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             let connector = objects.get_connector_mut(id).unwrap();
             let display = &self.displays[connector.driver_data.display_id as usize];
 
-            connector.modes = vec![modeinfo_for_size(display.width, display.height)];
             connector.connection = if display.enabled {
                 DrmConnectorStatus::Connected
             } else {
@@ -321,48 +318,12 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             };
 
             if self.has_edid {
-                let edid = edid::parse(&display.edid).unwrap().1;
-
-                if let Some(first_detailed_timing) =
-                    edid.descriptors
-                        .iter()
-                        .find_map(|descriptor| match descriptor {
-                            edid::Descriptor::DetailedTiming(detailed_timing) => {
-                                Some(detailed_timing)
-                            }
-                            _ => None,
-                        })
-                {
-                    connector.mm_width = first_detailed_timing.horizontal_size.into();
-                    connector.mm_height = first_detailed_timing.vertical_size.into();
-                } else {
-                    log::error!("No edid timing descriptor detected");
-                }
-
-                connector.modes = edid
-                    .descriptors
-                    .iter()
-                    .filter_map(|descriptor| {
-                        match descriptor {
-                            edid::Descriptor::DetailedTiming(detailed_timing) => {
-                                // FIXME extract full information
-                                Some(modeinfo_for_size(
-                                    u32::from(detailed_timing.horizontal_active_pixels),
-                                    u32::from(detailed_timing.vertical_active_lines),
-                                ))
-                            }
-                            _ => None,
-                        }
-                    })
-                    .collect::<Vec<_>>();
-
-                // First detailed timing descriptor indicates preferred mode.
-                for mode in connector.modes.iter_mut().skip(1) {
-                    mode.flags &= !DRM_MODE_TYPE_PREFERRED;
-                }
+                connector.update_from_edid(&display.edid);
 
                 let blob = objects.add_blob(display.edid.clone());
                 objects.set_object_property(id, standard_properties.edid, blob.into());
+            } else {
+                connector.update_from_size(display.width, display.height);
             }
         });
     }
