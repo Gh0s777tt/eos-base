@@ -95,8 +95,22 @@ impl GraphicsAdapter for Device {
         framebuffer.ptr.as_ptr().cast::<u8>()
     }
 
-    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Buffer, damage: Damage) {
-        framebuffer.sync(&mut self.framebuffers[display_id], damage)
+    fn update_plane(&mut self, display_id: usize, buffer: Option<&Self::Buffer>, damage: Damage) {
+        let framebuffer = &mut self.framebuffers[display_id];
+        if let Some(buffer) = buffer {
+            buffer.sync(framebuffer, damage)
+        } else {
+            let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
+            for row in 0..framebuffer.height {
+                unsafe {
+                    ptr::write_bytes(
+                        onscreen_ptr.add(row * framebuffer.stride),
+                        0,
+                        framebuffer.width,
+                    );
+                }
+            }
+        }
     }
 
     fn hw_cursor_size(&self) -> Option<(u32, u32)> {

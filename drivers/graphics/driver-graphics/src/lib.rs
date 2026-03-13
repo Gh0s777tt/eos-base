@@ -65,7 +65,12 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer;
     fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8;
 
-    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Buffer, damage: Damage);
+    fn update_plane(
+        &mut self,
+        display_id: usize,
+        framebuffer: Option<&Self::Buffer>,
+        damage: Damage,
+    );
 
     fn hw_cursor_size(&self) -> Option<(u32, u32)>;
     fn handle_cursor(&mut self, cursor: Option<&CursorPlane<Self::Buffer>>, dirty_fb: bool);
@@ -216,7 +221,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                         GraphicsSchemeInner::update_whole_screen(
                             &mut self.inner.adapter,
                             display_id,
-                            fb,
+                            fb.as_deref(),
                         );
                     }
 
@@ -289,7 +294,7 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
 }
 
 struct VtState<T: GraphicsAdapter> {
-    display_fbs: Vec<Arc<T::Buffer>>,
+    display_fbs: Vec<Option<Arc<T::Buffer>>>,
     cursor_plane: Option<CursorPlane<T::Buffer>>,
 }
 
@@ -313,29 +318,21 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
         vts: &'a mut HashMap<usize, VtState<T>>,
         vt: usize,
     ) -> &'a mut VtState<T> {
-        vts.entry(vt).or_insert_with(|| {
-            let mut display_fbs = vec![];
-            for display_id in 0..adapter.display_count() {
-                let (width, height) = adapter.display_size(display_id);
-                display_fbs.push(Arc::new(adapter.create_dumb_buffer(width, height)));
-            }
-
-            VtState {
-                display_fbs,
-                cursor_plane: None,
-            }
+        vts.entry(vt).or_insert_with(|| VtState {
+            display_fbs: vec![None; adapter.display_count()],
+            cursor_plane: None,
         })
     }
 
-    fn update_whole_screen(adapter: &mut T, screen: usize, framebuffer: &T::Buffer) {
+    fn update_whole_screen(adapter: &mut T, screen: usize, framebuffer: Option<&T::Buffer>) {
         adapter.update_plane(
             screen,
             framebuffer,
             Damage {
                 x: 0,
                 y: 0,
-                width: framebuffer.width(),
-                height: framebuffer.height(),
+                width: framebuffer.map_or(0, |fb| fb.width()),
+                height: framebuffer.map_or(0, |fb| fb.height()),
             },
         );
     }
@@ -478,13 +475,8 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
         let path = match self.handles.get(&id).ok_or(Error::new(EBADF))? {
             Handle::V1Screen { vt, screen } => {
-                let framebuffer = &self.vts[vt].display_fbs[*screen];
-                format!(
-                    "{}:{vt}.{screen}/{}/{}",
-                    self.scheme_name,
-                    framebuffer.width(),
-                    framebuffer.height()
-                )
+                let (width, height) = self.adapter.display_size(*screen);
+                format!("{}:{vt}.{screen}/{width}/{height}", self.scheme_name)
             }
             Handle::V2 {
                 vt,
@@ -849,15 +841,23 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         return Err(Error::new(EINVAL));
                     }
 
-                    let Some(framebuffer) = fbs.get(&id_index(payload.fb_id)) else {
+                    let framebuffer = if payload.fb_id == 0 {
+                        None
+                    } else if let Some(framebuffer) = fbs.get(&id_index(payload.fb_id)) {
+                        Some(framebuffer)
+                    } else {
                         return Err(Error::new(EINVAL));
                     };
 
-                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] = framebuffer.clone();
+                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] =
+                        framebuffer.map(Arc::clone);
 
                     if *vt == self.active_vt {
-                        self.adapter
-                            .update_plane(display_id, framebuffer, payload.damage);
+                        self.adapter.update_plane(
+                            display_id,
+                            framebuffer.map(|fb| &**fb),
+                            payload.damage,
+                        );
                     }
 
                     Ok(size_of::<ipc::UpdatePlane>())

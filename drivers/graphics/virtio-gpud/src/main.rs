@@ -207,6 +207,8 @@ static RESOURCE_ALLOC: AtomicU32 = AtomicU32::new(1); // XXX: 0 is reserved for 
 pub struct ResourceId(u32);
 
 impl ResourceId {
+    const NONE: ResourceId = ResourceId(0);
+
     fn alloc() -> Self {
         ResourceId(RESOURCE_ALLOC.fetch_add(1, Ordering::SeqCst))
     }

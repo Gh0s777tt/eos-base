@@ -441,8 +441,26 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         framebuffer.sgl.as_ptr()
     }
 
-    fn update_plane(&mut self, display_id: usize, framebuffer: &Self::Buffer, damage: Damage) {
+    fn update_plane(
+        &mut self,
+        display_id: usize,
+        framebuffer: Option<&Self::Buffer>,
+        damage: Damage,
+    ) {
         futures::executor::block_on(async {
+            let Some(framebuffer) = framebuffer else {
+                let scanout_request = Dma::new(SetScanout::new(
+                    display_id as u32,
+                    ResourceId::NONE,
+                    GpuRect::new(0, 0, 0, 0),
+                ))
+                .unwrap();
+                let header = self.send_request(scanout_request).await.unwrap();
+                assert_eq!(header.ty, CommandTy::RespOkNodata);
+                self.displays[display_id].active_resource = None;
+                return;
+            };
+
             let req = Dma::new(XferToHost2d::new(
                 framebuffer.id,
                 GpuRect {
