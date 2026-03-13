@@ -616,7 +616,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     }
                     let connector = self
                         .objects
-                        .get_connector_mut(DrmObjectId(data.connector_id()))?;
+                        .get_connector(DrmObjectId(data.connector_id()))?;
                     data.set_connection(connector.connection as u32);
                     data.set_modes_ptr(&connector.modes);
                     data.set_mm_width(connector.mm_width);

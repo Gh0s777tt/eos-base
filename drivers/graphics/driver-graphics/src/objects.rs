@@ -121,10 +121,6 @@ impl<T: GraphicsAdapter> DrmObjects<T> {
     pub fn get_encoder(&self, id: DrmObjectId) -> Result<&DrmEncoder> {
         self.get(id)
     }
-
-    pub fn get_encoder_mut(&mut self, id: DrmObjectId) -> Result<&mut DrmEncoder> {
-        self.get_mut(id)
-    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
