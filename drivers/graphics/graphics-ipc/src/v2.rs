@@ -73,18 +73,4 @@ pub mod ipc {
         pub fb_id: u32,
         pub damage: Damage,
     }
-
-    pub const UPDATE_CURSOR: u64 = 0x12345671;
-    #[derive(Debug, Copy, Clone)]
-    #[repr(C, packed)]
-    pub struct UpdateCursor {
-        pub header: u32,
-        pub x: i32,
-        pub y: i32,
-        pub hot_x: i32,
-        pub hot_y: i32,
-        pub width: i32,
-        pub height: i32,
-        pub cursor_img_bytes: [u32; 4096],
-    }
 }
