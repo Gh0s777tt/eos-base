@@ -421,7 +421,11 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
         let path = match self.handles.get(&id).ok_or(Error::new(EBADF))? {
             Handle::V1Screen { vt, screen } => {
-                let (width, height) = self.adapter.display_size(*screen);
+                let crtc_id = self.objects.crtc_ids()[*screen];
+                let crtc = self.objects.get_crtc(crtc_id).unwrap().lock().unwrap();
+                let (width, height) = crtc
+                    .mode
+                    .map_or((640, 480), |mode| (mode.hdisplay, mode.vdisplay));
                 format!("{}:{vt}.{screen}/{width}/{height}", self.scheme_name)
             }
             Handle::V2 {
