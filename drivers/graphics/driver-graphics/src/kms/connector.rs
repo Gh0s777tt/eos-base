@@ -2,13 +2,10 @@ use std::ffi::c_char;
 use std::fmt::Debug;
 use std::sync::Mutex;
 
-use drm_sys::{
-    drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_OBJECT_CONNECTOR,
-    DRM_MODE_OBJECT_ENCODER, DRM_MODE_TYPE_PREFERRED,
-};
+use drm_sys::{drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_TYPE_PREFERRED};
 use syscall::Result;
 
-use crate::kms::objects::{KmsObject, KmsObjectId, KmsObjects};
+use crate::kms::objects::{KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
@@ -62,7 +59,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 }
 
 #[derive(Debug)]
-pub struct KmsConnector<T: Debug + 'static> {
+pub struct KmsConnector<T: Debug> {
     pub encoder_id: KmsObjectId,
     pub modes: Vec<drm_mode_modeinfo>,
     pub connector_type: u32,
@@ -74,7 +71,7 @@ pub struct KmsConnector<T: Debug + 'static> {
     pub driver_data: T,
 }
 
-impl<T: Debug + 'static> KmsConnector<T> {
+impl<T: Debug> KmsConnector<T> {
     pub fn update_from_size(&mut self, width: u32, height: u32) {
         self.modes = vec![Self::modeinfo_for_size(width, height)];
     }
@@ -175,22 +172,10 @@ pub enum DrmSubpixelOrder {
     None,
 }
 
-impl<T: Debug + 'static> KmsObject for Mutex<KmsConnector<T>> {
-    fn object_type(&self) -> u32 {
-        DRM_MODE_OBJECT_CONNECTOR
-    }
-}
-
 // FIXME can we represent connector and encoder using a single struct?
 #[derive(Debug)]
 pub struct KmsEncoder {
     pub crtc_id: KmsObjectId,
     pub possible_crtcs: u32,
     pub possible_clones: u32,
-}
-
-impl KmsObject for KmsEncoder {
-    fn object_type(&self) -> u32 {
-        DRM_MODE_OBJECT_ENCODER
-    }
 }
