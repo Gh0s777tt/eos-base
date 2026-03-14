@@ -2,8 +2,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use common::{dma::Dma, sgl};
-use driver_graphics::connector::DrmConnectorStatus;
-use driver_graphics::objects::{DrmObjectId, DrmObjects};
+use driver_graphics::kms::connector::KmsConnectorStatus;
+use driver_graphics::kms::objects::{KmsObjectId, KmsObjects};
 use driver_graphics::{
     Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme, StandardProperties,
 };
@@ -40,6 +40,17 @@ pub struct VirtGpuFramebuffer<'a> {
     sgl: sgl::Sgl,
     width: u32,
     height: u32,
+}
+
+impl<'a> fmt::Debug for VirtGpuFramebuffer<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VirtGpuFramebuffer")
+            .field("id", &self.id)
+            .field("sgl", &self.sgl)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish_non_exhaustive()
+    }
 }
 
 impl DrmBuffer for VirtGpuFramebuffer<'_> {
@@ -266,7 +277,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         b"VirtIO GPU"
     }
 
-    fn init(&mut self, objects: &mut DrmObjects<Self>, standard_properties: &StandardProperties) {
+    fn init(&mut self, objects: &mut KmsObjects<Self>, standard_properties: &StandardProperties) {
         futures::executor::block_on(async {
             self.update_displays().await.unwrap();
         });
@@ -303,22 +314,24 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
     fn probe_connector(
         &mut self,
-        objects: &mut DrmObjects<Self>,
+        objects: &mut KmsObjects<Self>,
         standard_properties: &StandardProperties,
-        id: DrmObjectId,
+        id: KmsObjectId,
     ) {
         futures::executor::block_on(async {
-            let connector = objects.get_connector_mut(id).unwrap();
+            let mut connector = objects.get_connector(id).unwrap().lock().unwrap();
             let display = &self.displays[connector.driver_data.display_id as usize];
 
             connector.connection = if display.enabled {
-                DrmConnectorStatus::Connected
+                KmsConnectorStatus::Connected
             } else {
-                DrmConnectorStatus::Disconnected
+                KmsConnectorStatus::Disconnected
             };
 
             if self.has_edid {
                 connector.update_from_edid(&display.edid);
+
+                drop(connector);
 
                 let blob = objects.add_blob(display.edid.clone());
                 objects.set_object_property(id, standard_properties.edid, blob.into());

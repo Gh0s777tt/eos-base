@@ -24,17 +24,15 @@ use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP};
 
-use crate::objects::{DrmObjectId, DrmObjects};
-use crate::properties::DrmPropertyKind;
+use crate::kms::objects::{KmsObjectId, KmsObjects};
+use crate::kms::properties::KmsPropertyKind;
 
-pub mod connector;
-pub mod objects;
-pub mod properties;
+pub mod kms;
 
 #[derive(Debug, Copy, Clone)]
 pub struct StandardProperties {
-    pub edid: DrmObjectId,
-    pub dpms: DrmObjectId,
+    pub edid: KmsObjectId,
+    pub dpms: KmsObjectId,
 }
 
 pub trait GraphicsAdapter: Sized + Debug {
@@ -45,16 +43,16 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn name(&self) -> &'static [u8];
     fn desc(&self) -> &'static [u8];
 
-    fn init(&mut self, objects: &mut DrmObjects<Self>, standard_properties: &StandardProperties);
+    fn init(&mut self, objects: &mut KmsObjects<Self>, standard_properties: &StandardProperties);
 
     fn get_cap(&self, cap: u32) -> Result<u64>;
     fn set_client_cap(&self, cap: u32, value: u64) -> Result<()>;
 
     fn probe_connector(
         &mut self,
-        objects: &mut DrmObjects<Self>,
+        objects: &mut KmsObjects<Self>,
         standard_properties: &StandardProperties,
-        id: DrmObjectId,
+        id: KmsObjectId,
     );
 
     /// The maximum amount of displays that could be attached.
@@ -77,7 +75,7 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn handle_cursor(&mut self, cursor: Option<&CursorPlane<Self::Buffer>>, dirty_fb: bool);
 }
 
-pub trait Buffer {
+pub trait Buffer: Debug {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
 }
@@ -107,14 +105,14 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                 .expect("vesad: Failed to open /scheme/debug/disable-graphical-debug"),
         );
 
-        let mut objects = DrmObjects::new();
+        let mut objects = KmsObjects::new();
 
-        let edid = objects.add_property("EDID", true, false, DrmPropertyKind::Blob);
+        let edid = objects.add_property("EDID", true, false, KmsPropertyKind::Blob);
         let dpms = objects.add_property(
             "DPMS",
             false,
             false,
-            DrmPropertyKind::Enum(vec![
+            KmsPropertyKind::Enum(vec![
                 ("On", DRM_MODE_DPMS_ON.into()),
                 ("Standby", DRM_MODE_DPMS_STANDBY.into()),
                 ("Suspend", DRM_MODE_DPMS_SUSPEND.into()),
@@ -174,15 +172,15 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
         &mut self.inner.adapter
     }
 
-    pub fn objects(&self) -> &DrmObjects<T> {
+    pub fn kms_objects(&self) -> &KmsObjects<T> {
         &self.inner.objects
     }
 
-    pub fn objects_mut(&mut self) -> &mut DrmObjects<T> {
+    pub fn kms_objects_mut(&mut self) -> &mut KmsObjects<T> {
         &mut self.inner.objects
     }
 
-    pub fn adapter_and_objects_mut(&mut self) -> (&mut T, &mut DrmObjects<T>) {
+    pub fn adapter_and_kms_objects_mut(&mut self) -> (&mut T, &mut KmsObjects<T>) {
         (&mut self.inner.adapter, &mut self.inner.objects)
     }
 
@@ -290,7 +288,7 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
     scheme_name: String,
     disable_graphical_debug: Option<File>,
     socket: Socket,
-    objects: DrmObjects<T>,
+    objects: KmsObjects<T>,
     standard_properties: StandardProperties,
     next_id: usize,
     handles: BTreeMap<usize, Handle<T>>,
@@ -593,7 +591,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_GET_ENCODER => ipc::DrmModeGetEncoder::with(payload, |mut data| {
-                    let encoder = self.objects.get_encoder(DrmObjectId(data.encoder_id()))?;
+                    let encoder = self.objects.get_encoder(KmsObjectId(data.encoder_id()))?;
                     data.set_crtc_id(encoder.crtc_id.0);
                     data.set_possible_crtcs(encoder.possible_crtcs);
                     data.set_possible_clones(encoder.possible_clones);
@@ -604,17 +602,21 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         self.adapter.probe_connector(
                             &mut self.objects,
                             &self.standard_properties,
-                            DrmObjectId(data.connector_id()),
+                            KmsObjectId(data.connector_id()),
                         );
                     }
                     let connector = self
                         .objects
-                        .get_connector(DrmObjectId(data.connector_id()))?;
+                        .get_connector(KmsObjectId(data.connector_id()))?
+                        .lock()
+                        .unwrap();
                     data.set_encoders_ptr(&[connector.encoder_id.0]);
                     data.set_modes_ptr(&connector.modes);
                     let props = self
                         .objects
-                        .get_object_properties(DrmObjectId(data.connector_id()))?;
+                        .get_object_properties(KmsObjectId(data.connector_id()))?
+                        .lock()
+                        .unwrap();
                     data.set_props_ptr(&props.iter().map(|&(id, _)| id.0).collect::<Vec<_>>());
                     data.set_prop_values_ptr(
                         &props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
@@ -628,7 +630,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_GET_PROPERTY => ipc::DrmModeGetProperty::with(payload, |mut data| {
-                    let property = self.objects.get_property(DrmObjectId(data.prop_id()))?;
+                    let property = self.objects.get_property(KmsObjectId(data.prop_id()))?;
                     data.set_name(property.name);
                     let mut flags = 0;
                     if property.immutable {
@@ -638,12 +640,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         flags |= DRM_MODE_PROP_ATOMIC;
                     }
                     match &property.kind {
-                        &DrmPropertyKind::Range(start, end) => {
+                        &KmsPropertyKind::Range(start, end) => {
                             data.set_flags(flags | DRM_MODE_PROP_RANGE);
                             data.set_values_ptr(&[start, end]);
                             data.set_enum_blob_ptr(&[]);
                         }
-                        DrmPropertyKind::Enum(variants) => {
+                        KmsPropertyKind::Enum(variants) => {
                             data.set_flags(flags | DRM_MODE_PROP_ENUM);
                             data.set_values_ptr(
                                 &variants.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
@@ -666,12 +668,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                                     .collect::<Vec<_>>(),
                             );
                         }
-                        DrmPropertyKind::Blob => {
+                        KmsPropertyKind::Blob => {
                             data.set_flags(flags | DRM_MODE_PROP_BLOB);
                             data.set_values_ptr(&[]);
                             data.set_enum_blob_ptr(&[]);
                         }
-                        DrmPropertyKind::Bitmask(bitmask_flags) => {
+                        KmsPropertyKind::Bitmask(bitmask_flags) => {
                             data.set_flags(flags | DRM_MODE_PROP_BITMASK);
                             data.set_values_ptr(
                                 &bitmask_flags
@@ -697,12 +699,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                                     .collect::<Vec<_>>(),
                             );
                         }
-                        DrmPropertyKind::Object => {
+                        KmsPropertyKind::Object => {
                             data.set_flags(flags | DRM_MODE_PROP_OBJECT);
                             data.set_values_ptr(&[]);
                             data.set_enum_blob_ptr(&[]);
                         }
-                        &DrmPropertyKind::SignedRange(start, end) => {
+                        &KmsPropertyKind::SignedRange(start, end) => {
                             data.set_flags(flags | DRM_MODE_PROP_SIGNED_RANGE);
                             data.set_values_ptr(&[start as u64, end as u64]);
                             data.set_enum_blob_ptr(&[]);
@@ -711,7 +713,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_GET_PROP_BLOB => ipc::DrmModeGetBlob::with(payload, |mut data| {
-                    let blob = self.objects.get_blob(DrmObjectId(data.blob_id()))?;
+                    let blob = self.objects.get_blob(KmsObjectId(data.blob_id()))?;
                     data.set_data(&blob);
                     Ok(0)
                 }),
@@ -800,12 +802,14 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                         let props = self
                             .objects
-                            .get_object_properties(DrmObjectId(data.obj_id()))?;
+                            .get_object_properties(KmsObjectId(data.obj_id()))?
+                            .lock()
+                            .unwrap();
                         data.set_props_ptr(&props.iter().map(|&(id, _)| id.0).collect::<Vec<_>>());
                         data.set_prop_values_ptr(
                             &props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
                         );
-                        data.set_obj_type(self.objects.object_type(DrmObjectId(data.obj_id()))?);
+                        data.set_obj_type(self.objects.object_type(KmsObjectId(data.obj_id()))?);
                         Ok(0)
                     })
                 }
