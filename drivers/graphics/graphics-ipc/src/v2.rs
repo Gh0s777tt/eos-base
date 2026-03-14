@@ -6,7 +6,6 @@ use std::os::unix::io::AsRawFd;
 use drm::control::connector::{self, State};
 use drm::control::Device as _;
 use drm::{Device as _, DriverCapability};
-use redox_ioctl::drm::{drm_mode_modeinfo};
 use syscall::CallFlags;
 
 pub use crate::common::Damage;
@@ -56,36 +55,6 @@ impl V2GraphicsHandle {
             unsafe { plain::as_bytes(&cmd) },
             CallFlags::empty(),
             &[ipc::UPDATE_PLANE, 0, 0],
-        )?;
-        Ok(())
-    }
-
-    pub fn set_crtc(
-        &self,
-        crtc_id: drm::control::crtc::Handle,
-        fb_id: drm::control::framebuffer::Handle,
-        connectors: &[connector::Handle],
-        mode: Option<drm_mode_modeinfo>,
-    ) -> io::Result<()> {
-        let connector_ids: Vec<u32> = connectors.iter().map(|c| (*c).into()).collect();
-
-        let cmd = ipc::drm_mode_crtc {
-            set_connectors_ptr: connector_ids.as_ptr() as u64,
-            count_connectors: connector_ids.len() as u32,
-            crtc_id: crtc_id.into(),
-            fb_id: fb_id.into(),
-            x: 0,
-            y: 0,
-            gamma_size: 0,
-            mode_valid: mode.is_some() as u32,
-            mode: mode.unwrap_or_default(),
-        };
-
-        libredox::call::call_wo(
-            self.file.as_raw_fd() as  usize,
-            unsafe { plain::as_bytes(&cmd) },
-            CallFlags::empty(),
-            &[ipc::MODE_SET_CRTC, 0, 0],
         )?;
         Ok(())
     }
