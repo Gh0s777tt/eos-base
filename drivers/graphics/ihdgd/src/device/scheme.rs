@@ -3,9 +3,10 @@
 use std::alloc::{self, Layout};
 use std::convert::TryInto;
 use std::ptr::{self, NonNull};
+use std::sync::Mutex;
 
 use driver_graphics::kms::connector::KmsConnectorStatus;
-use driver_graphics::kms::objects::{KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{KmsCrtc, KmsObjectId, KmsObjects};
 use driver_graphics::{Buffer, CursorPlane, GraphicsAdapter, StandardProperties};
 use drm_sys::{drm_mode_modeinfo, DRM_MODE_DPMS_ON};
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
@@ -94,21 +95,26 @@ impl GraphicsAdapter for Device {
         framebuffer.ptr.as_ptr().cast::<u8>()
     }
 
-    fn update_plane(
+    fn set_crtc(
         &mut self,
         objects: &KmsObjects<Self>,
-        display_id: usize,
+        crtc: &Mutex<KmsCrtc<Self::Crtc>>,
+        connectors: &[KmsObjectId],
         mode: Option<drm_mode_modeinfo>,
         buffer: Option<&Self::Buffer>,
         damage: Damage,
     ) {
-        objects
-            .get_crtc(objects.crtc_ids()[display_id])
+        crtc.lock().unwrap().mode = mode;
+
+        let framebuffer_id = objects
+            .get_connector(connectors[0])
             .unwrap()
             .lock()
             .unwrap()
-            .mode = mode;
-        let framebuffer = &mut self.framebuffers[display_id];
+            .driver_data
+            .framebuffer_id;
+
+        let framebuffer = &mut self.framebuffers[framebuffer_id];
         if let Some(buffer) = buffer {
             buffer.sync(framebuffer, damage)
         } else {

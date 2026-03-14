@@ -8,7 +8,7 @@ use std::io::{self, Write};
 use std::mem;
 use std::mem::transmute;
 use std::os::fd::BorrowedFd;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use drm_sys::{
     drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON,
@@ -25,7 +25,7 @@ use syscall::schemev2::NewFdFlags;
 use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP};
 
 use crate::kms::connector::KmsConnector;
-use crate::kms::objects::{KmsObjectId, KmsObjects};
+use crate::kms::objects::{KmsCrtc, KmsObjectId, KmsObjects};
 use crate::kms::properties::KmsPropertyKind;
 
 pub mod kms;
@@ -66,10 +66,11 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer;
     fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8;
 
-    fn update_plane(
+    fn set_crtc(
         &mut self,
         objects: &KmsObjects<Self>,
-        display_id: usize,
+        crtc: &Mutex<KmsCrtc<Self::Crtc>>,
+        connectors: &[KmsObjectId],
         mode: Option<drm_mode_modeinfo>,
         framebuffer: Option<&Self::Buffer>,
         damage: Damage,
@@ -221,13 +222,16 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                     );
 
                     for (display_id, fb) in vt_state.display_fbs.iter().enumerate() {
+                        let crtc = self.inner.objects.crtcs().nth(display_id).unwrap();
+
                         let mode = fb.as_ref().map(|fb| {
                             KmsConnector::<()>::modeinfo_for_size(fb.width(), fb.height())
                         });
 
-                        self.inner.adapter.update_plane(
+                        self.inner.adapter.set_crtc(
                             &self.inner.objects,
-                            display_id,
+                            crtc,
+                            &[self.inner.objects.connector_ids()[display_id]],
                             mode,
                             fb.as_deref(),
                             Damage {
@@ -855,9 +859,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     };
 
                     let display_id = payload.display_id;
-                    if display_id >= self.adapter.display_count() {
+                    let Some(crtc) = self.objects.crtcs().nth(display_id) else {
                         return Err(Error::new(EINVAL));
-                    }
+                    };
 
                     let framebuffer = if payload.fb_id == 0 {
                         None
@@ -875,9 +879,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             KmsConnector::<()>::modeinfo_for_size(fb.width(), fb.height())
                         });
 
-                        self.adapter.update_plane(
+                        self.adapter.set_crtc(
                             &self.objects,
-                            display_id,
+                            crtc,
+                            &[self.objects.connector_ids()[display_id]],
                             mode,
                             framebuffer.map(|fb| &**fb),
                             payload.damage,
