@@ -92,7 +92,7 @@ pub struct CursorPlane<C: Buffer> {
     pub y: i32,
     pub hot_x: i32,
     pub hot_y: i32,
-    pub framebuffer: Option<Arc<C>>,
+    pub buffer: Option<Arc<C>>,
 }
 
 pub struct GraphicsScheme<T: GraphicsAdapter> {
@@ -326,7 +326,7 @@ enum Handle<T: GraphicsAdapter> {
     V2 {
         vt: usize,
         next_id: u32,
-        fbs: HashMap<u32, Arc<T::Buffer>>,
+        buffers: HashMap<u32, Arc<T::Buffer>>,
     },
     SchemeRoot,
 }
@@ -344,7 +344,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 y: 0,
                 hot_x: 0,
                 hot_y: 0,
-                framebuffer: None,
+                buffer: None,
             },
         })
     }
@@ -391,7 +391,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             Handle::V2 {
                 vt,
                 next_id: 0,
-                fbs: HashMap::new(),
+                buffers: HashMap::new(),
             }
         } else {
             let mut parts = path.split('/');
@@ -421,13 +421,17 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
         let path = match self.handles.get(&id).ok_or(Error::new(EBADF))? {
             Handle::V1Screen { vt, screen } => {
-                let (width, height) = self.adapter.display_size(*screen);
+                let crtc_id = self.objects.crtc_ids()[*screen];
+                let crtc = self.objects.get_crtc(crtc_id).unwrap().lock().unwrap();
+                let (width, height) = crtc
+                    .mode
+                    .map_or((640, 480), |mode| (mode.hdisplay, mode.vdisplay));
                 format!("{}:{vt}.{screen}/{width}/{height}", self.scheme_name)
             }
             Handle::V2 {
                 vt,
                 next_id: _,
-                fbs: _,
+                buffers: _,
             } => format!("/scheme/{}/v2/{vt}", self.scheme_name),
             Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
         };
@@ -462,13 +466,13 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             id_index(i) | (1 << 13)
         }
 
-        fn dumb_buffer_id(i: u32) -> u32 {
-            id_index(i) | (1 << 14)
-        }
-
         match self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
             Handle::V1Screen { .. } | Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
-            Handle::V2 { vt, next_id, fbs } => match metadata[0] {
+            Handle::V2 {
+                vt,
+                next_id,
+                buffers,
+            } => match metadata[0] {
                 ipc::VERSION => ipc::DrmVersion::with(payload, |mut data| {
                     data.set_version_major(1);
                     data.set_version_minor(4);
@@ -561,9 +565,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
                     if update_buffer {
-                        cursor_plane.framebuffer = if data.handle() == 0 {
+                        cursor_plane.buffer = if data.handle() == 0 {
                             None
-                        } else if let Some(buffer) = fbs.get(&id_index(data.handle())) {
+                        } else if let Some(buffer) = buffers.get(&data.handle()) {
                             Some(buffer.clone())
                         } else {
                             return Err(Error::new(EINVAL));
@@ -718,7 +722,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_ADD_FB => ipc::DrmModeFbCmd::with(payload, |mut data| {
-                    data.set_fb_id(fb_handle_id(id_index(data.handle())));
+                    data.set_fb_id(fb_handle_id(data.handle()));
                     Ok(0)
                 }),
                 ipc::MODE_CREATE_DUMB => ipc::DrmModeCreateDumb::with(payload, |mut data| {
@@ -729,8 +733,8 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let fb = self.adapter.create_dumb_buffer(data.width(), data.height());
 
                     *next_id += 1;
-                    fbs.insert(*next_id, Arc::new(fb));
-                    data.set_handle(dumb_buffer_id(*next_id as u32));
+                    buffers.insert(*next_id, Arc::new(fb));
+                    data.set_handle(*next_id as u32);
                     data.set_pitch(data.width() * 4);
                     data.set_size(u64::from(data.width()) * u64::from(data.height()) * 4);
                     Ok(0)
@@ -740,25 +744,24 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         return Err(Error::new(EINVAL));
                     }
 
-                    let fb_id = id_index(data.handle());
+                    let buffer_id = data.handle();
 
-                    if !fbs.contains_key(&fb_id) {
+                    if !buffers.contains_key(&buffer_id) {
                         return Err(Error::new(EINVAL));
                     }
 
                     // FIXME use a better scheme for creating map offsets
                     assert!(
-                        ((fbs[&fb_id].width() * fbs[&fb_id].height() * 4) as usize)
+                        ((buffers[&buffer_id].width() * buffers[&buffer_id].height() * 4) as usize)
                             < MAP_FAKE_OFFSET_MULTIPLIER
                     );
 
-                    data.set_offset((fb_id as usize * MAP_FAKE_OFFSET_MULTIPLIER) as u64);
+                    data.set_offset((buffer_id as usize * MAP_FAKE_OFFSET_MULTIPLIER) as u64);
 
                     Ok(0)
                 }),
                 ipc::MODE_DESTROY_DUMB => ipc::DrmModeDestroyDumb::with(payload, |data| {
-                    let fb_id = id_index(data.handle());
-                    if fbs.remove(&fb_id).is_none() {
+                    if buffers.remove(&data.handle()).is_none() {
                         return Err(Error::new(ENOENT));
                     }
                     Ok(0)
@@ -809,9 +812,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
                     if update_buffer {
-                        cursor_plane.framebuffer = if data.handle() == 0 {
+                        cursor_plane.buffer = if data.handle() == 0 {
                             None
-                        } else if let Some(buffer) = fbs.get(&id_index(data.handle())) {
+                        } else if let Some(buffer) = buffers.get(&data.handle()) {
                             Some(buffer.clone())
                         } else {
                             return Err(Error::new(EINVAL));
@@ -858,7 +861,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     let framebuffer = if payload.fb_id == 0 {
                         None
-                    } else if let Some(framebuffer) = fbs.get(&id_index(payload.fb_id)) {
+                    } else if let Some(framebuffer) = buffers.get(&id_index(payload.fb_id)) {
                         Some(framebuffer)
                     } else {
                         return Err(Error::new(EINVAL));
@@ -902,9 +905,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             Handle::V2 {
                 vt: _,
                 next_id: _,
-                fbs,
+                buffers,
             } => (
-                fbs.get(&((offset as usize / MAP_FAKE_OFFSET_MULTIPLIER) as u32))
+                buffers
+                    .get(&((offset as usize / MAP_FAKE_OFFSET_MULTIPLIER) as u32))
                     .ok_or(Error::new(EINVAL))
                     .unwrap(),
                 offset & (MAP_FAKE_OFFSET_MULTIPLIER as u64 - 1),

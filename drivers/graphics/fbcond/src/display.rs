@@ -82,7 +82,7 @@ impl Display {
     pub fn sync_rect(&mut self, damage: Damage) {
         if let Some(map) = &self.map {
             map.display_handle
-                .update_plane(0, u32::from(map.buffer.handle()), damage)
+                .update_plane(0, u32::from(map.fb), damage)
                 .unwrap();
         }
     }

@@ -146,7 +146,7 @@ impl FbbootlogScheme {
             }
         }
         map.display_handle
-            .update_plane(0, u32::from(map.buffer.handle()), total_damage)
+            .update_plane(0, u32::from(map.fb), total_damage)
             .unwrap();
     }
 
@@ -248,7 +248,7 @@ impl SchemeSync for FbbootlogScheme {
 
                 if let Some(map) = &self.display_map {
                     map.display_handle
-                        .update_plane(0, u32::from(map.buffer.handle()), damage)
+                        .update_plane(0, u32::from(map.fb), damage)
                         .unwrap();
                 }
             }

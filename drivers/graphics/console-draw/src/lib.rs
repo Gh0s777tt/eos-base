@@ -290,11 +290,12 @@ impl TextScreen {
             }
         }
 
-        let mut new_fb =
+        let mut new_buffer =
             map.display_handle
                 .create_dumb_buffer((width, height), DrmFourcc::Argb8888, 32)?;
+        let new_fb = map.display_handle.add_framebuffer(&new_buffer, 24, 32)?;
 
-        let new_mapping = map.display_handle.map_dumb_buffer(&mut new_fb)?;
+        let new_mapping = map.display_handle.map_dumb_buffer(&mut new_buffer)?;
         let mut new_mapping =
             unsafe { mem::transmute::<DumbMapping<'_>, DumbMapping<'static>>(new_mapping) };
 
@@ -307,8 +308,8 @@ impl TextScreen {
                     new_mapping.as_mut_ptr() as *mut u32,
                     new_mapping.len() / 4,
                 ),
-                width: new_fb.size().0 as usize,
-                height: new_fb.size().1 as usize,
+                width: new_buffer.size().0 as usize,
+                height: new_buffer.size().1 as usize,
             };
 
             if new_map.height >= old_map.height {
@@ -327,10 +328,12 @@ impl TextScreen {
             }
         }
 
-        let old_fb = mem::replace(&mut map.buffer, new_fb);
+        let old_buffer = mem::replace(&mut map.buffer, new_buffer);
+        let old_fb = mem::replace(&mut map.fb, new_fb);
         map.mapping = new_mapping;
 
-        let _ = map.display_handle.destroy_dumb_buffer(old_fb);
+        let _ = map.display_handle.destroy_dumb_buffer(old_buffer);
+        let _ = map.display_handle.destroy_framebuffer(old_fb);
 
         Ok(())
     }
