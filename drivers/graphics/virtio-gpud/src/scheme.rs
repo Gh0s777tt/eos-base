@@ -492,7 +492,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     }
 
     fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Buffer>, dirty_fb: bool) {
-        if let Some(buffer) = &cursor.framebuffer {
+        if let Some(buffer) = &cursor.buffer {
             if dirty_fb {
                 self.update_cursor(buffer, cursor.x, cursor.y, cursor.hot_x, cursor.hot_y);
             } else {
