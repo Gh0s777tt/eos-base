@@ -2,10 +2,10 @@ use std::ffi::c_char;
 use std::fmt::Debug;
 use std::sync::Mutex;
 
-use drm_sys::{DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_PROPERTY, DRM_PROP_NAME_LEN};
+use drm_sys::DRM_PROP_NAME_LEN;
 use syscall::{Error, Result, EINVAL};
 
-use crate::kms::objects::{KmsObject, KmsObjectId, KmsObjects};
+use crate::kms::objects::{KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
@@ -111,19 +111,7 @@ pub enum KmsPropertyKind {
     SignedRange(i64, i64),
 }
 
-impl KmsObject for KmsProperty {
-    fn object_type(&self) -> u32 {
-        DRM_MODE_OBJECT_PROPERTY
-    }
-}
-
 #[derive(Debug)]
 pub struct KmsBlob {
     data: Vec<u8>,
-}
-
-impl KmsObject for KmsBlob {
-    fn object_type(&self) -> u32 {
-        DRM_MODE_OBJECT_BLOB
-    }
 }

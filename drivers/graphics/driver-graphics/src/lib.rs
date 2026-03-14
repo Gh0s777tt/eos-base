@@ -36,7 +36,7 @@ pub struct StandardProperties {
 }
 
 pub trait GraphicsAdapter: Sized + Debug {
-    type Connector: Debug + 'static;
+    type Connector: Debug;
 
     type Buffer: Buffer;
 
