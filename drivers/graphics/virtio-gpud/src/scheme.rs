@@ -1,13 +1,13 @@
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::KmsConnectorStatus;
-use driver_graphics::kms::objects::{KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{KmsCrtc, KmsObjectId, KmsObjects};
 use driver_graphics::{
     Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme, StandardProperties,
 };
-use drm_sys::{DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON};
+use drm_sys::{drm_mode_modeinfo, DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON};
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use graphics_ipc::v2::Damage;
 
@@ -266,6 +266,7 @@ impl VirtGpuAdapter<'_> {
 
 impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     type Connector = VirtGpuConnector;
+    type Crtc = ();
 
     type Buffer = VirtGpuFramebuffer<'a>;
 
@@ -283,7 +284,9 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         });
 
         for display_id in 0..self.config.num_scanouts.get() {
-            let connector = objects.add_connector(VirtGpuConnector { display_id });
+            let crtc = objects.add_crtc(());
+
+            let connector = objects.add_connector(VirtGpuConnector { display_id }, &[crtc]);
             if self.has_edid {
                 objects.add_object_property(connector, standard_properties.edid, 0);
             }
@@ -415,23 +418,36 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         framebuffer.sgl.as_ptr()
     }
 
-    fn update_plane(
+    fn set_crtc(
         &mut self,
-        display_id: usize,
+        objects: &KmsObjects<Self>,
+        crtc: &Mutex<KmsCrtc<Self::Crtc>>,
+        connectors: &[KmsObjectId],
+        mode: Option<drm_mode_modeinfo>,
         framebuffer: Option<&Self::Buffer>,
         damage: Damage,
     ) {
         futures::executor::block_on(async {
+            crtc.lock().unwrap().mode = mode;
+
+            let display_id = objects
+                .get_connector(connectors[0])
+                .unwrap()
+                .lock()
+                .unwrap()
+                .driver_data
+                .display_id;
+
             let Some(framebuffer) = framebuffer else {
                 let scanout_request = Dma::new(SetScanout::new(
-                    display_id as u32,
+                    display_id,
                     ResourceId::NONE,
                     GpuRect::new(0, 0, 0, 0),
                 ))
                 .unwrap();
                 let header = self.send_request(scanout_request).await.unwrap();
                 assert_eq!(header.ty, CommandTy::RespOkNodata);
-                self.displays[display_id].active_resource = None;
+                self.displays[display_id as usize].active_resource = None;
                 return;
             };
 
@@ -450,16 +466,16 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             assert_eq!(header.ty, CommandTy::RespOkNodata);
 
             // FIXME once we support resizing we also need to check that the current and target size match
-            if self.displays[display_id].active_resource != Some(framebuffer.id) {
+            if self.displays[display_id as usize].active_resource != Some(framebuffer.id) {
                 let scanout_request = Dma::new(SetScanout::new(
-                    display_id as u32,
+                    display_id,
                     framebuffer.id,
                     GpuRect::new(0, 0, framebuffer.width, framebuffer.height),
                 ))
                 .unwrap();
                 let header = self.send_request(scanout_request).await.unwrap();
                 assert_eq!(header.ty, CommandTy::RespOkNodata);
-                self.displays[display_id].active_resource = Some(framebuffer.id);
+                self.displays[display_id as usize].active_resource = Some(framebuffer.id);
             }
 
             let flush = ResourceFlush::new(
@@ -475,16 +491,10 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         Some((64, 64))
     }
 
-    fn handle_cursor(&mut self, cursor: Option<&CursorPlane<Self::Buffer>>, dirty_fb: bool) {
-        if let Some(cursor) = cursor {
+    fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Buffer>, dirty_fb: bool) {
+        if let Some(buffer) = &cursor.framebuffer {
             if dirty_fb {
-                self.update_cursor(
-                    &cursor.framebuffer,
-                    cursor.x,
-                    cursor.y,
-                    cursor.hot_x,
-                    cursor.hot_y,
-                );
+                self.update_cursor(buffer, cursor.x, cursor.y, cursor.hot_x, cursor.hot_y);
             } else {
                 self.move_cursor(cursor.x, cursor.y);
             }

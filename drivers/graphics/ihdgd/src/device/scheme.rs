@@ -3,11 +3,12 @@
 use std::alloc::{self, Layout};
 use std::convert::TryInto;
 use std::ptr::{self, NonNull};
+use std::sync::Mutex;
 
 use driver_graphics::kms::connector::KmsConnectorStatus;
-use driver_graphics::kms::objects::{KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{KmsCrtc, KmsObjectId, KmsObjects};
 use driver_graphics::{Buffer, CursorPlane, GraphicsAdapter, StandardProperties};
-use drm_sys::DRM_MODE_DPMS_ON;
+use drm_sys::{drm_mode_modeinfo, DRM_MODE_DPMS_ON};
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use graphics_ipc::v2::Damage;
 use syscall::{error::EINVAL, PAGE_SIZE};
@@ -21,6 +22,7 @@ pub struct Connector {
 
 impl GraphicsAdapter for Device {
     type Connector = Connector;
+    type Crtc = ();
 
     type Buffer = DumbFb;
 
@@ -35,7 +37,9 @@ impl GraphicsAdapter for Device {
     fn init(&mut self, objects: &mut KmsObjects<Self>, standard_properties: &StandardProperties) {
         // FIXME enumerate actual connectors
         for (framebuffer_id, _) in self.framebuffers.iter().enumerate() {
-            let connector = objects.add_connector(Connector { framebuffer_id });
+            let crtc = objects.add_crtc(());
+
+            let connector = objects.add_connector(Connector { framebuffer_id }, &[crtc]);
             objects.add_object_property(
                 connector,
                 standard_properties.dpms,
@@ -91,8 +95,26 @@ impl GraphicsAdapter for Device {
         framebuffer.ptr.as_ptr().cast::<u8>()
     }
 
-    fn update_plane(&mut self, display_id: usize, buffer: Option<&Self::Buffer>, damage: Damage) {
-        let framebuffer = &mut self.framebuffers[display_id];
+    fn set_crtc(
+        &mut self,
+        objects: &KmsObjects<Self>,
+        crtc: &Mutex<KmsCrtc<Self::Crtc>>,
+        connectors: &[KmsObjectId],
+        mode: Option<drm_mode_modeinfo>,
+        buffer: Option<&Self::Buffer>,
+        damage: Damage,
+    ) {
+        crtc.lock().unwrap().mode = mode;
+
+        let framebuffer_id = objects
+            .get_connector(connectors[0])
+            .unwrap()
+            .lock()
+            .unwrap()
+            .driver_data
+            .framebuffer_id;
+
+        let framebuffer = &mut self.framebuffers[framebuffer_id];
         if let Some(buffer) = buffer {
             buffer.sync(framebuffer, damage)
         } else {
@@ -113,7 +135,7 @@ impl GraphicsAdapter for Device {
         None
     }
 
-    fn handle_cursor(&mut self, _cursor: Option<&CursorPlane<Self::Buffer>>, _dirty_fb: bool) {
+    fn handle_cursor(&mut self, _cursor: &CursorPlane<Self::Buffer>, _dirty_fb: bool) {
         unimplemented!("ihdgd does not support this function");
     }
 }
