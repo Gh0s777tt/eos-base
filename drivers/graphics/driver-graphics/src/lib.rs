@@ -11,10 +11,11 @@ use std::os::fd::BorrowedFd;
 use std::sync::{Arc, Mutex};
 
 use drm_sys::{
-    drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON,
-    DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND, DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK,
-    DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT,
-    DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE, DRM_PROP_NAME_LEN,
+    drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_CURSOR_BO, DRM_MODE_CURSOR_MOVE,
+    DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON, DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND,
+    DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM,
+    DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE,
+    DRM_PROP_NAME_LEN,
 };
 use graphics_ipc::v2::Damage;
 use inputd::{DisplayHandle, VtEventKind};
@@ -77,7 +78,7 @@ pub trait GraphicsAdapter: Sized + Debug {
     );
 
     fn hw_cursor_size(&self) -> Option<(u32, u32)>;
-    fn handle_cursor(&mut self, cursor: Option<&CursorPlane<Self::Buffer>>, dirty_fb: bool);
+    fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Buffer>, dirty_fb: bool);
 }
 
 pub trait Buffer: Debug {
@@ -91,7 +92,7 @@ pub struct CursorPlane<C: Buffer> {
     pub y: i32,
     pub hot_x: i32,
     pub hot_y: i32,
-    pub framebuffer: C,
+    pub framebuffer: Option<Arc<C>>,
 }
 
 pub struct GraphicsScheme<T: GraphicsAdapter> {
@@ -246,7 +247,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                     if self.inner.adapter.hw_cursor_size().is_some() {
                         self.inner
                             .adapter
-                            .handle_cursor(vt_state.cursor_plane.as_ref(), true);
+                            .handle_cursor(&vt_state.cursor_plane, true);
                     }
                 }
 
@@ -313,7 +314,7 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
 
 struct VtState<T: GraphicsAdapter> {
     display_fbs: Vec<Option<Arc<T::Buffer>>>,
-    cursor_plane: Option<CursorPlane<T::Buffer>>,
+    cursor_plane: CursorPlane<T::Buffer>,
 }
 
 enum Handle<T: GraphicsAdapter> {
@@ -338,7 +339,13 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     ) -> &'a mut VtState<T> {
         vts.entry(vt).or_insert_with(|| VtState {
             display_fbs: vec![None; adapter.display_count()],
-            cursor_plane: None,
+            cursor_plane: CursorPlane {
+                x: 0,
+                y: 0,
+                hot_x: 0,
+                hot_y: 0,
+                framebuffer: None,
+            },
         })
     }
 
@@ -353,13 +360,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
             return Err(Error::new(EINVAL));
         };
 
-        let cursor_plane = vt_state.cursor_plane.get_or_insert_with(|| CursorPlane {
-            x: 0,
-            y: 0,
-            hot_x: 0,
-            hot_y: 0,
-            framebuffer: self.adapter.create_dumb_buffer(width, height),
-        });
+        let cursor_plane = &mut vt_state.cursor_plane;
 
         cursor_plane.x = cursor_damage.x;
         cursor_plane.y = cursor_damage.y;
@@ -369,7 +370,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 return Ok(());
             }
 
-            self.adapter.handle_cursor(Some(cursor_plane), false);
+            self.adapter.handle_cursor(cursor_plane, false);
         } else {
             cursor_plane.hot_x = cursor_damage.hot_x;
             cursor_plane.hot_y = cursor_damage.hot_y;
@@ -377,7 +378,10 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
             let w: i32 = cursor_damage.width;
             let h: i32 = cursor_damage.height;
             let cursor_image = cursor_damage.cursor_img_bytes;
-            let cursor_ptr = self.adapter.map_dumb_buffer(&cursor_plane.framebuffer);
+            let framebuffer = cursor_plane
+                .framebuffer
+                .get_or_insert_with(|| Arc::new(self.adapter.create_dumb_buffer(width, height)));
+            let cursor_ptr = self.adapter.map_dumb_buffer(framebuffer);
 
             //Clear previous image from backing storage
             unsafe {
@@ -402,7 +406,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 return Ok(());
             }
 
-            self.adapter.handle_cursor(Some(cursor_plane), true);
+            self.adapter.handle_cursor(cursor_plane, true);
         }
 
         return Ok(());
@@ -611,6 +615,31 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         data.set_mode_valid(0);
                         data.set_mode(Default::default());
                     }
+                    Ok(0)
+                }),
+                ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
+                    let vt_state = self.vts.get_mut(vt).unwrap();
+
+                    let cursor_plane = &mut vt_state.cursor_plane;
+
+                    let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
+                    if update_buffer {
+                        cursor_plane.framebuffer = if data.handle() == 0 {
+                            None
+                        } else if let Some(buffer) = fbs.get(&id_index(data.handle())) {
+                            Some(buffer.clone())
+                        } else {
+                            return Err(Error::new(EINVAL));
+                        };
+                    }
+
+                    if data.flags() & DRM_MODE_CURSOR_MOVE != 0 {
+                        cursor_plane.x = data.x();
+                        cursor_plane.y = data.y();
+                    }
+
+                    self.adapter.handle_cursor(cursor_plane, update_buffer);
+
                     Ok(0)
                 }),
                 ipc::MODE_GET_ENCODER => ipc::DrmModeGetEncoder::with(payload, |mut data| {
@@ -836,6 +865,33 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         Ok(0)
                     })
                 }
+                ipc::MODE_CURSOR2 => ipc::DrmModeCursor2::with(payload, |data| {
+                    let vt_state = self.vts.get_mut(vt).unwrap();
+
+                    let cursor_plane = &mut vt_state.cursor_plane;
+
+                    let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
+                    if update_buffer {
+                        cursor_plane.framebuffer = if data.handle() == 0 {
+                            None
+                        } else if let Some(buffer) = fbs.get(&id_index(data.handle())) {
+                            Some(buffer.clone())
+                        } else {
+                            return Err(Error::new(EINVAL));
+                        };
+                        cursor_plane.hot_x = data.hot_x();
+                        cursor_plane.hot_y = data.hot_y();
+                    }
+
+                    if data.flags() & DRM_MODE_CURSOR_MOVE != 0 {
+                        cursor_plane.x = data.x();
+                        cursor_plane.y = data.y();
+                    }
+
+                    self.adapter.handle_cursor(cursor_plane, update_buffer);
+
+                    Ok(0)
+                }),
                 ipc::MODE_GET_FB2 => ipc::DrmModeFbCmd2::with(payload, |mut data| {
                     let i = id_index(data.fb_id());
                     let (width, height) = self.adapter.display_size(i as usize);

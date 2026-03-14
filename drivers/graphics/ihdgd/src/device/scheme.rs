@@ -135,7 +135,7 @@ impl GraphicsAdapter for Device {
         None
     }
 
-    fn handle_cursor(&mut self, _cursor: Option<&CursorPlane<Self::Buffer>>, _dirty_fb: bool) {
+    fn handle_cursor(&mut self, _cursor: &CursorPlane<Self::Buffer>, _dirty_fb: bool) {
         unimplemented!("ihdgd does not support this function");
     }
 }

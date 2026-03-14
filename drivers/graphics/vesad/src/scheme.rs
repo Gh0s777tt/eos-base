@@ -113,7 +113,7 @@ impl GraphicsAdapter for FbAdapter {
     ) {
         crtc.lock().unwrap().mode = mode;
 
-        let framebuffer_id =  objects
+        let framebuffer_id = objects
             .get_connector(connectors[0])
             .unwrap()
             .lock()
@@ -142,7 +142,7 @@ impl GraphicsAdapter for FbAdapter {
         None
     }
 
-    fn handle_cursor(&mut self, _cursor: Option<&CursorPlane<Self::Buffer>>, _dirty_fb: bool) {
+    fn handle_cursor(&mut self, _cursor: &CursorPlane<Self::Buffer>, _dirty_fb: bool) {
         unimplemented!("Vesad does not support this function");
     }
 }
