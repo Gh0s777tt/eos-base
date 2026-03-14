@@ -348,69 +348,6 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
             },
         })
     }
-
-    fn handle_cursor_update(
-        &mut self,
-        vt: usize,
-        cursor_damage: &graphics_ipc::v2::ipc::UpdateCursor,
-    ) -> Result<()> {
-        let vt_state = self.vts.get_mut(&vt).unwrap();
-
-        let Some((width, height)) = self.adapter.hw_cursor_size() else {
-            return Err(Error::new(EINVAL));
-        };
-
-        let cursor_plane = &mut vt_state.cursor_plane;
-
-        cursor_plane.x = cursor_damage.x;
-        cursor_plane.y = cursor_damage.y;
-
-        if cursor_damage.header == 0 {
-            if vt != self.active_vt {
-                return Ok(());
-            }
-
-            self.adapter.handle_cursor(cursor_plane, false);
-        } else {
-            cursor_plane.hot_x = cursor_damage.hot_x;
-            cursor_plane.hot_y = cursor_damage.hot_y;
-
-            let w: i32 = cursor_damage.width;
-            let h: i32 = cursor_damage.height;
-            let cursor_image = cursor_damage.cursor_img_bytes;
-            let framebuffer = cursor_plane
-                .framebuffer
-                .get_or_insert_with(|| Arc::new(self.adapter.create_dumb_buffer(width, height)));
-            let cursor_ptr = self.adapter.map_dumb_buffer(framebuffer);
-
-            //Clear previous image from backing storage
-            unsafe {
-                core::ptr::write_bytes(cursor_ptr as *mut u8, 0, 64 * 64 * 4);
-            }
-
-            //Write image to backing storage
-            for row in 0..h {
-                let start: usize = (w * row) as usize;
-                let end: usize = (w * row + w) as usize;
-
-                unsafe {
-                    core::ptr::copy_nonoverlapping(
-                        cursor_image[start..end].as_ptr(),
-                        cursor_ptr.cast::<u32>().offset(64 * row as isize),
-                        w as usize,
-                    );
-                }
-            }
-
-            if vt != self.active_vt {
-                return Ok(());
-            }
-
-            self.adapter.handle_cursor(cursor_plane, true);
-        }
-
-        return Ok(());
-    }
 }
 
 const MAP_FAKE_OFFSET_MULTIPLIER: usize = 0x10_000_000;
@@ -946,20 +883,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     }
 
                     Ok(size_of::<ipc::UpdatePlane>())
-                }
-                ipc::UPDATE_CURSOR => {
-                    if payload.len() < size_of::<ipc::UpdateCursor>() {
-                        return Err(Error::new(EINVAL));
-                    }
-                    let payload = unsafe {
-                        transmute::<&mut [u8; size_of::<ipc::UpdateCursor>()], &mut ipc::UpdateCursor>(
-                            payload.as_mut_array().unwrap(),
-                        )
-                    };
-                    let vt = *vt;
-                    self.handle_cursor_update(vt, payload)?;
-
-                    Ok(size_of::<ipc::UpdateCursor>())
                 }
                 _ => return Err(Error::new(EINVAL)),
             },
