@@ -22,20 +22,19 @@ pub enum LogHandle {
 pub struct LogScheme<'sock> {
     next_id: usize,
     socket: &'sock Socket,
+    kernel_debug: File,
     output_tx: Sender<OutputCmd>,
     handles: BTreeMap<usize, LogHandle>,
 }
 
 enum OutputCmd {
     Log(Vec<u8>),
-    /// Log a message from the kernel. This skips writing it back to the kernel debug output.
-    LogKernel(Vec<u8>),
     AddSink(usize),
 }
 
 impl<'sock> LogScheme<'sock> {
     pub fn new(socket: &'sock Socket) -> Self {
-        let mut kernel_debug = OpenOptions::new()
+        let kernel_debug = OpenOptions::new()
             .write(true)
             .open("/scheme/debug")
             .unwrap();
@@ -50,19 +49,6 @@ impl<'sock> LogScheme<'sock> {
             for cmd in output_rx {
                 match cmd {
                     OutputCmd::Log(line) => {
-                        let _ = kernel_debug.write(&line);
-                        let _ = kernel_debug.flush();
-                        for file in &mut files {
-                            let _ = file.write(&line);
-                            let _ = file.flush();
-                        }
-                        logs.push_back(line);
-                        // Keep a limited amount of logs for backfilling to bound memory usage
-                        while logs.len() > 1000 {
-                            logs.pop_front();
-                        }
-                    }
-                    OutputCmd::LogKernel(line) => {
                         for file in &mut files {
                             let _ = file.write(&line);
                             let _ = file.flush();
@@ -97,13 +83,14 @@ impl<'sock> LogScheme<'sock> {
                     // FIXME currently possible as /scheme/log/kernel presents a snapshot of the log queue
                     break;
                 }
-                Self::write_logs(&output_tx2, &mut handle_buf, "kernel", &buf, true);
+                Self::write_logs(&output_tx2, &mut handle_buf, "kernel", &buf, None);
             }
         });
 
         LogScheme {
             next_id: 0,
             socket,
+            kernel_debug,
             output_tx,
             handles: BTreeMap::new(),
         }
@@ -114,7 +101,7 @@ impl<'sock> LogScheme<'sock> {
         handle_buf: &mut Vec<u8>,
         context: &str,
         buf: &[u8],
-        kernel: bool,
+        mut kernel_debug: Option<&mut File>,
     ) {
         let mut i = 0;
         while i < buf.len() {
@@ -128,12 +115,14 @@ impl<'sock> LogScheme<'sock> {
             handle_buf.push(b);
 
             if b == b'\n' {
+                if let Some(kernel_debug) = kernel_debug.as_mut() {
+                    // Writing to the kernel debug log never blocks
+                    let _ = kernel_debug.write(handle_buf);
+                    let _ = kernel_debug.flush();
+                }
+
                 output_tx
-                    .send(if kernel {
-                        OutputCmd::LogKernel(mem::take(handle_buf))
-                    } else {
-                        OutputCmd::Log(mem::take(handle_buf))
-                    })
+                    .send(OutputCmd::Log(mem::take(handle_buf)))
                     .unwrap();
             }
 
@@ -215,7 +204,13 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
 
         let handle_buf = bufs.entry(ctx.pid).or_insert_with(|| Vec::new());
 
-        Self::write_logs(&self.output_tx, handle_buf, context, buf, false);
+        Self::write_logs(
+            &self.output_tx,
+            handle_buf,
+            context,
+            buf,
+            Some(&mut self.kernel_debug),
+        );
 
         Ok(buf.len())
     }
