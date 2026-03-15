@@ -80,13 +80,6 @@ impl GraphicsAdapter for FbAdapter {
         self.framebuffers.len()
     }
 
-    fn display_size(&self, display_id: usize) -> (u32, u32) {
-        (
-            self.framebuffers[display_id].width as u32,
-            self.framebuffers[display_id].height as u32,
-        )
-    }
-
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
         GraphicScreen::new(width as usize, height as usize)
     }

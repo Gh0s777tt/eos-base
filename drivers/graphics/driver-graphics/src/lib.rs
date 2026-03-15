@@ -52,7 +52,6 @@ pub trait GraphicsAdapter: Sized + Debug {
     ///
     /// This must be constant for the lifetime of the graphics adapter.
     fn display_count(&self) -> usize;
-    fn display_size(&self, display_id: usize) -> (u32, u32);
 
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer;
     fn map_dumb_buffer(&mut self, buffer: &Self::Buffer) -> *mut u8;

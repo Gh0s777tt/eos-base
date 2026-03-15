@@ -339,13 +339,6 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         self.displays.len()
     }
 
-    fn display_size(&self, display_id: usize) -> (u32, u32) {
-        (
-            self.displays[display_id].width,
-            self.displays[display_id].height,
-        )
-    }
-
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
         futures::executor::block_on(async {
             let bpp = 32;
