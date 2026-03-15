@@ -76,10 +76,6 @@ impl GraphicsAdapter for FbAdapter {
         connector.update_from_size(connector.driver_data.width, connector.driver_data.height);
     }
 
-    fn display_count(&self) -> usize {
-        self.framebuffers.len()
-    }
-
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
         GraphicScreen::new(width as usize, height as usize)
     }

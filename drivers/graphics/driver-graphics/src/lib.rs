@@ -48,11 +48,6 @@ pub trait GraphicsAdapter: Sized + Debug {
 
     fn probe_connector(&mut self, objects: &mut KmsObjects<Self>, id: KmsObjectId);
 
-    /// The maximum amount of displays that could be attached.
-    ///
-    /// This must be constant for the lifetime of the graphics adapter.
-    fn display_count(&self) -> usize;
-
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer;
     fn map_dumb_buffer(&mut self, buffer: &Self::Buffer) -> *mut u8;
 
@@ -191,7 +186,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                     self.inner.active_vt = vt_event.vt;
 
                     let vt_state = GraphicsSchemeInner::get_or_create_vt(
-                        &mut self.inner.adapter,
+                        &self.inner.objects,
                         &mut self.inner.vts,
                         vt_event.vt,
                     );
@@ -314,12 +309,12 @@ enum Handle<T: GraphicsAdapter> {
 
 impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     fn get_or_create_vt<'a>(
-        adapter: &mut T,
+        objects: &KmsObjects<T>,
         vts: &'a mut HashMap<usize, VtState<T>>,
         vt: usize,
     ) -> &'a mut VtState<T> {
         vts.entry(vt).or_insert_with(|| VtState {
-            display_fbs: vec![None; adapter.display_count()],
+            display_fbs: vec![None; objects.crtc_ids().len()],
             cursor_plane: CursorPlane {
                 x: 0,
                 y: 0,
@@ -367,7 +362,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 .map_err(|_| Error::new(EINVAL))?;
 
             // Ensure the VT exists such that the rest of the methods can freely access it.
-            Self::get_or_create_vt(&mut self.adapter, &mut self.vts, vt);
+            Self::get_or_create_vt(&self.objects, &mut self.vts, vt);
 
             Handle::V2 {
                 vt,
@@ -381,7 +376,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             let vt = screen.next().unwrap_or("").parse::<usize>().unwrap();
             let id = screen.next().unwrap_or("").parse::<usize>().unwrap_or(0);
 
-            if id >= self.adapter.display_count() {
+            if id >= self.objects.crtc_ids().len() {
                 return Err(Error::new(EINVAL));
             }
 
@@ -791,7 +786,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_GET_PLANE_RES => ipc::DrmModeGetPlaneRes::with(payload, |mut data| {
-                    let count = self.adapter.display_count();
+                    let count = self.objects.crtc_ids().len();
                     let mut ids = Vec::with_capacity(count);
                     for i in 0..(count as u32) {
                         ids.push(plane_id(i));

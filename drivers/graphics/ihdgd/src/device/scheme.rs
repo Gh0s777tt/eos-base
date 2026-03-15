@@ -69,10 +69,6 @@ impl GraphicsAdapter for Device {
         // FIXME fetch EDID
     }
 
-    fn display_count(&self) -> usize {
-        self.framebuffers.len()
-    }
-
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
         DumbFb::new(width as usize, height as usize)
     }
