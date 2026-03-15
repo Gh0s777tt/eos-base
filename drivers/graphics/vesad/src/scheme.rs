@@ -5,7 +5,8 @@ use std::sync::Mutex;
 
 use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
-use driver_graphics::{Buffer, CursorPlane, GraphicsAdapter, StandardProperties};
+use driver_graphics::kms::properties::DPMS;
+use driver_graphics::{Buffer, CursorPlane, GraphicsAdapter};
 use drm_sys::{drm_mode_modeinfo, DRM_MODE_DPMS_ON};
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use graphics_ipc::v2::Damage;
@@ -38,7 +39,7 @@ impl GraphicsAdapter for FbAdapter {
         b"VESA"
     }
 
-    fn init(&mut self, objects: &mut KmsObjects<Self>, standard_properties: &StandardProperties) {
+    fn init(&mut self, objects: &mut KmsObjects<Self>) {
         for (framebuffer_id, framebuffer) in self.framebuffers.iter().enumerate() {
             let crtc = objects.add_crtc(());
 
@@ -50,11 +51,7 @@ impl GraphicsAdapter for FbAdapter {
                 },
                 &[crtc],
             );
-            objects.add_object_property(
-                connector,
-                standard_properties.dpms,
-                DRM_MODE_DPMS_ON.into(),
-            );
+            objects.add_object_property(connector, DPMS, DRM_MODE_DPMS_ON.into());
         }
     }
 
@@ -72,12 +69,7 @@ impl GraphicsAdapter for FbAdapter {
         }
     }
 
-    fn probe_connector(
-        &mut self,
-        objects: &mut KmsObjects<Self>,
-        _standard_properties: &StandardProperties,
-        id: KmsObjectId,
-    ) {
+    fn probe_connector(&mut self, objects: &mut KmsObjects<Self>, id: KmsObjectId) {
         let mut connector = objects.get_connector(id).unwrap().lock().unwrap();
         let connector = &mut *connector;
         connector.connection = KmsConnectorStatus::Connected;

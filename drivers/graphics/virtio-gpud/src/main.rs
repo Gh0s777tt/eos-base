@@ -586,11 +586,10 @@ fn deamon(deamon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow:
                 let events = scheme.adapter().config.events_read.get();
 
                 if events & VIRTIO_GPU_EVENT_DISPLAY != 0 {
-                    let standard_properties = scheme.standard_properties();
                     let (adapter, objects) = scheme.adapter_and_kms_objects_mut();
                     futures::executor::block_on(async { adapter.update_displays().await.unwrap() });
                     for connector_id in objects.connector_ids().to_vec() {
-                        adapter.probe_connector(objects, &standard_properties, connector_id);
+                        adapter.probe_connector(objects, connector_id);
                     }
                     scheme.notify_displays_changed();
                     scheme

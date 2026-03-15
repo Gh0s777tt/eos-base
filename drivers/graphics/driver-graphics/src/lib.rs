@@ -1,3 +1,4 @@
+#![feature(macro_metavar_expr)]
 #![feature(slice_as_array)]
 
 use std::collections::{BTreeMap, HashMap};
@@ -12,7 +13,6 @@ use std::sync::{Arc, Mutex};
 
 use drm_sys::{
     drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_CURSOR_BO, DRM_MODE_CURSOR_MOVE,
-    DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON, DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND,
     DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM,
     DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE,
     DRM_PROP_NAME_LEN,
@@ -31,12 +31,6 @@ use crate::kms::properties::KmsPropertyKind;
 
 pub mod kms;
 
-#[derive(Debug, Copy, Clone)]
-pub struct StandardProperties {
-    pub edid: KmsObjectId,
-    pub dpms: KmsObjectId,
-}
-
 pub trait GraphicsAdapter: Sized + Debug {
     type Connector: Debug;
     type Crtc: Debug;
@@ -47,17 +41,12 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn name(&self) -> &'static [u8];
     fn desc(&self) -> &'static [u8];
 
-    fn init(&mut self, objects: &mut KmsObjects<Self>, standard_properties: &StandardProperties);
+    fn init(&mut self, objects: &mut KmsObjects<Self>);
 
     fn get_cap(&self, cap: u32) -> Result<u64>;
     fn set_client_cap(&self, cap: u32, value: u64) -> Result<()>;
 
-    fn probe_connector(
-        &mut self,
-        objects: &mut KmsObjects<Self>,
-        standard_properties: &StandardProperties,
-        id: KmsObjectId,
-    );
+    fn probe_connector(&mut self, objects: &mut KmsObjects<Self>, id: KmsObjectId);
 
     /// The maximum amount of displays that could be attached.
     ///
@@ -118,24 +107,9 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
         );
 
         let mut objects = KmsObjects::new();
-
-        let edid = objects.add_property("EDID", true, false, KmsPropertyKind::Blob);
-        let dpms = objects.add_property(
-            "DPMS",
-            false,
-            false,
-            KmsPropertyKind::Enum(vec![
-                ("On", DRM_MODE_DPMS_ON.into()),
-                ("Standby", DRM_MODE_DPMS_STANDBY.into()),
-                ("Suspend", DRM_MODE_DPMS_SUSPEND.into()),
-                ("Off", DRM_MODE_DPMS_OFF.into()),
-            ]),
-        );
-        let standard_properties = StandardProperties { edid, dpms };
-
-        adapter.init(&mut objects, &standard_properties);
+        adapter.init(&mut objects);
         for connector_id in objects.connector_ids().to_vec() {
-            adapter.probe_connector(&mut objects, &standard_properties, connector_id)
+            adapter.probe_connector(&mut objects, connector_id)
         }
 
         let mut inner = GraphicsSchemeInner {
@@ -144,7 +118,6 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
             disable_graphical_debug,
             socket,
             objects,
-            standard_properties,
             next_id: 0,
             handles: BTreeMap::new(),
             active_vt: 0,
@@ -194,10 +167,6 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
 
     pub fn adapter_and_kms_objects_mut(&mut self) -> (&mut T, &mut KmsObjects<T>) {
         (&mut self.inner.adapter, &mut self.inner.objects)
-    }
-
-    pub fn standard_properties(&self) -> StandardProperties {
-        self.inner.standard_properties
     }
 
     pub fn handle_vt_events(&mut self) {
@@ -318,7 +287,6 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
     disable_graphical_debug: Option<File>,
     socket: Socket,
     objects: KmsObjects<T>,
-    standard_properties: StandardProperties,
     next_id: usize,
     handles: BTreeMap<usize, Handle<T>>,
 
@@ -599,11 +567,8 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 }),
                 ipc::MODE_GET_CONNECTOR => ipc::DrmModeGetConnector::with(payload, |mut data| {
                     if data.count_modes() == 0 {
-                        self.adapter.probe_connector(
-                            &mut self.objects,
-                            &self.standard_properties,
-                            KmsObjectId(data.connector_id()),
-                        );
+                        self.adapter
+                            .probe_connector(&mut self.objects, KmsObjectId(data.connector_id()));
                     }
                     let connector = self
                         .objects

@@ -10,7 +10,7 @@ use drm_sys::{
 use syscall::{Error, Result, EINVAL};
 
 use crate::kms::connector::{KmsConnector, KmsEncoder};
-use crate::kms::properties::{KmsBlob, KmsProperty};
+use crate::kms::properties::{init_standard_props, KmsBlob, KmsProperty};
 use crate::GraphicsAdapter;
 
 #[derive(Debug)]
@@ -26,7 +26,7 @@ pub struct KmsObjects<T: GraphicsAdapter> {
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
     pub(crate) fn new() -> Self {
-        KmsObjects {
+        let mut objects = KmsObjects {
             next_id: KmsObjectId(1),
             connectors: vec![],
             encoders: vec![],
@@ -34,7 +34,9 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             framebuffers: vec![],
             objects: HashMap::new(),
             _marker: PhantomData,
-        }
+        };
+        init_standard_props(&mut objects);
+        objects
     }
 
     pub(crate) fn add<U: Into<KmsObjectKind<T>>>(&mut self, data: U) -> KmsObjectId {

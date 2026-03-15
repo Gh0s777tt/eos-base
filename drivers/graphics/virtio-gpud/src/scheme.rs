@@ -4,9 +4,8 @@ use std::sync::{Arc, Mutex};
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
-use driver_graphics::{
-    Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme, StandardProperties,
-};
+use driver_graphics::kms::properties::{DPMS, EDID};
+use driver_graphics::{Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{drm_mode_modeinfo, DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON};
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use graphics_ipc::v2::Damage;
@@ -279,7 +278,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         b"VirtIO GPU"
     }
 
-    fn init(&mut self, objects: &mut KmsObjects<Self>, standard_properties: &StandardProperties) {
+    fn init(&mut self, objects: &mut KmsObjects<Self>) {
         futures::executor::block_on(async {
             self.update_displays().await.unwrap();
         });
@@ -289,13 +288,9 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
             let connector = objects.add_connector(VirtGpuConnector { display_id }, &[crtc]);
             if self.has_edid {
-                objects.add_object_property(connector, standard_properties.edid, 0);
+                objects.add_object_property(connector, EDID, 0);
             }
-            objects.add_object_property(
-                connector,
-                standard_properties.dpms,
-                DRM_MODE_DPMS_ON.into(),
-            );
+            objects.add_object_property(connector, DPMS, DRM_MODE_DPMS_ON.into());
         }
     }
 
@@ -316,12 +311,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         }
     }
 
-    fn probe_connector(
-        &mut self,
-        objects: &mut KmsObjects<Self>,
-        standard_properties: &StandardProperties,
-        id: KmsObjectId,
-    ) {
+    fn probe_connector(&mut self, objects: &mut KmsObjects<Self>, id: KmsObjectId) {
         futures::executor::block_on(async {
             let mut connector = objects.get_connector(id).unwrap().lock().unwrap();
             let display = &self.displays[connector.driver_data.display_id as usize];
@@ -338,7 +328,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
                 drop(connector);
 
                 let blob = objects.add_blob(display.edid.clone());
-                objects.set_object_property(id, standard_properties.edid, blob.into());
+                objects.set_object_property(id, EDID, blob.into());
             } else {
                 connector.update_from_size(display.width, display.height);
             }
