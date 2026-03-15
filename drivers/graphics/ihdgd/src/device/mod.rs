@@ -404,7 +404,7 @@ impl Device {
         let buffers = 1024;
         //TODO: how to use 64-bit surface addresses?
         let surface_memory = gm.size.min(u32::max_value() as usize) as u32;
-        let mut this = Self {
+        Ok(Self {
             kind,
             alloc_buffers: RangeAllocator::new(0..buffers),
             alloc_surfaces: RangeAllocator::new(0..surface_memory),
@@ -422,12 +422,10 @@ impl Device {
             power_wells,
             ref_freq,
             transcoders,
-        };
-        this.init()?;
-        Ok(this)
+        })
     }
 
-    pub fn init(&mut self) -> Result<()> {
+    pub fn init_inner(&mut self) {
         // Discover current framebuffers
         self.alloc_buffers.reset();
         self.alloc_surfaces.reset();
@@ -440,15 +438,12 @@ impl Device {
                     let buffer_end = (buf_cfg >> 16) & 0x7FF;
                     self.alloc_buffers
                         .allocate_exact_range(buffer_start..(buffer_end + 1))
-                        .map_err(|err| {
-                            log::warn!(
+                        .unwrap_or_else(|err| {
+                            panic!(
                                 "failed to allocate pre-existing buffer blocks {} to {}: {:?}",
-                                buffer_start,
-                                buffer_end,
-                                err
+                                buffer_start, buffer_end, err
                             );
-                            Error::new(EIO)
-                        })?;
+                        });
 
                     let size = plane.size.read();
                     let width = (size & 0xFFFF) + 1;
@@ -459,10 +454,9 @@ impl Device {
                     let surf = plane.surf.read() & 0xFFFFF000;
                     //TODO: read bits per pixel
                     let surf_size = (stride * height * 4).next_multiple_of(4096);
-                    self.alloc_surfaces.allocate_exact_range(surf .. (surf + surf_size)).map_err(|err| {
-                        log::warn!("failed to allocate pre-existing surface at 0x{:x} of size {}: {:?}", surf, surf_size, err);
-                        Error::new(EIO)
-                    })?;
+                    self.alloc_surfaces.allocate_exact_range(surf .. (surf + surf_size)).unwrap_or_else(|err| {
+                        panic!("failed to allocate pre-existing surface at 0x{:x} of size {}: {:?}", surf, surf_size, err);
+                    });
 
                     self.framebuffers.push(unsafe {
                         DeviceFb::new(
@@ -480,7 +474,7 @@ impl Device {
         // Probe all DDIs
         let ddi_names: Vec<&str> = self.ddis.iter().map(|ddi| ddi.name).collect();
         for ddi_name in ddi_names {
-            self.probe_ddi(ddi_name)?;
+            self.probe_ddi(ddi_name).expect("failed to probe DDI");
         }
 
         self.dump();
@@ -517,8 +511,6 @@ impl Device {
         for change_detect in self.int.change_detects.iter_mut() {
             change_detect.log();
         }
-
-        Ok(())
     }
 
     pub fn dump(&self) {

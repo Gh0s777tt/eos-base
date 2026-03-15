@@ -38,6 +38,8 @@ impl GraphicsAdapter for Device {
     }
 
     fn init(&mut self, objects: &mut KmsObjects<Self>) {
+        self.init_inner();
+
         // FIXME enumerate actual connectors
         for (framebuffer_id, _) in self.framebuffers.iter().enumerate() {
             let crtc = objects.add_crtc((), ());
