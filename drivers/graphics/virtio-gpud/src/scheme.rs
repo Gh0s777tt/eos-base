@@ -3,10 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::KmsConnectorStatus;
-use driver_graphics::kms::objects::{KmsCrtc, KmsObjectId, KmsObjects};
-use driver_graphics::{
-    Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme, StandardProperties,
-};
+use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
+use driver_graphics::kms::properties::{DPMS, EDID};
+use driver_graphics::{Buffer as DrmBuffer, CursorPlane, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{drm_mode_modeinfo, DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_MODE_DPMS_ON};
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use graphics_ipc::v2::Damage;
@@ -269,6 +268,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     type Crtc = ();
 
     type Buffer = VirtGpuFramebuffer<'a>;
+    type Framebuffer = ();
 
     fn name(&self) -> &'static [u8] {
         b"virtio-gpud"
@@ -278,7 +278,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         b"VirtIO GPU"
     }
 
-    fn init(&mut self, objects: &mut KmsObjects<Self>, standard_properties: &StandardProperties) {
+    fn init(&mut self, objects: &mut KmsObjects<Self>) {
         futures::executor::block_on(async {
             self.update_displays().await.unwrap();
         });
@@ -288,13 +288,9 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
             let connector = objects.add_connector(VirtGpuConnector { display_id }, &[crtc]);
             if self.has_edid {
-                objects.add_object_property(connector, standard_properties.edid, 0);
+                objects.add_object_property(connector, EDID, 0);
             }
-            objects.add_object_property(
-                connector,
-                standard_properties.dpms,
-                DRM_MODE_DPMS_ON.into(),
-            );
+            objects.add_object_property(connector, DPMS, DRM_MODE_DPMS_ON.into());
         }
     }
 
@@ -315,12 +311,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         }
     }
 
-    fn probe_connector(
-        &mut self,
-        objects: &mut KmsObjects<Self>,
-        standard_properties: &StandardProperties,
-        id: KmsObjectId,
-    ) {
+    fn probe_connector(&mut self, objects: &mut KmsObjects<Self>, id: KmsObjectId) {
         futures::executor::block_on(async {
             let mut connector = objects.get_connector(id).unwrap().lock().unwrap();
             let display = &self.displays[connector.driver_data.display_id as usize];
@@ -337,22 +328,11 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
                 drop(connector);
 
                 let blob = objects.add_blob(display.edid.clone());
-                objects.set_object_property(id, standard_properties.edid, blob.into());
+                objects.set_object_property(id, EDID, blob.into());
             } else {
                 connector.update_from_size(display.width, display.height);
             }
         });
-    }
-
-    fn display_count(&self) -> usize {
-        self.displays.len()
-    }
-
-    fn display_size(&self, display_id: usize) -> (u32, u32) {
-        (
-            self.displays[display_id].width,
-            self.displays[display_id].height,
-        )
     }
 
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
@@ -414,8 +394,12 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         })
     }
 
-    fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8 {
-        framebuffer.sgl.as_ptr()
+    fn map_dumb_buffer(&mut self, buffer: &Self::Buffer) -> *mut u8 {
+        buffer.sgl.as_ptr()
+    }
+
+    fn create_framebuffer(&mut self, _buffer: &Self::Buffer) -> Self::Framebuffer {
+        ()
     }
 
     fn set_crtc(
@@ -424,7 +408,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         crtc: &Mutex<KmsCrtc<Self::Crtc>>,
         connectors: &[KmsObjectId],
         mode: Option<drm_mode_modeinfo>,
-        framebuffer: Option<&Self::Buffer>,
+        framebuffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
         damage: Damage,
     ) {
         futures::executor::block_on(async {
@@ -452,7 +436,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             };
 
             let req = Dma::new(XferToHost2d::new(
-                framebuffer.id,
+                framebuffer.buffer.id,
                 GpuRect {
                     x: 0,
                     y: 0,
@@ -466,20 +450,20 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             assert_eq!(header.ty, CommandTy::RespOkNodata);
 
             // FIXME once we support resizing we also need to check that the current and target size match
-            if self.displays[display_id as usize].active_resource != Some(framebuffer.id) {
+            if self.displays[display_id as usize].active_resource != Some(framebuffer.buffer.id) {
                 let scanout_request = Dma::new(SetScanout::new(
                     display_id,
-                    framebuffer.id,
+                    framebuffer.buffer.id,
                     GpuRect::new(0, 0, framebuffer.width, framebuffer.height),
                 ))
                 .unwrap();
                 let header = self.send_request(scanout_request).await.unwrap();
                 assert_eq!(header.ty, CommandTy::RespOkNodata);
-                self.displays[display_id as usize].active_resource = Some(framebuffer.id);
+                self.displays[display_id as usize].active_resource = Some(framebuffer.buffer.id);
             }
 
             let flush = ResourceFlush::new(
-                framebuffer.id,
+                framebuffer.buffer.id,
                 damage.clip(framebuffer.width, framebuffer.height).into(),
             );
             let header = self.send_request(Dma::new(flush).unwrap()).await.unwrap();

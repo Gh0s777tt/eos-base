@@ -2,7 +2,10 @@ use std::ffi::c_char;
 use std::fmt::Debug;
 use std::sync::Mutex;
 
-use drm_sys::DRM_PROP_NAME_LEN;
+use drm_sys::{
+    DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON, DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND,
+    DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY, DRM_PROP_NAME_LEN,
+};
 use syscall::{Error, Result, EINVAL};
 
 use crate::kms::objects::{KmsObjectId, KmsObjects};
@@ -114,4 +117,79 @@ pub enum KmsPropertyKind {
 #[derive(Debug)]
 pub struct KmsBlob {
     data: Vec<u8>,
+}
+
+macro_rules! define_properties {
+    ($($prop:ident $($prop_name:literal)?: $prop_type:ident $({$($prop_content:tt)*})? [$($prop_flag:ident)?],)*) => {
+        $(#[allow(non_upper_case_globals)] pub const $prop: KmsObjectId = KmsObjectId(1 + ${index()});)*
+
+        pub(super) fn init_standard_props<T: GraphicsAdapter>(objects: &mut KmsObjects<T>) {
+            $(
+                assert_eq!(objects.add_property(
+                    define_properties!(@prop_name $prop $($prop_name)?),
+                    define_properties!(@is_immutable $($prop_flag)?),
+                    define_properties!(@is_atomic $($prop_flag)?),
+                    define_properties!(@prop_kind $prop_type $({$($prop_content)*})?),
+                ), $prop);
+            )*
+        }
+    };
+    (@prop_name $prop:ident $prop_name:literal) => { $prop_name };
+    (@prop_name $prop:ident) => { stringify!($prop) };
+    (@is_immutable) => { false };
+    (@is_immutable immutable) => { true };
+    (@is_immutable atomic) => { false };
+    (@is_atomic) => { false };
+    (@is_atomic immutable) => { false };
+    (@is_atomic atomic) => { true };
+    (@prop_kind range { $start:expr, $end:expr }) => {
+        KmsPropertyKind::Range($start, $end)
+    };
+    (@prop_kind enum { $($variant:ident = $value:expr,)* }) => {
+        KmsPropertyKind::Enum(vec![$((stringify!($variant), $value)),*])
+    };
+    (@prop_kind blob) => {
+        KmsPropertyKind::Blob
+    };
+    (@prop_kind object) => {
+        KmsPropertyKind::Object
+    };
+    (@prop_kind srange { $start:expr, $end:expr }) => {
+        KmsPropertyKind::SignedRange($start, $end)
+    };
+}
+
+define_properties! {
+    // Connector + Plane
+    CRTC_ID: object [atomic],
+
+    // Connector
+    EDID: blob [immutable],
+    DPMS: enum {
+        On = u64::from(DRM_MODE_DPMS_ON),
+        Standby = u64::from(DRM_MODE_DPMS_STANDBY),
+        Suspend = u64::from(DRM_MODE_DPMS_SUSPEND),
+        Off = u64::from(DRM_MODE_DPMS_OFF),
+    } [],
+
+    // CRTC
+    ACTIVE: range { 0,1 } [atomic],
+    MODE_ID: blob [atomic],
+
+    // Plane
+    type_ "type": enum {
+        Overlay = u64::from(DRM_PLANE_TYPE_OVERLAY),
+        Primary = u64::from(DRM_PLANE_TYPE_PRIMARY),
+        Cursor = u64::from(DRM_PLANE_TYPE_CURSOR),
+    } [immutable],
+    FB_ID: object [atomic],
+    CRTC_X: srange { i64::from(i32::MIN), i64::from(i32::MAX) } [atomic],
+    CRTC_Y: srange { i64::from(i32::MIN), i64::from(i32::MAX) } [atomic],
+    CRTC_W: range { 0, u64::from(u32::MAX) } [atomic],
+    CRTC_H: range { 0, u64::from(u32::MAX) } [atomic],
+    SRC_X: range { 0, u64::from(u32::MAX) } [atomic],
+    SRC_Y: range { 0, u64::from(u32::MAX) } [atomic],
+    SRC_W: range { 0, u64::from(u32::MAX) } [atomic],
+    SRC_H: range { 0, u64::from(u32::MAX) } [atomic],
+    FB_DAMAGE_CLIPS: blob [atomic],
 }

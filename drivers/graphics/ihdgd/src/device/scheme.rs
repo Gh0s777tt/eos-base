@@ -6,8 +6,9 @@ use std::ptr::{self, NonNull};
 use std::sync::Mutex;
 
 use driver_graphics::kms::connector::KmsConnectorStatus;
-use driver_graphics::kms::objects::{KmsCrtc, KmsObjectId, KmsObjects};
-use driver_graphics::{Buffer, CursorPlane, GraphicsAdapter, StandardProperties};
+use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
+use driver_graphics::kms::properties::DPMS;
+use driver_graphics::{Buffer, CursorPlane, GraphicsAdapter};
 use drm_sys::{drm_mode_modeinfo, DRM_MODE_DPMS_ON};
 use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use graphics_ipc::v2::Damage;
@@ -25,6 +26,7 @@ impl GraphicsAdapter for Device {
     type Crtc = ();
 
     type Buffer = DumbFb;
+    type Framebuffer = ();
 
     fn name(&self) -> &'static [u8] {
         b"ihdgd"
@@ -34,17 +36,13 @@ impl GraphicsAdapter for Device {
         b"Intel HD Graphics"
     }
 
-    fn init(&mut self, objects: &mut KmsObjects<Self>, standard_properties: &StandardProperties) {
+    fn init(&mut self, objects: &mut KmsObjects<Self>) {
         // FIXME enumerate actual connectors
         for (framebuffer_id, _) in self.framebuffers.iter().enumerate() {
             let crtc = objects.add_crtc(());
 
             let connector = objects.add_connector(Connector { framebuffer_id }, &[crtc]);
-            objects.add_object_property(
-                connector,
-                standard_properties.dpms,
-                DRM_MODE_DPMS_ON.into(),
-            );
+            objects.add_object_property(connector, DPMS, DRM_MODE_DPMS_ON.into());
         }
     }
 
@@ -63,28 +61,12 @@ impl GraphicsAdapter for Device {
         }
     }
 
-    fn probe_connector(
-        &mut self,
-        objects: &mut KmsObjects<Self>,
-        _standard_properties: &StandardProperties,
-        id: KmsObjectId,
-    ) {
+    fn probe_connector(&mut self, objects: &mut KmsObjects<Self>, id: KmsObjectId) {
         let mut connector = objects.get_connector(id).unwrap().lock().unwrap();
         let framebuffer = &self.framebuffers[connector.driver_data.framebuffer_id];
         connector.connection = KmsConnectorStatus::Connected;
         connector.update_from_size(framebuffer.width as u32, framebuffer.height as u32);
         // FIXME fetch EDID
-    }
-
-    fn display_count(&self) -> usize {
-        self.framebuffers.len()
-    }
-
-    fn display_size(&self, display_id: usize) -> (u32, u32) {
-        (
-            self.framebuffers[display_id].width as u32,
-            self.framebuffers[display_id].height as u32,
-        )
     }
 
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
@@ -95,13 +77,17 @@ impl GraphicsAdapter for Device {
         framebuffer.ptr.as_ptr().cast::<u8>()
     }
 
+    fn create_framebuffer(&mut self, _buffer: &Self::Buffer) -> Self::Framebuffer {
+        ()
+    }
+
     fn set_crtc(
         &mut self,
         objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self::Crtc>>,
         connectors: &[KmsObjectId],
         mode: Option<drm_mode_modeinfo>,
-        buffer: Option<&Self::Buffer>,
+        buffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
         damage: Damage,
     ) {
         crtc.lock().unwrap().mode = mode;
@@ -116,7 +102,7 @@ impl GraphicsAdapter for Device {
 
         let framebuffer = &mut self.framebuffers[framebuffer_id];
         if let Some(buffer) = buffer {
-            buffer.sync(framebuffer, damage)
+            buffer.buffer.sync(framebuffer, damage)
         } else {
             let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
             for row in 0..framebuffer.height {

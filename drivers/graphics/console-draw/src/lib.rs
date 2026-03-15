@@ -21,7 +21,7 @@ impl V2DisplayMap {
     pub fn new(display_handle: V2GraphicsHandle, width: u32, height: u32) -> io::Result<Self> {
         let mut buffer =
             display_handle.create_dumb_buffer((width, height), DrmFourcc::Argb8888, 32)?;
-        let fb = display_handle.add_framebuffer(&buffer, 24, 32)?;
+        let fb = display_handle.add_framebuffer(&buffer, 32, 32)?;
 
         let map = display_handle.map_dumb_buffer(&mut buffer)?;
         let map = unsafe { mem::transmute::<DumbMapping<'_>, DumbMapping<'static>>(map) };
