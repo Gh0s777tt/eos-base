@@ -1,5 +1,6 @@
 [package]
 name = "pcid"
+description = "PCI and PCI Express driver"
 version = "0.1.0"
 edition = "2021"
 

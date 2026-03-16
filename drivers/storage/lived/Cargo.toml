@@ -1,5 +1,6 @@
 [package]
 name = "lived"
+description = "Live disk daemon"
 authors = ["4lDO2 <4lDO2@protonmail.com>"]
 version = "0.1.0"
 edition = "2021"

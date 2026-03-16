@@ -1,5 +1,6 @@
 [package]
 name = "xhcid"
+description = "xHCI controller driver"
 version = "0.1.0"
 edition = "2018"
 

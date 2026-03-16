@@ -1,5 +1,6 @@
 [package]
 name = "partitionlib"
+description = "GPT and MBR partition table library"
 version = "0.1.0"
 authors = ["Deepak Sirone <deepaksirone94@gmail.com>"]
 edition = "2021"

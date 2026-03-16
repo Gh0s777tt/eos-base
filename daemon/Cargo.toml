@@ -1,5 +1,6 @@
 [package]
 name = "daemon"
+description = "Redox daemon library"
 version = "0.0.0"
 edition = "2024"
 

@@ -1,5 +1,6 @@
 [package]
 name = "pcid-spawner"
+description = "PCI-based device driver spawner daemon"
 version = "0.1.0"
 authors = ["4lDO2 <4lDO2@protonmail.com>"]
 edition = "2021"

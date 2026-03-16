@@ -1,5 +1,6 @@
 [package]
 name = "ihdad"
+description = "Intel HD Audio chipset driver"
 version = "0.1.0"
 edition = "2021"
 

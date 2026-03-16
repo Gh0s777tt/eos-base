@@ -1,5 +1,6 @@
 [package]
 name = "redox-initfs"
+description = "Userspace bootstrap image library"
 version = "0.2.0"
 authors = ["4lDO2 <4lDO2@protonmail.com>", "Kamil Koczurek <koczurekk@gmail.com>"]
 edition = "2024"

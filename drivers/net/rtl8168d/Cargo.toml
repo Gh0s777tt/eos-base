@@ -1,5 +1,6 @@
 [package]
 name = "rtl8168d"
+description = "Realtek 8168 ethernet driver"
 version = "0.1.0"
 edition = "2018"
 

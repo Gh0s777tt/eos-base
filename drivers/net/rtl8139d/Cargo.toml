@@ -1,5 +1,6 @@
 [package]
 name = "rtl8139d"
+description = "Realtek 8139 ethernet driver"
 version = "0.1.0"
 edition = "2018"
 
