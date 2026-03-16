@@ -3,7 +3,7 @@ name = "redox-initfs-tools"
 version = "0.2.0"
 authors = ["4lDO2 <4lDO2@protonmail.com>", "Kamil Koczurek <koczurekk@gmail.com>"]
 edition = "2021"
-description = "Archive a directory into a Redox initfs image"
+description = "Tooling to archive a directory into an userspace bootstrap image (initfs)"
 license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

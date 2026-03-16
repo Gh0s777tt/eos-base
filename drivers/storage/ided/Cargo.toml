@@ -1,5 +1,6 @@
 [package]
 name = "ided"
+description = "PATA (IDE) driver"
 version = "0.1.0"
 edition = "2021"
 

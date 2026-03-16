@@ -1,5 +1,6 @@
 [package]
 name = "nvmed"
+description = "NVM Express (NVMe) driver"
 version = "0.1.0"
 edition = "2021"
 

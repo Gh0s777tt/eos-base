@@ -1,5 +1,6 @@
 [package]
 name = "audiod"
+description = "Sound daemon"
 version = "0.1.0"
 authors = ["Jeremy Soller <jackpot51@gmail.com>"]
 edition = "2021"

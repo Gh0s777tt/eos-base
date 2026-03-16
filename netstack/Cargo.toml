@@ -1,5 +1,6 @@
 [package]
 name = "redox_netstack"
+description = "Network stack daemons"
 version = "0.1.0"
 edition = "2021"
 

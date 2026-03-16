@@ -1,5 +1,6 @@
 [package]
 name = "bcm2835-sdhcid"
+description = "BCM2835 storage controller driver"
 version = "0.1.0"
 edition = "2021"
 

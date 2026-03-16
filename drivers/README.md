@@ -20,7 +20,6 @@
 ## Libraries
 
 - amlserde - Library to provide serialization/deserialization of the AML symbol table from ACPI
-- block-io-wrapper - TODO
 - common - Library with shared driver code
 - executor - Library to run Rust futures and integrate the executor in an interrupt+queue model without a separated reactor thread
 - [graphics/console-draw](graphics/console-draw/) - Library with shared terminal drawing code
@@ -29,27 +28,28 @@
 - [net/driver-network](net/driver-network/) - Library with shared networking code
 - [storage/partitionlib](storage/partitionlib/) - Library with MBR and GPT code
 - [storage/driver-block](storage/driver-block/) - Library with shared storage code
+- virtio-core - VirtIO driver library
 
 ## Services
 
 - [graphics/fbbootlogd](graphics/fbbootlogd/) - Daemon for boot log drawing
 - [graphics/fbcond](graphics/fbcond/) - Terminal daemon
-- hwd - Handles the ACPI and DeviceTree booting
+- hwd - Daemon that handle the ACPI and DeviceTree booting
 - inputd - Multiplexes input from multiple input drivers and provides that to Orbital
-- pcid-spawner - Daemon for PCI device driver spawn
+- pcid-spawner - Daemon for PCI-based device driver spawn
 - [storage/lived](storage/lived/) - Daemon for live disk
 - redoxerd - Daemon that send/receive terminal text between the host system and QEMU
 
 ## Hardware Interfaces
 
 - acpid - ACPI interface driver
-- pcid - PCI interface driver with PCI Express extensions
+- pcid - PCI and PCI Express driver
 
 ## Devices
 
 ### CPU
 
-- rtcd - x86 real time clock driver
+- rtcd - x86 Real Time Clock driver
 
 ### Controllers
 
@@ -57,10 +57,10 @@
 
 ### Storage
 
-- [storage/ahcid](storage/ahcid/) - SATA interface driver
-- [storage/bcm2835-sdhcid](storage/bcm2835-sdhcid/) - Raspberry Pi 3B+ storage driver
-- [storage/ided](storage/ided/) - IDE interface driver
-- [storage/nvmed](storage/nvmed/) - NVMe interface driver
+- [storage/ahcid](storage/ahcid/) - AHCI (SATA) driver
+- [storage/bcm2835-sdhcid](storage/bcm2835-sdhcid/) - BCM2835 storage driver
+- [storage/ided](storage/ided/) - PATA (IDE) driver
+- [storage/nvmed](storage/nvmed/) - NVMe driver
 - [storage/virtio-blkd](storage/virtio-blkd/) - VirtIO block device driver
 - [storage/usbscsid](storage/usbscsid/) - USB SCSI driver
 
@@ -69,33 +69,31 @@
 - [graphics/bgad](graphics/bgad/) - Bochs video driver
 - [graphics/ihdgd](graphics/ihdgd/) - Intel graphics driver
 - [graphics/vesad](graphics/vesad/) - VESA video driver
-- [graphics/virtio-gpud](graphics/virtio-gpud/) - VirtIO GPU device driver
+- [graphics/virtio-gpud](graphics/virtio-gpud/) - VirtIO-GPU device driver
 
 ### Input
 
 - [input/ps2d](input/ps2d/) - PS/2 interface driver
 - [input/usbhidd](input/usbhidd/) - USB HID driver
-- [usb/usbctl](usb/usbctl/) - USB control
-- [usb/usbhubd](usb/usbhubd/) - USB hub driver
+- [usb/usbhubd](usb/usbhubd/) - USB Hub driver
+- [usb/usbctl](usb/usbctl/) - TODO
 
 ### Sound
 
-- [audio/ac97d](audio/ac97d/) - Realtek audio chipsets driver
-- [audio/ihdad](audio/ihdad/) - Intel HD Audio chipsets driver
-- [audio/sb16d](audio/sb16d/) - Sound Blaster audio driver
+- [audio/ac97d](audio/ac97d/) - AC'97 codec driver
+- [audio/ihdad](audio/ihdad/) - Intel HD Audio chipset driver
+- [audio/sb16d](audio/sb16d/) - Sound Blaster sound card driver
 
 ### Networking
 
-- [net/alxd](net/alxd/) - Qualcomm Atheros ethernet driver
 - [net/e1000d](net/e1000d/) - Intel Gigabit ethernet driver
 - [net/ixgbed](net/ixgbed/) - Intel 10 Gigabit ethernet driver
-- [net/rtl8139d](net/rtl8139d/), [net/rtl8168d](net/rtl8168d/) - Realtek ethernet driver
+- [net/rtl8139d](net/rtl8139d/), [net/rtl8168d](net/rtl8168d/) - Realtek ethernet drivers
 - [net/virtio-netd](net/virtio-netd/) - VirtIO network device driver
 
 ### Virtualization
 
-- vboxd - VirtualBox guest driver driver
-- virtio-core - VirtIO core driver
+- vboxd - VirtualBox driver
 
 Some drivers are work-in-progress and incomplete, read [this](https://gitlab.redox-os.org/redox-os/base/-/issues/56) tracking issue to verify.
 

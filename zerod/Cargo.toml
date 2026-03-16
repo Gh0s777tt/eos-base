@@ -1,5 +1,6 @@
 [package]
 name = "zerod"
+description = "Zeroing buffers daemon"
 version = "0.1.0"
 authors = ["Alex Lyon <arcterus@mail.com>"]
 edition = "2021"

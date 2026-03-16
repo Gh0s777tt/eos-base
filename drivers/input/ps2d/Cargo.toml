@@ -1,5 +1,6 @@
 [package]
 name = "ps2d"
+description = "PS/2 driver"
 version = "0.1.0"
 edition = "2018"
 
