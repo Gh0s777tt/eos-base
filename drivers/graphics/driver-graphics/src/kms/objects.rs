@@ -74,6 +74,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         let crtc_index = self.crtcs.len() as u32;
         let id = self.add(Mutex::new(KmsCrtc {
             crtc_index,
+            target_connectors: vec![],
             fb_id: KmsObjectId::INVALID,
             gamma_size: 0,
             mode: None,
@@ -202,6 +203,8 @@ define_object_kinds! { <T>
 #[derive(Debug)]
 pub struct KmsCrtc<T> {
     pub crtc_index: u32,
+    // FIXME maybe have this on connector instead?
+    pub target_connectors: Vec<KmsObjectId>,
     pub fb_id: KmsObjectId,
     pub gamma_size: u32,
     pub mode: Option<drm_mode_modeinfo>,

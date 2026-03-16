@@ -219,6 +219,9 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                                 height: fb.map_or(0, |fb| fb.height),
                             },
                         );
+
+                        crtc.lock().unwrap().target_connectors =
+                            vec![self.inner.objects.connector_ids()[display_id]];
                     }
 
                     if self.inner.adapter.hw_cursor_size().is_some() {
@@ -528,10 +531,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_SET_CRTC => ipc::DrmModeCrtc::with(payload, |data| {
-                    let crtc = self
-                        .objects
-                        .get_crtc(KmsObjectId(data.crtc_id()))?
-                        ;
+                    let crtc = self.objects.get_crtc(KmsObjectId(data.crtc_id()))?;
                     let display_id = crtc.lock().unwrap().crtc_index as usize;
                     let connector_ids: Vec<KmsObjectId> = data
                         .set_connectors_ptr()
@@ -563,13 +563,14 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                                 height: mode.map_or(0, |m| m.vdisplay as u32),
                             },
                         );
+                        crtc.lock().unwrap().fb_id = KmsObjectId(data.fb_id());
+                        crtc.lock().unwrap().target_connectors = connector_ids;
                     }
-                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] = if data.fb_id() != 0
-                        {
-                            Some(KmsObjectId(data.fb_id()))
-                        } else {
-                            None
-                        };
+                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] = if data.fb_id() != 0 {
+                        Some(KmsObjectId(data.fb_id()))
+                    } else {
+                        None
+                    };
                     Ok(0)
                 }),
                 ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
@@ -789,6 +790,45 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     Ok(0)
                 }),
+                ipc::MODE_DIRTYFB => ipc::DrmModeFbDirtyCmd::with(payload, |data| {
+                    let fb = self.objects.get_framebuffer(KmsObjectId(data.fb_id()))?;
+
+                    let damage = data
+                        .clips_ptr()
+                        .iter()
+                        .map(|rect| Damage {
+                            x: u32::from(rect.x1),
+                            y: u32::from(rect.y1),
+                            width: u32::from(rect.x2 - rect.x1),
+                            height: u32::from(rect.y2 - rect.y1),
+                        })
+                        .reduce(Damage::merge)
+                        .unwrap_or(Damage {
+                            x: 0,
+                            y: 0,
+                            width: fb.width,
+                            height: fb.height,
+                        });
+
+                    if *vt == self.active_vt {
+                        for crtc in self.objects.crtcs() {
+                            if crtc.lock().unwrap().fb_id == KmsObjectId(data.fb_id()) {
+                                let connectors = crtc.lock().unwrap().target_connectors.clone();
+                                let mode = crtc.lock().unwrap().mode;
+                                self.adapter.set_crtc(
+                                    &self.objects,
+                                    crtc,
+                                    &connectors,
+                                    mode,
+                                    Some(fb),
+                                    damage,
+                                );
+                            }
+                        }
+                    }
+
+                    Ok(0)
+                }),
                 ipc::MODE_CREATE_DUMB => ipc::DrmModeCreateDumb::with(payload, |mut data| {
                     if data.bpp() != 32 {
                         return Err(Error::new(EINVAL));
@@ -954,6 +994,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             fb,
                             payload.damage,
                         );
+
+                        crtc.lock().unwrap().fb_id = KmsObjectId(payload.fb_id);
+                        crtc.lock().unwrap().target_connectors =
+                            vec![self.objects.connector_ids()[display_id]];
                     }
 
                     Ok(size_of::<ipc::UpdatePlane>())
