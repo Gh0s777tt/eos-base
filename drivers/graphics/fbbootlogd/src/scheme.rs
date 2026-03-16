@@ -48,13 +48,7 @@ impl FbbootlogScheme {
             }
         };
 
-        let (width, height) = new_display_handle
-            .get_connector(new_display_handle.first_display().unwrap(), true)
-            .unwrap()
-            .modes()[0]
-            .size();
-
-        match V2DisplayMap::new(new_display_handle, width.into(), height.into()) {
+        match V2DisplayMap::new(new_display_handle) {
             Ok(display_map) => self.display_map = Some(display_map),
             Err(err) => {
                 eprintln!("fbbootlogd: failed to open display: {}", err);
@@ -145,9 +139,7 @@ impl FbbootlogScheme {
                 total_damage = total_damage.merge(damage);
             }
         }
-        map.display_handle
-            .update_plane(0, u32::from(map.fb), total_damage)
-            .unwrap();
+        map.dirty_fb(total_damage).unwrap();
     }
 
     fn handle_resize(map: &mut V2DisplayMap, text_screen: &mut TextScreen) {
@@ -247,9 +239,7 @@ impl SchemeSync for FbbootlogScheme {
                 let damage = self.text_screen.write(map, buf, &mut VecDeque::new());
 
                 if let Some(map) = &self.display_map {
-                    map.display_handle
-                        .update_plane(0, u32::from(map.fb), damage)
-                        .unwrap();
+                    map.dirty_fb(damage).unwrap();
                 }
             }
         }

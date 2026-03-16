@@ -12,15 +12,24 @@ use orbclient::FONT;
 
 pub struct V2DisplayMap {
     pub display_handle: V2GraphicsHandle,
-    pub fb: framebuffer::Handle,
+    fb: framebuffer::Handle,
     pub buffer: DumbBuffer,
     mapping: DumbMapping<'static>,
 }
 
 impl V2DisplayMap {
-    pub fn new(display_handle: V2GraphicsHandle, width: u32, height: u32) -> io::Result<Self> {
-        let mut buffer =
-            display_handle.create_dumb_buffer((width, height), DrmFourcc::Argb8888, 32)?;
+    pub fn new(display_handle: V2GraphicsHandle) -> io::Result<Self> {
+        let connector = display_handle.first_display().unwrap();
+        let connector_info = display_handle.get_connector(connector, true).unwrap();
+
+        let mode = connector_info.modes()[0];
+        let (width, height) = mode.size();
+
+        let mut buffer = display_handle.create_dumb_buffer(
+            (width.into(), height.into()),
+            DrmFourcc::Argb8888,
+            32,
+        )?;
         let fb = display_handle.add_framebuffer(&buffer, 32, 32)?;
 
         let map = display_handle.map_dumb_buffer(&mut buffer)?;
@@ -43,6 +52,11 @@ impl V2DisplayMap {
             width: self.buffer.size().0 as usize,
             height: self.buffer.size().1 as usize,
         }
+    }
+
+    pub fn dirty_fb(&self, damage: Damage) -> io::Result<()> {
+        self.display_handle
+            .update_plane(0, u32::from(self.fb), damage)
     }
 }
 
