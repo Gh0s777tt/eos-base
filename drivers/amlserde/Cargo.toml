@@ -1,6 +1,5 @@
 [package]
 name = "amlserde"
-description = "AML symbol table serialization/deserialization library"
 version = "0.0.1"
 authors = ["Ron Williams"]
 repository = "https://gitlab.redox-os.org/redox-os/drivers"
