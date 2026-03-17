@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use console_draw::{Damage, TextScreen, V2DisplayMap};
 use drm::buffer::Buffer;
 use drm::control::Device;
-use graphics_ipc::v2::V2GraphicsHandle;
+use graphics_ipc::V2GraphicsHandle;
 use inputd::ConsumerHandle;
 use orbclient::{Event, EventOption};
 use redox_scheme::scheme::SchemeSync;

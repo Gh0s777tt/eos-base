@@ -472,7 +472,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         metadata: &[u64],
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        use graphics_ipc::v2::ipc;
+        use redox_ioctl::drm as ipc;
 
         const DRM_FORMAT_ARGB8888: u32 = 0x34325241; // 'AR24' fourcc code, for ARGB8888
 

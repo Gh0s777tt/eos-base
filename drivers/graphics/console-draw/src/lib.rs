@@ -7,7 +7,7 @@ use std::{cmp, io, mem, ptr};
 use drm::buffer::{Buffer, DrmFourcc};
 use drm::control::dumbbuffer::{DumbBuffer, DumbMapping};
 use drm::control::{framebuffer, ClipRect, Device};
-use graphics_ipc::v2::V2GraphicsHandle;
+use graphics_ipc::V2GraphicsHandle;
 use orbclient::FONT;
 
 #[derive(Debug, Copy, Clone)]

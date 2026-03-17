@@ -6,12 +6,6 @@ edition = "2021"
 
 [dependencies]
 drm.workspace = true
-log.workspace = true
-libredox.workspace = true
-plain = "0.2"
-redox-ioctl.workspace = true
-
-common = { path = "../../common" }
 
 [lints]
 workspace = true

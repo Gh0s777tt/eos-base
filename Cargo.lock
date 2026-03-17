@@ -593,10 +593,10 @@ dependencies = [
  "common",
  "drm-sys",
  "edid",
- "graphics-ipc",
  "inputd",
  "libredox",
  "log",
+ "redox-ioctl",
  "redox-scheme",
  "redox_syscall 0.7.3",
 ]
@@ -932,12 +932,7 @@ dependencies = [
 name = "graphics-ipc"
 version = "0.1.0"
 dependencies = [
- "common",
  "drm",
- "libredox",
- "log",
- "plain",
- "redox-ioctl",
 ]
 
 [[package]]
@@ -1087,7 +1082,6 @@ dependencies = [
  "drm-sys",
  "edid",
  "embedded-hal",
- "graphics-ipc",
  "libredox",
  "log",
  "nb 1.1.0",
@@ -2513,7 +2507,6 @@ dependencies = [
  "daemon",
  "driver-graphics",
  "drm-sys",
- "graphics-ipc",
  "libredox",
  "orbclient",
  "ransid",
@@ -2568,7 +2561,6 @@ dependencies = [
  "driver-graphics",
  "drm-sys",
  "futures",
- "graphics-ipc",
  "libredox",
  "log",
  "orbclient",
