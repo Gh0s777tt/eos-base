@@ -7,8 +7,48 @@ use std::{cmp, io, mem, ptr};
 use drm::buffer::{Buffer, DrmFourcc};
 use drm::control::dumbbuffer::{DumbBuffer, DumbMapping};
 use drm::control::{framebuffer, ClipRect, Device};
-use graphics_ipc::v2::{Damage, V2GraphicsHandle};
+use graphics_ipc::v2::V2GraphicsHandle;
 use orbclient::FONT;
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct Damage {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Damage {
+    pub const NONE: Self = Damage {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+    };
+
+    pub fn merge(self, other: Self) -> Self {
+        if self.width == 0 || self.height == 0 {
+            return other;
+        }
+
+        if other.width == 0 || other.height == 0 {
+            return self;
+        }
+
+        let x = cmp::min(self.x, other.x);
+        let y = cmp::min(self.y, other.y);
+        let x2 = cmp::max(self.x + self.width, other.x + other.width);
+        let y2 = cmp::max(self.y + self.height, other.y + other.height);
+
+        Damage {
+            x,
+            y,
+            width: x2 - x,
+            height: y2 - y,
+        }
+    }
+}
 
 pub struct V2DisplayMap {
     pub display_handle: V2GraphicsHandle,

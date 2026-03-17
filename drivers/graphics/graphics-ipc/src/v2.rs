@@ -6,8 +6,6 @@ use drm::control::connector::{self, State};
 use drm::control::Device as _;
 use drm::{Device as _, DriverCapability};
 
-pub use crate::common::Damage;
-
 /// A graphics handle using the v2 graphics API.
 ///
 /// The v2 graphics API allows creating framebuffers on the fly, using them for page flipping and

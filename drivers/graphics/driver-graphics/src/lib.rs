@@ -5,9 +5,9 @@ use std::ffi::c_char;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, Write};
-use std::mem;
 use std::os::fd::BorrowedFd;
 use std::sync::{Arc, Mutex};
+use std::{cmp, mem};
 
 use drm_sys::{
     drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_CURSOR_BO, DRM_MODE_CURSOR_MOVE,
@@ -15,7 +15,6 @@ use drm_sys::{
     DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE,
     DRM_PROP_NAME_LEN,
 };
-use graphics_ipc::v2::Damage;
 use inputd::{DisplayHandle, VtEventKind};
 use libredox::Fd;
 use redox_scheme::scheme::{register_scheme_inner, SchemeState, SchemeSync};
@@ -28,6 +27,56 @@ use crate::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
 use crate::kms::properties::KmsPropertyKind;
 
 pub mod kms;
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct Damage {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Damage {
+    fn merge(self, other: Self) -> Self {
+        if self.width == 0 || self.height == 0 {
+            return other;
+        }
+
+        if other.width == 0 || other.height == 0 {
+            return self;
+        }
+
+        let x = cmp::min(self.x, other.x);
+        let y = cmp::min(self.y, other.y);
+        let x2 = cmp::max(self.x + self.width, other.x + other.width);
+        let y2 = cmp::max(self.y + self.height, other.y + other.height);
+
+        Damage {
+            x,
+            y,
+            width: x2 - x,
+            height: y2 - y,
+        }
+    }
+
+    #[must_use]
+    pub fn clip(mut self, width: u32, height: u32) -> Self {
+        // Clip damage
+        let x2 = self.x + self.width;
+        self.x = cmp::min(self.x, width);
+        if x2 > width {
+            self.width = width - self.x;
+        }
+
+        let y2 = self.y + self.height;
+        self.y = cmp::min(self.y, height);
+        if y2 > height {
+            self.height = height - self.y;
+        }
+        self
+    }
+}
 
 pub trait GraphicsAdapter: Sized + Debug {
     type Connector: Debug;
