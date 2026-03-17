@@ -9,12 +9,12 @@ drm-sys.workspace = true
 #TODO: edid is abandoned, fork it an maintain?
 edid = "0.3.0"
 log.workspace = true
+redox-ioctl.workspace = true
 redox-scheme.workspace = true
 redox_syscall.workspace = true
 libredox.workspace = true
 
 common = { path = "../../common" }
-graphics-ipc = { path = "../graphics-ipc" }
 inputd = { path = "../../inputd" }
 
 [lints]

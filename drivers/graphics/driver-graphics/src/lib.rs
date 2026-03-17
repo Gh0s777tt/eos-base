@@ -1,15 +1,13 @@
 #![feature(macro_metavar_expr)]
-#![feature(slice_as_array)]
 
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_char;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, Write};
-use std::mem;
-use std::mem::transmute;
 use std::os::fd::BorrowedFd;
 use std::sync::{Arc, Mutex};
+use std::{cmp, mem};
 
 use drm_sys::{
     drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_CURSOR_BO, DRM_MODE_CURSOR_MOVE,
@@ -17,7 +15,6 @@ use drm_sys::{
     DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE,
     DRM_PROP_NAME_LEN,
 };
-use graphics_ipc::v2::Damage;
 use inputd::{DisplayHandle, VtEventKind};
 use libredox::Fd;
 use redox_scheme::scheme::{register_scheme_inner, SchemeState, SchemeSync};
@@ -30,6 +27,56 @@ use crate::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
 use crate::kms::properties::KmsPropertyKind;
 
 pub mod kms;
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C, packed)]
+pub struct Damage {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Damage {
+    fn merge(self, other: Self) -> Self {
+        if self.width == 0 || self.height == 0 {
+            return other;
+        }
+
+        if other.width == 0 || other.height == 0 {
+            return self;
+        }
+
+        let x = cmp::min(self.x, other.x);
+        let y = cmp::min(self.y, other.y);
+        let x2 = cmp::max(self.x + self.width, other.x + other.width);
+        let y2 = cmp::max(self.y + self.height, other.y + other.height);
+
+        Damage {
+            x,
+            y,
+            width: x2 - x,
+            height: y2 - y,
+        }
+    }
+
+    #[must_use]
+    pub fn clip(mut self, width: u32, height: u32) -> Self {
+        // Clip damage
+        let x2 = self.x + self.width;
+        self.x = cmp::min(self.x, width);
+        if x2 > width {
+            self.width = width - self.x;
+        }
+
+        let y2 = self.y + self.height;
+        self.y = cmp::min(self.y, height);
+        if y2 > height {
+            self.height = height - self.y;
+        }
+        self
+    }
+}
 
 pub trait GraphicsAdapter: Sized + Debug {
     type Connector: Debug;
@@ -425,7 +472,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         metadata: &[u64],
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        use graphics_ipc::v2::ipc;
+        use redox_ioctl::drm as ipc;
 
         const DRM_FORMAT_ARGB8888: u32 = 0x34325241; // 'AR24' fourcc code, for ARGB8888
 
@@ -953,55 +1000,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_modifier([0; 4]);
                     Ok(0)
                 }),
-                ipc::UPDATE_PLANE => {
-                    if payload.len() < size_of::<ipc::UpdatePlane>() {
-                        return Err(Error::new(EINVAL));
-                    }
-                    let payload = unsafe {
-                        transmute::<&mut [u8; size_of::<ipc::UpdatePlane>()], &mut ipc::UpdatePlane>(
-                            payload.as_mut_array().unwrap(),
-                        )
-                    };
-
-                    let display_id = payload.display_id;
-                    let Some(crtc) = self.objects.crtcs().nth(display_id) else {
-                        return Err(Error::new(EINVAL));
-                    };
-
-                    let fb = if payload.fb_id == 0 {
-                        None
-                    } else {
-                        Some(self.objects.get_framebuffer(KmsObjectId(payload.fb_id))?)
-                    };
-
-                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] = if payload.fb_id == 0 {
-                        None
-                    } else {
-                        Some(KmsObjectId(payload.fb_id))
-                    };
-
-                    if *vt == self.active_vt {
-                        crtc.lock().unwrap().fb_id = KmsObjectId(payload.fb_id);
-
-                        let mode =
-                            fb.map(|fb| KmsConnector::<()>::modeinfo_for_size(fb.width, fb.height));
-
-                        self.adapter.set_crtc(
-                            &self.objects,
-                            crtc,
-                            &[self.objects.connector_ids()[display_id]],
-                            mode,
-                            fb,
-                            payload.damage,
-                        );
-
-                        crtc.lock().unwrap().fb_id = KmsObjectId(payload.fb_id);
-                        crtc.lock().unwrap().target_connectors =
-                            vec![self.objects.connector_ids()[display_id]];
-                    }
-
-                    Ok(size_of::<ipc::UpdatePlane>())
-                }
                 _ => return Err(Error::new(EINVAL)),
             },
         }

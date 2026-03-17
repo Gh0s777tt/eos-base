@@ -8,10 +8,10 @@ use std::sync::Mutex;
 use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
 use driver_graphics::kms::properties::DPMS;
-use driver_graphics::{Buffer, CursorPlane, GraphicsAdapter};
-use drm_sys::{drm_mode_modeinfo, DRM_MODE_DPMS_ON};
-use graphics_ipc::v2::ipc::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
-use graphics_ipc::v2::Damage;
+use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
+use drm_sys::{
+    drm_mode_modeinfo, DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_MODE_DPMS_ON,
+};
 use syscall::{error::EINVAL, PAGE_SIZE};
 
 use super::Device;

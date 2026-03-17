@@ -1,10 +1,10 @@
 use std::cmp;
 use std::collections::VecDeque;
 
-use console_draw::{TextScreen, V2DisplayMap};
+use console_draw::{Damage, TextScreen, V2DisplayMap};
 use drm::buffer::Buffer;
 use drm::control::Device;
-use graphics_ipc::v2::{Damage, V2GraphicsHandle};
+use graphics_ipc::V2GraphicsHandle;
 use inputd::ConsumerHandle;
 use orbclient::{Event, EventOption};
 use redox_scheme::scheme::SchemeSync;
