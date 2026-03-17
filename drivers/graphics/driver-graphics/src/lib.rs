@@ -1,5 +1,4 @@
 #![feature(macro_metavar_expr)]
-#![feature(slice_as_array)]
 
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_char;
@@ -7,7 +6,6 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, Write};
 use std::mem;
-use std::mem::transmute;
 use std::os::fd::BorrowedFd;
 use std::sync::{Arc, Mutex};
 
@@ -953,55 +951,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_modifier([0; 4]);
                     Ok(0)
                 }),
-                ipc::UPDATE_PLANE => {
-                    if payload.len() < size_of::<ipc::UpdatePlane>() {
-                        return Err(Error::new(EINVAL));
-                    }
-                    let payload = unsafe {
-                        transmute::<&mut [u8; size_of::<ipc::UpdatePlane>()], &mut ipc::UpdatePlane>(
-                            payload.as_mut_array().unwrap(),
-                        )
-                    };
-
-                    let display_id = payload.display_id;
-                    let Some(crtc) = self.objects.crtcs().nth(display_id) else {
-                        return Err(Error::new(EINVAL));
-                    };
-
-                    let fb = if payload.fb_id == 0 {
-                        None
-                    } else {
-                        Some(self.objects.get_framebuffer(KmsObjectId(payload.fb_id))?)
-                    };
-
-                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] = if payload.fb_id == 0 {
-                        None
-                    } else {
-                        Some(KmsObjectId(payload.fb_id))
-                    };
-
-                    if *vt == self.active_vt {
-                        crtc.lock().unwrap().fb_id = KmsObjectId(payload.fb_id);
-
-                        let mode =
-                            fb.map(|fb| KmsConnector::<()>::modeinfo_for_size(fb.width, fb.height));
-
-                        self.adapter.set_crtc(
-                            &self.objects,
-                            crtc,
-                            &[self.objects.connector_ids()[display_id]],
-                            mode,
-                            fb,
-                            payload.damage,
-                        );
-
-                        crtc.lock().unwrap().fb_id = KmsObjectId(payload.fb_id);
-                        crtc.lock().unwrap().target_connectors =
-                            vec![self.objects.connector_ids()[display_id]];
-                    }
-
-                    Ok(size_of::<ipc::UpdatePlane>())
-                }
                 _ => return Err(Error::new(EINVAL)),
             },
         }

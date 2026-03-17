@@ -1,12 +1,10 @@
 use std::fs::File;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::io::AsRawFd;
 
 use drm::control::connector::{self, State};
 use drm::control::Device as _;
 use drm::{Device as _, DriverCapability};
-use syscall::CallFlags;
 
 pub use crate::common::Damage;
 
@@ -43,34 +41,8 @@ impl V2GraphicsHandle {
         }
         Err(io::Error::other("no connected display"))
     }
-
-    pub fn update_plane(&self, display_id: usize, fb_id: u32, damage: Damage) -> io::Result<()> {
-        let cmd = ipc::UpdatePlane {
-            display_id,
-            fb_id,
-            damage,
-        };
-        libredox::call::call_wo(
-            self.file.as_raw_fd() as usize,
-            unsafe { plain::as_bytes(&cmd) },
-            CallFlags::empty(),
-            &[ipc::UPDATE_PLANE, 0, 0],
-        )?;
-        Ok(())
-    }
 }
 
 pub mod ipc {
-    use crate::common::Damage;
-
     pub use redox_ioctl::drm::*;
-
-    // FIXME replace these with proper drm interfaces and update orbital
-    pub const UPDATE_PLANE: u64 = 0x12345670;
-    #[repr(C, packed)]
-    pub struct UpdatePlane {
-        pub display_id: usize,
-        pub fb_id: u32,
-        pub damage: Damage,
-    }
 }

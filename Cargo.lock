@@ -938,7 +938,6 @@ dependencies = [
  "log",
  "plain",
  "redox-ioctl",
- "redox_syscall 0.7.3",
 ]
 
 [[package]]
