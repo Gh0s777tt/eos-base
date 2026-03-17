@@ -527,6 +527,51 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     }
                     Ok(0)
                 }),
+                ipc::MODE_SET_CRTC => ipc::DrmModeCrtc::with(payload, |data| {
+                    let crtc = self
+                        .objects
+                        .get_crtc(KmsObjectId(data.crtc_id()))?
+                        ;
+                    let display_id = crtc.lock().unwrap().crtc_index as usize;
+                    let connector_ids: Vec<KmsObjectId> = data
+                        .set_connectors_ptr()
+                        .iter()
+                        .take(data.count_connectors() as usize)
+                        .map(|&id| KmsObjectId(id))
+                        .collect();
+                    let fb = if data.fb_id() != 0 {
+                        Some(self.objects.get_framebuffer(KmsObjectId(data.fb_id()))?)
+                    } else {
+                        None
+                    };
+                    let mode = if data.mode_valid() != 0 {
+                        Some(data.mode())
+                    } else {
+                        None
+                    };
+                    if *vt == self.active_vt {
+                        self.adapter.set_crtc(
+                            &self.objects,
+                            crtc,
+                            &connector_ids,
+                            mode,
+                            fb.as_deref(),
+                            Damage {
+                                x: data.x(),
+                                y: data.y(),
+                                width: mode.map_or(0, |m| m.hdisplay as u32),
+                                height: mode.map_or(0, |m| m.vdisplay as u32),
+                            },
+                        );
+                    }
+                    self.vts.get_mut(vt).unwrap().display_fbs[display_id] = if data.fb_id() != 0
+                        {
+                            Some(KmsObjectId(data.fb_id()))
+                        } else {
+                            None
+                        };
+                    Ok(0)
+                }),
                 ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
                     let vt_state = self.vts.get_mut(vt).unwrap();
 
