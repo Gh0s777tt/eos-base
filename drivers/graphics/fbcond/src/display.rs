@@ -35,13 +35,7 @@ impl Display {
 
         log::debug!("fbcond: Opened new display");
 
-        let (width, height) = new_display_handle
-            .get_connector(new_display_handle.first_display().unwrap(), true)
-            .unwrap()
-            .modes()[0]
-            .size();
-
-        match V2DisplayMap::new(new_display_handle, width.into(), height.into()) {
+        match V2DisplayMap::new(new_display_handle) {
             Ok(map) => {
                 log::debug!(
                     "fbcond: Mapped new display with size {}x{}",
@@ -81,9 +75,7 @@ impl Display {
 
     pub fn sync_rect(&mut self, damage: Damage) {
         if let Some(map) = &self.map {
-            map.display_handle
-                .update_plane(0, u32::from(map.fb), damage)
-                .unwrap();
+            map.dirty_fb(damage).unwrap();
         }
     }
 }

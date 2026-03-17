@@ -1793,7 +1793,7 @@ dependencies = [
 [[package]]
 name = "redox-ioctl"
 version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/relibc.git#266bf56554403ac36425113af06ea9ea273ce820"
+source = "git+https://gitlab.redox-os.org/redox-os/relibc.git#18e6c9f5c17b4db1361e536cd59e902a2080c4c0"
 dependencies = [
  "drm-sys",
  "redox_syscall 0.7.3",
