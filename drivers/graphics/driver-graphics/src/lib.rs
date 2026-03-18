@@ -1,7 +1,6 @@
 #![feature(macro_metavar_expr)]
 
 use std::collections::{BTreeMap, HashMap};
-use std::ffi::c_char;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, Write};
@@ -9,11 +8,11 @@ use std::os::fd::BorrowedFd;
 use std::sync::{Arc, Mutex};
 use std::{cmp, mem};
 
+use drm_fourcc::DrmFourcc;
 use drm_sys::{
     drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_CURSOR_BO, DRM_MODE_CURSOR_MOVE,
     DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM,
     DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE,
-    DRM_PROP_NAME_LEN,
 };
 use inputd::{DisplayHandle, VtEventKind};
 use libredox::Fd;
@@ -447,8 +446,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     ) -> Result<usize> {
         use redox_ioctl::drm as ipc;
 
-        const DRM_FORMAT_ARGB8888: u32 = 0x34325241; // 'AR24' fourcc code, for ARGB8888
-
         fn id_index(id: u32) -> u32 {
             id & 0xFF
         }
@@ -656,7 +653,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 }),
                 ipc::MODE_GET_PROPERTY => ipc::DrmModeGetProperty::with(payload, |mut data| {
                     let property = self.objects.get_property(KmsObjectId(data.prop_id()))?;
-                    data.set_name(property.name);
+                    data.set_name(property.name.0);
                     let mut flags = 0;
                     if property.immutable {
                         flags |= DRM_MODE_PROP_IMMUTABLE;
@@ -678,17 +675,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             data.set_enum_blob_ptr(
                                 &variants
                                     .iter()
-                                    .map(|&(name, value)| {
-                                        let mut name_bytes = [0; DRM_PROP_NAME_LEN as usize];
-                                        for (to, &from) in
-                                            name_bytes.iter_mut().zip(name.as_bytes())
-                                        {
-                                            *to = from as c_char;
-                                        }
-                                        drm_mode_property_enum {
-                                            name: name_bytes,
-                                            value,
-                                        }
+                                    .map(|&(name, value)| drm_mode_property_enum {
+                                        name: name.0,
+                                        value,
                                     })
                                     .collect::<Vec<_>>(),
                             );
@@ -709,17 +698,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             data.set_enum_blob_ptr(
                                 &bitmask_flags
                                     .iter()
-                                    .map(|&(name, value)| {
-                                        let mut name_bytes = [0; DRM_PROP_NAME_LEN as usize];
-                                        for (to, &from) in
-                                            name_bytes.iter_mut().zip(name.as_bytes())
-                                        {
-                                            *to = from as c_char;
-                                        }
-                                        drm_mode_property_enum {
-                                            name: name_bytes,
-                                            value,
-                                        }
+                                    .map(|&(name, value)| drm_mode_property_enum {
+                                        name: name.0,
+                                        value,
                                     })
                                     .collect::<Vec<_>>(),
                             );
@@ -906,7 +887,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_crtc_id(crtc_id.0);
                     data.set_fb_id(crtc.lock().unwrap().fb_id.0);
                     data.set_possible_crtcs(1 << i);
-                    data.set_format_type_ptr(&[DRM_FORMAT_ARGB8888]);
+                    data.set_format_type_ptr(&[DrmFourcc::Argb8888 as u32]);
                     Ok(0)
                 }),
                 ipc::MODE_OBJ_GET_PROPERTIES => {
@@ -966,7 +947,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     data.set_width(fb.width);
                     data.set_height(fb.height);
-                    data.set_pixel_format(DRM_FORMAT_ARGB8888);
+                    data.set_pixel_format(DrmFourcc::Argb8888 as u32);
                     data.set_handles([*next_id, 0, 0, 0]);
                     data.set_pitches([fb.width * 4, 0, 0, 0]);
                     data.set_offsets([0; 4]);
