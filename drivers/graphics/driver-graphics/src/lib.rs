@@ -344,11 +344,6 @@ struct VtState<T: GraphicsAdapter> {
 }
 
 enum Handle<T: GraphicsAdapter> {
-    // This only exists for compatibility with orbclient.
-    V1Screen {
-        vt: usize,
-        screen: usize,
-    },
     V2 {
         vt: usize,
         next_id: u32,
@@ -420,21 +415,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 buffers: HashMap::new(),
             }
         } else {
-            let mut parts = path.split('/');
-            let mut screen = parts.next().unwrap_or("").split('.');
-
-            let vt = screen.next().unwrap_or("").parse::<usize>().unwrap();
-            let id = screen.next().unwrap_or("").parse::<usize>().unwrap_or(0);
-
-            if id >= self.objects.crtc_ids().len() {
-                return Err(Error::new(EINVAL));
-            }
-
-            if !self.vts.contains_key(&vt) {
-                return Err(Error::new(ENOENT));
-            }
-
-            Handle::V1Screen { vt, screen: id }
+            return Err(Error::new(EINVAL));
         };
         self.next_id += 1;
         self.handles.insert(self.next_id, handle);
@@ -446,14 +427,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
         let path = match self.handles.get(&id).ok_or(Error::new(EBADF))? {
-            Handle::V1Screen { vt, screen } => {
-                let crtc_id = self.objects.crtc_ids()[*screen];
-                let crtc = self.objects.get_crtc(crtc_id).unwrap().lock().unwrap();
-                let (width, height) = crtc
-                    .mode
-                    .map_or((640, 480), |mode| (mode.hdisplay, mode.vdisplay));
-                format!("{}:{vt}.{screen}/{width}/{height}", self.scheme_name)
-            }
             Handle::V2 {
                 vt,
                 next_id: _,
@@ -485,7 +458,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         }
 
         match self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
-            Handle::V1Screen { .. } | Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
+            Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
             Handle::V2 {
                 vt,
                 next_id,
@@ -1026,7 +999,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     .unwrap(),
                 offset & (MAP_FAKE_OFFSET_MULTIPLIER as u64 - 1),
             ),
-            Handle::V1Screen { .. } | Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
+            Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
         };
         let ptr = T::map_dumb_buffer(&mut self.adapter, framebuffer);
         Ok(unsafe { ptr.add(offset as usize) } as usize)
