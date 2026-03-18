@@ -9,6 +9,7 @@ use std::os::fd::BorrowedFd;
 use std::sync::{Arc, Mutex};
 use std::{cmp, mem};
 
+use drm_fourcc::DrmFourcc;
 use drm_sys::{
     drm_mode_modeinfo, drm_mode_property_enum, DRM_MODE_CURSOR_BO, DRM_MODE_CURSOR_MOVE,
     DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM,
@@ -446,8 +447,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         _ctx: &CallerCtx,
     ) -> Result<usize> {
         use redox_ioctl::drm as ipc;
-
-        const DRM_FORMAT_ARGB8888: u32 = 0x34325241; // 'AR24' fourcc code, for ARGB8888
 
         fn id_index(id: u32) -> u32 {
             id & 0xFF
@@ -906,7 +905,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_crtc_id(crtc_id.0);
                     data.set_fb_id(crtc.lock().unwrap().fb_id.0);
                     data.set_possible_crtcs(1 << i);
-                    data.set_format_type_ptr(&[DRM_FORMAT_ARGB8888]);
+                    data.set_format_type_ptr(&[DrmFourcc::Argb8888 as u32]);
                     Ok(0)
                 }),
                 ipc::MODE_OBJ_GET_PROPERTIES => {
@@ -966,7 +965,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     data.set_width(fb.width);
                     data.set_height(fb.height);
-                    data.set_pixel_format(DRM_FORMAT_ARGB8888);
+                    data.set_pixel_format(DrmFourcc::Argb8888 as u32);
                     data.set_handles([*next_id, 0, 0, 0]);
                     data.set_pitches([fb.width * 4, 0, 0, 0]);
                     data.set_offsets([0; 4]);

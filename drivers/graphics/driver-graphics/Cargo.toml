@@ -5,6 +5,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+drm-fourcc = "2.2.0"
 drm-sys.workspace = true
 #TODO: edid is abandoned, fork it an maintain?
 edid = "0.3.0"
