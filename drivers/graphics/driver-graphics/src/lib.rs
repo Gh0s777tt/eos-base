@@ -653,7 +653,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 }),
                 ipc::MODE_GET_PROPERTY => ipc::DrmModeGetProperty::with(payload, |mut data| {
                     let property = self.objects.get_property(KmsObjectId(data.prop_id()))?;
-                    data.set_name(property.name);
+                    data.set_name(property.name.0);
                     let mut flags = 0;
                     if property.immutable {
                         flags |= DRM_MODE_PROP_IMMUTABLE;
@@ -675,7 +675,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             data.set_enum_blob_ptr(
                                 &variants
                                     .iter()
-                                    .map(|&(name, value)| drm_mode_property_enum { name, value })
+                                    .map(|&(name, value)| drm_mode_property_enum {
+                                        name: name.0,
+                                        value,
+                                    })
                                     .collect::<Vec<_>>(),
                             );
                         }
@@ -695,7 +698,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             data.set_enum_blob_ptr(
                                 &bitmask_flags
                                     .iter()
-                                    .map(|&(name, value)| drm_mode_property_enum { name, value })
+                                    .map(|&(name, value)| drm_mode_property_enum {
+                                        name: name.0,
+                                        value,
+                                    })
                                     .collect::<Vec<_>>(),
                             );
                         }

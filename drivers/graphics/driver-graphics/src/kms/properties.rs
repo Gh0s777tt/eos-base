@@ -1,5 +1,6 @@
 use std::ffi::c_char;
 use std::fmt::Debug;
+use std::mem;
 use std::sync::Mutex;
 
 use drm_sys::{
@@ -10,19 +11,6 @@ use syscall::{Error, Result, EINVAL};
 
 use crate::kms::objects::{KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
-
-fn fixed_size_name<const N: usize>(context: &str, name: &str) -> [c_char; N] {
-    if name.len() > N {
-        panic!("{context} {name} is too long");
-    }
-
-    let mut name_bytes = [0; N];
-    for (to, &from) in name_bytes.iter_mut().zip(name.as_bytes()) {
-        *to = from as c_char;
-    }
-
-    name_bytes
-}
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
     pub fn add_property(
@@ -51,7 +39,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         }
 
         self.add(KmsProperty {
-            name: fixed_size_name("Property name", name),
+            name: KmsPropertyName::new("Property name", name),
             immutable,
             atomic,
             kind,
@@ -95,9 +83,34 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 }
 
+#[derive(Copy, Clone)]
+pub struct KmsPropertyName(pub [c_char; DRM_PROP_NAME_LEN as usize]);
+
+impl KmsPropertyName {
+    fn new(context: &str, name: &str) -> KmsPropertyName {
+        if name.len() > DRM_PROP_NAME_LEN as usize {
+            panic!("{context} {name} is too long");
+        }
+
+        let mut name_bytes = [0; DRM_PROP_NAME_LEN as usize];
+        for (to, &from) in name_bytes.iter_mut().zip(name.as_bytes()) {
+            *to = from as c_char;
+        }
+
+        KmsPropertyName(name_bytes)
+    }
+}
+
+impl Debug for KmsPropertyName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let u8_bytes = unsafe { mem::transmute::<&[c_char], &[u8]>(&self.0) };
+        f.write_str(&String::from_utf8_lossy(u8_bytes).trim_end_matches('\0'))
+    }
+}
+
 #[derive(Debug)]
 pub struct KmsProperty {
-    pub name: [c_char; DRM_PROP_NAME_LEN as usize],
+    pub name: KmsPropertyName,
     pub immutable: bool,
     pub atomic: bool,
     pub kind: KmsPropertyKind,
@@ -106,9 +119,9 @@ pub struct KmsProperty {
 #[derive(Debug)]
 pub enum KmsPropertyKind {
     Range(u64, u64),
-    Enum(Vec<([c_char; DRM_PROP_NAME_LEN as usize], u64)>),
+    Enum(Vec<(KmsPropertyName, u64)>),
     Blob,
-    Bitmask(Vec<([c_char; DRM_PROP_NAME_LEN as usize], u64)>),
+    Bitmask(Vec<(KmsPropertyName, u64)>),
     Object,
     SignedRange(i64, i64),
 }
@@ -146,7 +159,7 @@ macro_rules! define_properties {
     };
     (@prop_kind enum { $($variant:ident = $value:expr,)* }) => {
         KmsPropertyKind::Enum(vec![
-            $((fixed_size_name("Property variant name", stringify!($variant)), $value)),*]
+            $((KmsPropertyName::new("Property variant name", stringify!($variant)), $value)),*]
         )
     };
     (@prop_kind blob) => {
