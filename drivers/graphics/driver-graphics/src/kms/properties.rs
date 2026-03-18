@@ -11,6 +11,19 @@ use syscall::{Error, Result, EINVAL};
 use crate::kms::objects::{KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
 
+fn fixed_size_name<const N: usize>(context: &str, name: &str) -> [c_char; N] {
+    if name.len() > N {
+        panic!("{context} {name} is too long");
+    }
+
+    let mut name_bytes = [0; N];
+    for (to, &from) in name_bytes.iter_mut().zip(name.as_bytes()) {
+        *to = from as c_char;
+    }
+
+    name_bytes
+}
+
 impl<T: GraphicsAdapter> KmsObjects<T> {
     pub fn add_property(
         &mut self,
@@ -19,28 +32,14 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         atomic: bool,
         kind: KmsPropertyKind,
     ) -> KmsObjectId {
-        if name.len() > DRM_PROP_NAME_LEN as usize {
-            panic!("Property name {name} is too long");
-        }
-
         match &kind {
             KmsPropertyKind::Range(start, end) => assert!(start < end),
-            KmsPropertyKind::Enum(variants) => {
+            KmsPropertyKind::Enum(_variants) => {
                 // FIXME check duplicate variant numbers
-                for (variant_name, _) in variants {
-                    if variant_name.len() > DRM_PROP_NAME_LEN as usize {
-                        panic!("Property variant name {variant_name} is too long");
-                    }
-                }
             }
             KmsPropertyKind::Blob => {}
-            KmsPropertyKind::Bitmask(bitmask_flags) => {
+            KmsPropertyKind::Bitmask(_bitmask_flags) => {
                 // FIXME check overlapping flag numbers
-                for (flag_name, _) in bitmask_flags {
-                    if flag_name.len() > DRM_PROP_NAME_LEN as usize {
-                        panic!("Property bitflag name {flag_name} is too long");
-                    }
-                }
             }
             KmsPropertyKind::Object => {}
             KmsPropertyKind::SignedRange(start, end) => assert!(start < end),
@@ -52,7 +51,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         }
 
         self.add(KmsProperty {
-            name: name_bytes,
+            name: fixed_size_name("Property name", name),
             immutable,
             atomic,
             kind,
@@ -107,9 +106,9 @@ pub struct KmsProperty {
 #[derive(Debug)]
 pub enum KmsPropertyKind {
     Range(u64, u64),
-    Enum(Vec<(&'static str, u64)>),
+    Enum(Vec<([c_char; DRM_PROP_NAME_LEN as usize], u64)>),
     Blob,
-    Bitmask(Vec<(&'static str, u64)>),
+    Bitmask(Vec<([c_char; DRM_PROP_NAME_LEN as usize], u64)>),
     Object,
     SignedRange(i64, i64),
 }
@@ -146,7 +145,9 @@ macro_rules! define_properties {
         KmsPropertyKind::Range($start, $end)
     };
     (@prop_kind enum { $($variant:ident = $value:expr,)* }) => {
-        KmsPropertyKind::Enum(vec![$((stringify!($variant), $value)),*])
+        KmsPropertyKind::Enum(vec![
+            $((fixed_size_name("Property variant name", stringify!($variant)), $value)),*]
+        )
     };
     (@prop_kind blob) => {
         KmsPropertyKind::Blob
