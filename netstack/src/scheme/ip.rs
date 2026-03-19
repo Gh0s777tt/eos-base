@@ -137,7 +137,7 @@ impl<'a> SchemeSocket for RawSocket<'a> {
     }
 
     fn fpath(&self, _file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
-        let path = format!("ip:{}", self.ip_protocol());
+        let path = format!("/scheme/ip/{}", self.ip_protocol());
         let path = path.as_bytes();
 
         let mut i = 0;

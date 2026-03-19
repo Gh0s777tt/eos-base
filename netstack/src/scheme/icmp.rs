@@ -252,7 +252,7 @@ impl<'a> SchemeSocket for IcmpSocket<'a> {
         if let SchemeFile::Socket(ref socket_file) = *file {
             match socket_file.data.socket_type {
                 IcmpSocketType::Echo => {
-                    let path = format!("icmp:echo/{}", socket_file.data.ip);
+                    let path = format!("/scheme/icmp/echo/{}", socket_file.data.ip);
                     let path = path.as_bytes();
 
                     let mut i = 0;
@@ -264,7 +264,7 @@ impl<'a> SchemeSocket for IcmpSocket<'a> {
                     Ok(i)
                 }
                 IcmpSocketType::Udp => {
-                    let path = format!("icmp:udp/{}", socket_file.data.ip);
+                    let path = format!("/scheme/icmp/udp/{}", socket_file.data.ip);
                     let path = path.as_bytes();
 
                     let mut i = 0;
