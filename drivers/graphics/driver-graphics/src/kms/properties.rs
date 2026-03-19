@@ -8,7 +8,7 @@ use drm_sys::{
 };
 use syscall::{Error, Result, EINVAL};
 
-use crate::kms::objects::{KmsObjectId, KmsObjects};
+use crate::kms::objects::{KmsObject, KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
@@ -52,39 +52,37 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     pub fn set_object_property(&mut self, object: KmsObjectId, property: KmsObjectId, value: u64) {
         let object = self.objects.get_mut(&object).unwrap();
         // FIXME validate property existence and value
-        match object.kind() {
-            super::objects::KmsObjectKind::Crtc(crtc) => {
+        match &**object {
+            KmsObject::Crtc(crtc) => {
                 for (prop, val) in crtc.lock().unwrap().properties.iter_mut() {
                     if *prop == property {
                         *val = value;
                     }
                 }
             }
-            super::objects::KmsObjectKind::Connector(connector) => {
+            KmsObject::Connector(connector) => {
                 for (prop, val) in connector.lock().unwrap().properties.iter_mut() {
                     if *prop == property {
                         *val = value;
                     }
                 }
             }
-            super::objects::KmsObjectKind::Encoder(_)
-            | super::objects::KmsObjectKind::Property(_)
-            | super::objects::KmsObjectKind::Framebuffer(_)
-            | super::objects::KmsObjectKind::Blob(_) => unreachable!(),
+            KmsObject::Encoder(_)
+            | KmsObject::Property(_)
+            | KmsObject::Framebuffer(_)
+            | KmsObject::Blob(_) => unreachable!(),
         }
     }
 
     pub fn get_object_properties_data(&self, id: KmsObjectId) -> Result<(Vec<u32>, Vec<u64>)> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        let props = match object.kind() {
-            super::objects::KmsObjectKind::Crtc(crtc) => crtc.lock().unwrap().properties.clone(),
-            super::objects::KmsObjectKind::Connector(connector) => {
-                connector.lock().unwrap().properties.clone()
-            }
-            super::objects::KmsObjectKind::Encoder(_) => vec![],
-            super::objects::KmsObjectKind::Property(_) => vec![],
-            super::objects::KmsObjectKind::Framebuffer(_) => vec![],
-            super::objects::KmsObjectKind::Blob(_) => vec![],
+        let props = match &**object {
+            KmsObject::Crtc(crtc) => crtc.lock().unwrap().properties.clone(),
+            KmsObject::Connector(connector) => connector.lock().unwrap().properties.clone(),
+            KmsObject::Encoder(_) => vec![],
+            KmsObject::Property(_) => vec![],
+            KmsObject::Framebuffer(_) => vec![],
+            KmsObject::Blob(_) => vec![],
         };
         Ok((
             props.iter().map(|&(id, _)| id.0).collect::<Vec<_>>(),

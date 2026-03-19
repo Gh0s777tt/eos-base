@@ -39,14 +39,9 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         objects
     }
 
-    pub(crate) fn add<U: Into<KmsObjectKind<T>>>(&mut self, data: U) -> KmsObjectId {
+    pub(crate) fn add<U: Into<KmsObject<T>>>(&mut self, data: U) -> KmsObjectId {
         let id = self.next_id;
-        self.objects.insert(
-            id,
-            Arc::new(KmsObject {
-                kind: Box::new(data.into()),
-            }),
-        );
+        self.objects.insert(id, Arc::new(data.into()));
         self.next_id.0 += 1;
 
         id
@@ -54,10 +49,10 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub(crate) fn get<'a, U: 'a>(&'a self, id: KmsObjectId) -> Result<&'a U>
     where
-        &'a U: TryFrom<&'a KmsObjectKind<T>>,
+        &'a U: TryFrom<&'a KmsObject<T>>,
     {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        if let Ok(object) = (&*object.kind).try_into() {
+        if let Ok(object) = (&**object).try_into() {
             Ok(object)
         } else {
             Err(Error::new(EINVAL))
@@ -66,7 +61,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub fn object_type(&self, id: KmsObjectId) -> Result<u32> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        Ok(object.kind.object_type())
+        Ok(object.object_type())
     }
 
     pub fn add_crtc(&mut self, driver_data: T::Crtc) -> KmsObjectId {
@@ -109,11 +104,10 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 
     pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
-        let kind = match self.objects.get(&id).map(|object| &**object) {
-            Some(KmsObject { kind, .. }) => kind,
-            _ => return Err(Error::new(EINVAL)),
+        let Some(object) = self.objects.get(&id).map(|object| &**object) else {
+            return Err(Error::new(EINVAL));
         };
-        let KmsObjectKind::Framebuffer(_) = **kind else {
+        let KmsObject::Framebuffer(_) = object else {
             return Err(Error::new(EINVAL));
         };
         self.objects.remove(&id).unwrap();
@@ -146,27 +140,16 @@ impl From<KmsObjectId> for u64 {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct KmsObject<T: GraphicsAdapter> {
-    kind: Box<KmsObjectKind<T>>,
-}
-
-impl<T: GraphicsAdapter> KmsObject<T> {
-    pub(super) fn kind(&self) -> &KmsObjectKind<T> {
-        &self.kind
-    }
-}
-
 macro_rules! define_object_kinds {
     (<$T:ident> $(
         $variant:ident($data:ty) = $type:ident,
     )*) => {
         #[derive(Debug)]
-        pub(crate) enum KmsObjectKind<$T: GraphicsAdapter> {
+        pub(crate) enum KmsObject<$T: GraphicsAdapter> {
             $($variant($data),)*
         }
 
-        impl<$T: GraphicsAdapter> KmsObjectKind<$T> {
+        impl<$T: GraphicsAdapter> KmsObject<$T> {
             fn object_type(&self) -> u32 {
                 match self {
                     $(Self::$variant(_) => $type,)*
@@ -175,18 +158,18 @@ macro_rules! define_object_kinds {
         }
 
         $(
-            impl<$T: GraphicsAdapter> From<$data> for KmsObjectKind<$T> {
+            impl<$T: GraphicsAdapter> From<$data> for KmsObject<$T> {
                 fn from(value: $data) -> Self {
                     Self::$variant(value)
                 }
             }
 
-            impl<'a, $T: GraphicsAdapter> TryFrom<&'a KmsObjectKind<$T>> for &'a $data {
+            impl<'a, $T: GraphicsAdapter> TryFrom<&'a KmsObject<$T>> for &'a $data {
                 type Error = ();
 
-                fn try_from(value: &'a KmsObjectKind<T>) -> Result<Self, Self::Error> {
+                fn try_from(value: &'a KmsObject<T>) -> Result<Self, Self::Error> {
                     match value {
-                        KmsObjectKind::$variant(data) => Ok(data),
+                        KmsObject::$variant(data) => Ok(data),
                         _ => Err(()),
                     }
                 }
