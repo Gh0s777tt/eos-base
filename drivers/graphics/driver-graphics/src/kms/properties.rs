@@ -220,3 +220,21 @@ define_properties! {
     SRC_H: range { 0, u64::from(u32::MAX) } [atomic],
     FB_DAMAGE_CLIPS: blob [atomic],
 }
+
+macro_rules! define_object_props {
+    ($object:ident, $obj:ident$(<$($T:ident),*>)? { $(
+        $prop:ident {
+            get => $get:expr,
+        }
+    )* }) => {
+        impl$(<$($T),*>)? $obj$(<$($T),*>)? {
+            pub(super) fn base_properties() -> Vec<KmsPropertyData<Self>> {
+                vec![$(KmsPropertyData {
+                    id: $prop,
+                    getter: |$object| $get
+                }),*]
+            }
+        }
+    };
+}
+pub(super) use define_object_props;

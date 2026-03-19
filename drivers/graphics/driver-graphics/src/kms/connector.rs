@@ -9,7 +9,7 @@ use drm_sys::{
 use syscall::Result;
 
 use crate::kms::objects::{KmsObjectId, KmsObjects};
-use crate::kms::properties::{KmsPropertyData, DPMS, EDID};
+use crate::kms::properties::{define_object_props, KmsPropertyData, DPMS, EDID};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
@@ -39,22 +39,12 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             mm_width: 0,
             mm_height: 0,
             subpixel: DrmSubpixelOrder::Unknown,
-            properties: vec![],
+            properties: KmsConnector::base_properties(),
             dpms: KmsDpms::Off,
             edid: KmsObjectId::INVALID,
             driver_data,
         }));
         self.connectors.push(connector_id);
-
-        let mut connector = self.get_connector(connector_id).unwrap().lock().unwrap();
-        connector.properties.push(KmsPropertyData {
-            id: DPMS,
-            getter: |connector| connector.dpms as u64,
-        });
-        connector.properties.push(KmsPropertyData {
-            id: EDID,
-            getter: |connector| connector.edid.0.into(),
-        });
 
         connector_id
     }
@@ -99,6 +89,15 @@ pub struct KmsConnector<T> {
     pub edid: KmsObjectId,
     pub driver_data: T,
 }
+
+define_object_props!(object, KmsConnector<T> {
+    EDID {
+        get => u64::from(object.edid.0),
+    }
+    DPMS {
+        get => object.dpms as u64,
+    }
+});
 
 impl<T> KmsConnector<T> {
     pub fn update_from_size(&mut self, width: u32, height: u32) {

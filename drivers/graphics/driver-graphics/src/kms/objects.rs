@@ -10,7 +10,9 @@ use drm_sys::{
 use syscall::{Error, Result, EINVAL};
 
 use crate::kms::connector::{KmsConnector, KmsEncoder};
-use crate::kms::properties::{init_standard_props, KmsBlob, KmsProperty, KmsPropertyData};
+use crate::kms::properties::{
+    define_object_props, init_standard_props, KmsBlob, KmsProperty, KmsPropertyData,
+};
 use crate::GraphicsAdapter;
 
 #[derive(Debug)]
@@ -72,7 +74,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             fb_id: KmsObjectId::INVALID,
             gamma_size: 0,
             mode: None,
-            properties: vec![],
+            properties: KmsCrtc::base_properties(),
             driver_data,
         }));
         self.crtcs.push(id);
@@ -198,6 +200,8 @@ pub struct KmsCrtc<T> {
     pub properties: Vec<KmsPropertyData<Self>>,
     pub driver_data: T,
 }
+
+define_object_props!(object, KmsCrtc<T> {});
 
 #[derive(Debug)]
 pub struct KmsFramebuffer<T, Buf> {
