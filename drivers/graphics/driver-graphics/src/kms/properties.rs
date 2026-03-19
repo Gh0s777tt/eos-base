@@ -1,7 +1,6 @@
 use std::ffi::c_char;
 use std::fmt::Debug;
 use std::mem;
-use std::sync::Mutex;
 
 use drm_sys::{
     DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON, DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND,
@@ -66,12 +65,13 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         }
     }
 
-    pub fn get_object_properties(
-        &self,
-        id: KmsObjectId,
-    ) -> Result<&Mutex<Vec<(KmsObjectId, u64)>>> {
+    pub fn get_object_properties_data(&self, id: KmsObjectId) -> Result<(Vec<u32>, Vec<u64>)> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        Ok(&object.properties)
+        let props = object.properties.lock().unwrap();
+        Ok((
+            props.iter().map(|&(id, _)| id.0).collect::<Vec<_>>(),
+            props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
+        ))
     }
 
     pub fn add_blob(&mut self, data: Vec<u8>) -> KmsObjectId {

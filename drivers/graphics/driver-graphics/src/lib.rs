@@ -634,15 +634,11 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         .unwrap();
                     data.set_encoders_ptr(&[connector.encoder_id.0]);
                     data.set_modes_ptr(&connector.modes);
-                    let props = self
+                    let (props, prop_vals) = self
                         .objects
-                        .get_object_properties(KmsObjectId(data.connector_id()))?
-                        .lock()
-                        .unwrap();
-                    data.set_props_ptr(&props.iter().map(|&(id, _)| id.0).collect::<Vec<_>>());
-                    data.set_prop_values_ptr(
-                        &props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
-                    );
+                        .get_object_properties_data(KmsObjectId(data.connector_id()))?;
+                    data.set_props_ptr(&props);
+                    data.set_prop_values_ptr(&prop_vals);
                     data.set_connector_type(data.connector_type());
                     data.set_connector_type_id(data.connector_type_id());
                     data.set_connection(connector.connection as u32);
@@ -899,15 +895,11 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             return Ok(0);
                         }
 
-                        let props = self
+                        let (props, prop_vals) = self
                             .objects
-                            .get_object_properties(KmsObjectId(data.obj_id()))?
-                            .lock()
-                            .unwrap();
-                        data.set_props_ptr(&props.iter().map(|&(id, _)| id.0).collect::<Vec<_>>());
-                        data.set_prop_values_ptr(
-                            &props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
-                        );
+                            .get_object_properties_data(KmsObjectId(data.obj_id()))?;
+                        data.set_props_ptr(&props);
+                        data.set_prop_values_ptr(&prop_vals);
                         data.set_obj_type(self.objects.object_type(KmsObjectId(data.obj_id()))?);
                         Ok(0)
                     })

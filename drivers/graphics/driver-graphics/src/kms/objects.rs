@@ -20,7 +20,7 @@ pub struct KmsObjects<T: GraphicsAdapter> {
     pub(crate) encoders: Vec<KmsObjectId>,
     crtcs: Vec<KmsObjectId>,
     framebuffers: Vec<KmsObjectId>,
-    pub(crate) objects: HashMap<KmsObjectId, Arc<KmsObjectData<T>>>,
+    pub(crate) objects: HashMap<KmsObjectId, Arc<KmsObject<T>>>,
     _marker: PhantomData<T>,
 }
 
@@ -43,7 +43,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         let id = self.next_id;
         self.objects.insert(
             id,
-            Arc::new(KmsObjectData {
+            Arc::new(KmsObject {
                 kind: Box::new(data.into()),
                 properties: Mutex::new(vec![]),
             }),
@@ -110,7 +110,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
         let kind = match self.objects.get(&id).map(|object| &**object) {
-            Some(KmsObjectData { kind, .. }) => kind,
+            Some(KmsObject { kind, .. }) => kind,
             _ => return Err(Error::new(EINVAL)),
         };
         let KmsObjectKind::Framebuffer(_) = **kind else {
@@ -147,7 +147,7 @@ impl From<KmsObjectId> for u64 {
 }
 
 #[derive(Debug)]
-pub(crate) struct KmsObjectData<T: GraphicsAdapter> {
+pub(crate) struct KmsObject<T: GraphicsAdapter> {
     kind: Box<KmsObjectKind<T>>,
     pub(crate) properties: Mutex<Vec<(KmsObjectId, u64)>>,
 }
@@ -168,7 +168,6 @@ macro_rules! define_object_kinds {
                 }
             }
         }
-
 
         $(
             impl<$T: GraphicsAdapter> From<$data> for KmsObjectKind<$T> {
