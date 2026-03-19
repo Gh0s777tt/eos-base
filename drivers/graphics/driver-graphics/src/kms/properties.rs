@@ -49,45 +49,36 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         self.get(id)
     }
 
-    pub fn set_object_property(&mut self, object: KmsObjectId, property: KmsObjectId, value: u64) {
-        let object = self.objects.get_mut(&object).unwrap();
-        // FIXME validate property existence and value
+    pub fn get_object_properties_data(&self, id: KmsObjectId) -> Result<(Vec<u32>, Vec<u64>)> {
+        let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
         match &**object {
             KmsObject::Crtc(crtc) => {
-                for (prop, val) in crtc.lock().unwrap().properties.iter_mut() {
-                    if *prop == property {
-                        *val = value;
-                    }
-                }
+                let crtc = crtc.lock().unwrap();
+                let props = &crtc.properties;
+                Ok((
+                    props.iter().map(|prop| prop.id.0).collect::<Vec<_>>(),
+                    props
+                        .iter()
+                        .map(|prop| (prop.getter)(&crtc))
+                        .collect::<Vec<_>>(),
+                ))
             }
             KmsObject::Connector(connector) => {
-                for (prop, val) in connector.lock().unwrap().properties.iter_mut() {
-                    if *prop == property {
-                        *val = value;
-                    }
-                }
+                let connector = connector.lock().unwrap();
+                let props = &connector.properties;
+                Ok((
+                    props.iter().map(|prop| prop.id.0).collect::<Vec<_>>(),
+                    props
+                        .iter()
+                        .map(|prop| (prop.getter)(&connector))
+                        .collect::<Vec<_>>(),
+                ))
             }
             KmsObject::Encoder(_)
             | KmsObject::Property(_)
             | KmsObject::Framebuffer(_)
-            | KmsObject::Blob(_) => unreachable!(),
+            | KmsObject::Blob(_) => Ok((vec![], vec![])),
         }
-    }
-
-    pub fn get_object_properties_data(&self, id: KmsObjectId) -> Result<(Vec<u32>, Vec<u64>)> {
-        let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        let props = match &**object {
-            KmsObject::Crtc(crtc) => crtc.lock().unwrap().properties.clone(),
-            KmsObject::Connector(connector) => connector.lock().unwrap().properties.clone(),
-            KmsObject::Encoder(_) => vec![],
-            KmsObject::Property(_) => vec![],
-            KmsObject::Framebuffer(_) => vec![],
-            KmsObject::Blob(_) => vec![],
-        };
-        Ok((
-            props.iter().map(|&(id, _)| id.0).collect::<Vec<_>>(),
-            props.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
-        ))
     }
 
     pub fn add_blob(&mut self, data: Vec<u8>) -> KmsObjectId {
@@ -140,6 +131,12 @@ pub enum KmsPropertyKind {
     Bitmask(Vec<(KmsPropertyName, u64)>),
     Object,
     SignedRange(i64, i64),
+}
+
+#[derive(Debug)]
+pub struct KmsPropertyData<T> {
+    pub id: KmsObjectId,
+    pub getter: fn(&T) -> u64,
 }
 
 #[derive(Debug)]

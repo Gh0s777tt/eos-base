@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
-use driver_graphics::kms::properties::EDID;
 use driver_graphics::{Buffer as DrmBuffer, CursorPlane, Damage, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{
     drm_mode_modeinfo, DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_CAP_DUMB_BUFFER,
@@ -325,7 +324,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
                 drop(connector);
 
                 let blob = objects.add_blob(display.edid.clone());
-                objects.set_object_property(id, EDID, blob.into());
+                objects.get_connector(id).unwrap().lock().unwrap().edid = blob;
             } else {
                 connector.update_from_size(display.width, display.height);
             }

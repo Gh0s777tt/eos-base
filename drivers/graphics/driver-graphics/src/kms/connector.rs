@@ -3,12 +3,13 @@ use std::fmt::Debug;
 use std::sync::Mutex;
 
 use drm_sys::{
-    drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_DPMS_ON, DRM_MODE_TYPE_PREFERRED,
+    drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON,
+    DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND, DRM_MODE_TYPE_PREFERRED,
 };
 use syscall::Result;
 
 use crate::kms::objects::{KmsObjectId, KmsObjects};
-use crate::kms::properties::{DPMS, EDID};
+use crate::kms::properties::{KmsPropertyData, DPMS, EDID};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
@@ -38,10 +39,22 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             mm_width: 0,
             mm_height: 0,
             subpixel: DrmSubpixelOrder::Unknown,
-            properties: vec![(EDID, 0), (DPMS, DRM_MODE_DPMS_ON as u64)],
+            properties: vec![],
+            dpms: KmsDpms::Off,
+            edid: KmsObjectId::INVALID,
             driver_data,
         }));
         self.connectors.push(connector_id);
+
+        let mut connector = self.get_connector(connector_id).unwrap().lock().unwrap();
+        connector.properties.push(KmsPropertyData {
+            id: DPMS,
+            getter: |connector| connector.dpms as u64,
+        });
+        connector.properties.push(KmsPropertyData {
+            id: EDID,
+            getter: |connector| connector.edid.0.into(),
+        });
 
         connector_id
     }
@@ -81,11 +94,13 @@ pub struct KmsConnector<T> {
     pub mm_width: u32,
     pub mm_height: u32,
     pub subpixel: DrmSubpixelOrder,
-    pub properties: Vec<(KmsObjectId, u64)>,
+    pub properties: Vec<KmsPropertyData<Self>>,
+    pub dpms: KmsDpms,
+    pub edid: KmsObjectId,
     pub driver_data: T,
 }
 
-impl<T: Debug> KmsConnector<T> {
+impl<T> KmsConnector<T> {
     pub fn update_from_size(&mut self, width: u32, height: u32) {
         self.modes = vec![Self::modeinfo_for_size(width, height)];
     }
@@ -184,6 +199,15 @@ pub enum DrmSubpixelOrder {
     VerticalRGB,
     VerticalBGR,
     None,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(u64)]
+pub enum KmsDpms {
+    On = DRM_MODE_DPMS_ON as u64,
+    Standby = DRM_MODE_DPMS_STANDBY as u64,
+    Suspend = DRM_MODE_DPMS_SUSPEND as u64,
+    Off = DRM_MODE_DPMS_OFF as u64,
 }
 
 // FIXME can we represent connector and encoder using a single struct?
