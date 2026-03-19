@@ -21,8 +21,8 @@ use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP};
 
-use crate::kms::connector::KmsConnector;
-use crate::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
+use crate::kms::connector::{KmsConnector, KmsConnectorDriver};
+use crate::kms::objects::{self, KmsCrtc, KmsCrtcDriver, KmsObjectId, KmsObjects};
 use crate::kms::properties::KmsPropertyKind;
 
 pub mod kms;
@@ -78,8 +78,8 @@ impl Damage {
 }
 
 pub trait GraphicsAdapter: Sized + Debug {
-    type Connector: Debug;
-    type Crtc: Debug;
+    type Connector: KmsConnectorDriver;
+    type Crtc: KmsCrtcDriver;
 
     type Buffer: Buffer;
     type Framebuffer: Framebuffer;
@@ -241,7 +241,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                         let crtc = self.inner.objects.get_crtc(crtc_id).unwrap();
                         let connector_id = self.inner.objects.connector_ids()[display_id];
 
-                        crtc.lock().unwrap().fb_id = fb.unwrap_or(KmsObjectId::INVALID);
+                        crtc.lock().unwrap().state.fb_id = fb.unwrap_or(KmsObjectId::INVALID);
 
                         let fb = fb.map(|fb| {
                             self.inner
@@ -272,6 +272,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                             .unwrap()
                             .lock()
                             .unwrap()
+                            .state
                             .crtc_id = crtc_id;
                     }
 
@@ -538,12 +539,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         .lock()
                         .unwrap();
                     // Don't touch set_connectors, that is only used by MODE_SET_CRTC
-                    data.set_fb_id(crtc.fb_id.0);
+                    data.set_fb_id(crtc.state.fb_id.0);
                     // FIXME fill x and y with the data from the primary plane
                     data.set_x(0);
                     data.set_y(0);
                     data.set_gamma_size(crtc.gamma_size);
-                    if let Some(mode) = crtc.mode {
+                    if let Some(mode) = crtc.state.mode {
                         data.set_mode_valid(1);
                         data.set_mode(mode);
                     } else {
@@ -584,13 +585,14 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                                 height: mode.map_or(0, |m| m.vdisplay as u32),
                             },
                         );
-                        crtc.lock().unwrap().fb_id = KmsObjectId(data.fb_id());
+                        crtc.lock().unwrap().state.fb_id = KmsObjectId(data.fb_id());
 
                         for connector in connector_ids {
                             self.objects
                                 .get_connector(connector)?
                                 .lock()
                                 .unwrap()
+                                .state
                                 .crtc_id = KmsObjectId(data.crtc_id());
                         }
                     }
@@ -780,7 +782,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                                 continue;
                             }
                             let crtc = self.objects.crtcs().nth(display_id).unwrap();
-                            crtc.lock().unwrap().fb_id = KmsObjectId::INVALID;
+                            crtc.lock().unwrap().state.fb_id = KmsObjectId::INVALID;
                             self.adapter.set_crtc(
                                 &self.objects,
                                 crtc,
@@ -820,8 +822,8 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     if *vt == self.active_vt {
                         for crtc in self.objects.crtcs() {
-                            if crtc.lock().unwrap().fb_id == KmsObjectId(data.fb_id()) {
-                                let mode = crtc.lock().unwrap().mode;
+                            if crtc.lock().unwrap().state.fb_id == KmsObjectId(data.fb_id()) {
+                                let mode = crtc.lock().unwrap().state.mode;
                                 self.adapter
                                     .set_crtc(&self.objects, crtc, mode, Some(fb), damage);
                             }
@@ -885,7 +887,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let crtc_id = self.objects.crtc_ids()[i as usize];
                     let crtc = self.objects.get_crtc(crtc_id).unwrap();
                     data.set_crtc_id(crtc_id.0);
-                    data.set_fb_id(crtc.lock().unwrap().fb_id.0);
+                    data.set_fb_id(crtc.lock().unwrap().state.fb_id.0);
                     data.set_possible_crtcs(1 << i);
                     data.set_format_type_ptr(&[DrmFourcc::Argb8888 as u32]);
                     Ok(0)

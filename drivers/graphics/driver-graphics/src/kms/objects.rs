@@ -66,14 +66,21 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         Ok(object.object_type())
     }
 
-    pub fn add_crtc(&mut self, driver_data: T::Crtc) -> KmsObjectId {
+    pub fn add_crtc(
+        &mut self,
+        driver_data: T::Crtc,
+        driver_data_state: <T::Crtc as KmsCrtcDriver>::State,
+    ) -> KmsObjectId {
         let crtc_index = self.crtcs.len() as u32;
         let id = self.add(Mutex::new(KmsCrtc {
             crtc_index,
-            fb_id: KmsObjectId::INVALID,
             gamma_size: 0,
-            mode: None,
             properties: KmsCrtc::base_properties(),
+            state: KmsCrtcState {
+                fb_id: KmsObjectId::INVALID,
+                mode: None,
+                driver_data: driver_data_state,
+            },
             driver_data,
         }));
         self.crtcs.push(id);
@@ -188,17 +195,31 @@ define_object_kinds! { <T>
     Blob(KmsBlob) = DRM_MODE_OBJECT_BLOB,
 }
 
+pub trait KmsCrtcDriver: Debug {
+    type State: Clone + Debug;
+}
+
+impl KmsCrtcDriver for () {
+    type State = ();
+}
+
 #[derive(Debug)]
-pub struct KmsCrtc<T> {
+pub struct KmsCrtc<T: KmsCrtcDriver> {
     pub crtc_index: u32,
-    pub fb_id: KmsObjectId,
     pub gamma_size: u32,
-    pub mode: Option<drm_mode_modeinfo>,
     pub properties: Vec<KmsPropertyData<Self>>,
+    pub state: KmsCrtcState<T::State>,
     pub driver_data: T,
 }
 
-define_object_props!(object, KmsCrtc<T> {});
+#[derive(Debug, Clone)]
+pub struct KmsCrtcState<T> {
+    pub fb_id: KmsObjectId,
+    pub mode: Option<drm_mode_modeinfo>,
+    pub driver_data: T,
+}
+
+define_object_props!(object, KmsCrtc<T: KmsCrtcDriver> {});
 
 #[derive(Debug)]
 pub struct KmsFramebuffer<T, Buf> {

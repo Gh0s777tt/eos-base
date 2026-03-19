@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::ptr::{self, NonNull};
 use std::sync::Mutex;
 
-use driver_graphics::kms::connector::KmsConnectorStatus;
+use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
 use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
 use drm_sys::{drm_mode_modeinfo, DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
@@ -19,6 +19,10 @@ pub struct Connector {
     width: u32,
     height: u32,
     framebuffer_id: usize,
+}
+
+impl KmsConnectorDriver for Connector {
+    type State = ();
 }
 
 impl GraphicsAdapter for FbAdapter {
@@ -38,7 +42,7 @@ impl GraphicsAdapter for FbAdapter {
 
     fn init(&mut self, objects: &mut KmsObjects<Self>) {
         for (framebuffer_id, framebuffer) in self.framebuffers.iter().enumerate() {
-            let crtc = objects.add_crtc(());
+            let crtc = objects.add_crtc((), ());
 
             objects.add_connector(
                 Connector {
@@ -46,6 +50,7 @@ impl GraphicsAdapter for FbAdapter {
                     height: framebuffer.height as u32,
                     framebuffer_id,
                 },
+                (),
                 &[crtc],
             );
         }
@@ -93,12 +98,12 @@ impl GraphicsAdapter for FbAdapter {
         damage: Damage,
     ) {
         let mut crtc = crtc.lock().unwrap();
-        crtc.mode = mode;
+        crtc.state.mode = mode;
 
         for connector in objects.connectors() {
             let connector = connector.lock().unwrap();
 
-            if connector.crtc_id != objects.crtc_ids()[crtc.crtc_index as usize] {
+            if connector.state.crtc_id != objects.crtc_ids()[crtc.crtc_index as usize] {
                 continue;
             }
 

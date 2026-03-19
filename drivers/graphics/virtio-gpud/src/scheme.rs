@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use common::{dma::Dma, sgl};
-use driver_graphics::kms::connector::KmsConnectorStatus;
+use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
 use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
 use driver_graphics::{Buffer as DrmBuffer, CursorPlane, Damage, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{
@@ -31,6 +31,10 @@ impl Into<GpuRect> for Damage {
 #[derive(Debug)]
 pub struct VirtGpuConnector {
     display_id: u32,
+}
+
+impl KmsConnectorDriver for VirtGpuConnector {
+    type State = ();
 }
 
 pub struct VirtGpuFramebuffer<'a> {
@@ -284,9 +288,9 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         });
 
         for display_id in 0..self.config.num_scanouts.get() {
-            let crtc = objects.add_crtc(());
+            let crtc = objects.add_crtc((), ());
 
-            objects.add_connector(VirtGpuConnector { display_id }, &[crtc]);
+            objects.add_connector(VirtGpuConnector { display_id }, (), &[crtc]);
         }
     }
 
@@ -408,12 +412,12 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     ) {
         futures::executor::block_on(async {
             let mut crtc = crtc.lock().unwrap();
-            crtc.mode = mode;
+            crtc.state.mode = mode;
 
             for connector in objects.connectors() {
                 let connector = connector.lock().unwrap();
 
-                if connector.crtc_id != objects.crtc_ids()[crtc.crtc_index as usize] {
+                if connector.state.crtc_id != objects.crtc_ids()[crtc.crtc_index as usize] {
                     continue;
                 }
 

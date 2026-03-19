@@ -16,6 +16,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     pub fn add_connector(
         &mut self,
         driver_data: T::Connector,
+        driver_data_state: <T::Connector as KmsConnectorDriver>::State,
         crtcs: &[KmsObjectId],
     ) -> KmsObjectId {
         let mut possible_crtcs = 0;
@@ -40,9 +41,12 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             mm_height: 0,
             subpixel: DrmSubpixelOrder::Unknown,
             properties: KmsConnector::base_properties(),
-            dpms: KmsDpms::Off,
             edid: KmsObjectId::INVALID,
-            crtc_id: KmsObjectId::INVALID,
+            state: KmsConnectorState {
+                dpms: KmsDpms::On,
+                crtc_id: KmsObjectId::INVALID,
+                driver_data: driver_data_state,
+            },
             driver_data,
         }));
         self.connectors.push(connector_id);
@@ -75,8 +79,16 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 }
 
+pub trait KmsConnectorDriver: Debug {
+    type State: Clone + Debug;
+}
+
+impl KmsConnectorDriver for () {
+    type State = ();
+}
+
 #[derive(Debug)]
-pub struct KmsConnector<T> {
+pub struct KmsConnector<T: KmsConnectorDriver> {
     pub encoder_id: KmsObjectId,
     pub modes: Vec<drm_mode_modeinfo>,
     pub connector_type: u32,
@@ -86,25 +98,31 @@ pub struct KmsConnector<T> {
     pub mm_height: u32,
     pub subpixel: DrmSubpixelOrder,
     pub properties: Vec<KmsPropertyData<Self>>,
-    pub dpms: KmsDpms,
     pub edid: KmsObjectId,
+    pub state: KmsConnectorState<T::State>,
+    pub driver_data: T,
+}
+
+#[derive(Debug, Clone)]
+pub struct KmsConnectorState<T> {
+    pub dpms: KmsDpms,
     pub crtc_id: KmsObjectId,
     pub driver_data: T,
 }
 
-define_object_props!(object, KmsConnector<T> {
+define_object_props!(object, KmsConnector<T: KmsConnectorDriver> {
     EDID {
         get => u64::from(object.edid.0),
     }
     DPMS {
-        get => object.dpms as u64,
+        get => object.state.dpms as u64,
     }
     CRTC_ID {
-        get => u64::from(object.crtc_id.0),
+        get => u64::from(object.state.crtc_id.0),
     }
 });
 
-impl<T> KmsConnector<T> {
+impl<T: KmsConnectorDriver> KmsConnector<T> {
     pub fn update_from_size(&mut self, width: u32, height: u32) {
         self.modes = vec![Self::modeinfo_for_size(width, height)];
     }

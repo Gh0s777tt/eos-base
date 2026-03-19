@@ -223,12 +223,12 @@ define_properties! {
 }
 
 macro_rules! define_object_props {
-    ($object:ident, $obj:ident$(<$($T:ident),*>)? { $(
+    ($object:ident, $obj:ident$(<$($T:ident$(: $bound:ident)?),*>)? { $(
         $prop:ident {
             get => $get:expr,
         }
     )* }) => {
-        impl$(<$($T),*>)? $obj$(<$($T),*>)? {
+        impl$(<$($T$(: $bound)?),*>)? $obj$(<$($T),*>)? {
             pub(super) fn base_properties() -> Vec<KmsPropertyData<Self>> {
                 vec![$(KmsPropertyData {
                     id: $prop,
