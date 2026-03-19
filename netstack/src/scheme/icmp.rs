@@ -281,6 +281,10 @@ impl<'a> SchemeSocket for IcmpSocket<'a> {
         }
     }
 
+    fn handle_recvmsg(&mut self, file: &mut SchemeFile<Self>, how:&mut [u8], flags:usize) -> SyscallResult<usize> {
+        return Err(SyscallError::new(syscall::EOPNOTSUPP));
+    }
+
     fn handle_get_peer_name(
         &self,
         file: &SchemeFile<Self>,

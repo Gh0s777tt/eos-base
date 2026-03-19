@@ -243,6 +243,13 @@ where
 
     fn handle_shutdown(&mut self, file: &mut SchemeFile<Self>, how: usize) -> SyscallResult<usize>;
 
+    fn handle_recvmsg(
+        &mut self,
+        file: &mut SchemeFile<Self>,
+        payload: &mut [u8],
+        flags: usize,
+    ) -> SyscallResult<usize>;
+    
     fn get_sock_opt(
         &self,
         file: &SchemeFile<Self>,
@@ -496,7 +503,6 @@ where
                 }
             }
             // SocketCall::SendMsg => self.handle_sendmsg(id, payload, ctx),
-            // SocketCall::RecvMsg => self.handle_recvmsg(id, payload),
             // SocketCall::Unbind => self.handle_unbind(id),
             // SocketCall::GetToken => self.handle_get_token(id, payload),
             SocketCall::GetPeerName => {
@@ -514,6 +520,22 @@ where
 
                 SocketT::handle_get_peer_name(socket, file, payload)
             }
+            SocketCall::RecvMsg => {
+                let flags = metadata[1] as usize;
+                let handle = self.handles.get_mut(&fd).ok_or_else(||SyscallError::new(syscall::EBADF))?;
+
+                match *handle {
+                    Handle::File(ref mut file) => {
+                        let mut socket_set = self.socket_set.borrow_mut();
+                        let socket = socket_set.get_mut::<SocketT>(file.socket_handle());
+
+                        SocketT::handle_recvmsg(socket, file, payload, flags)
+                    }
+                    Handle::Null(_) => Err(SyscallError::new(syscall::EINVAL)),
+                    Handle::SchemeRoot => Err(SyscallError::new(syscall::EBADF)),
+                }
+            }
+
             SocketCall::Shutdown => {
                 let how = metadata[1] as usize;
 
