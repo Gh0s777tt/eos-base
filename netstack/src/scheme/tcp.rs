@@ -9,6 +9,7 @@ use syscall::{Error as SyscallError, Result as SyscallResult};
 use super::socket::{Context, DupResult, SchemeFile, SchemeSocket, SocketFile};
 use super::{parse_endpoint, SchemeWrapper, SocketSet};
 use crate::port_set::PortSet;
+use libredox::flag;
 
 const SO_SNDBUF: usize = 7;
 const SO_RCVBUF: usize = 8;
@@ -309,8 +310,47 @@ impl<'a> SchemeSocket for TcpSocket<'a> {
     }
 
     fn handle_recvmsg(&mut self, file: &mut SchemeFile<Self>, how:&mut [u8], flags:usize) -> SyscallResult<usize> {
-        return Err(SyscallError::new(syscall::EOPNOTSUPP));
+        let socket_file = match file {
+            SchemeFile::Socket(ref mut sock_f) => sock_f,
+            _ => return Err(SyscallError::new(syscall::EBADF))
+        };
+        if !socket_file.read_enabled {
+            Ok(0)
+        } else if self.can_recv(&socket_file.data) {
+            let usize_length = core::mem::size_of::<usize>();
+            let prepared_name_len = usize::from_le_bytes(
+                how[0..usize_length].try_into().map_err(|_| SyscallError::new(syscall::EINVAL))?,
+            );
+            let prepared_whole_iov_size = usize::from_le_bytes(
+                how[usize_length..2 * usize_length].try_into().map_err(|_| SyscallError::new(syscall::EINVAL))?,
+            );
+            let prepared_msg_controllen = usize::from_le_bytes(
+                how[2 * usize_length..3 * usize_length].try_into().map_err(|_| SyscallError::new(syscall::EINVAL))?,
+            );
+            if  prepared_name_len + prepared_msg_controllen + prepared_whole_iov_size > how.len() {//expected returned buffer size is larger than provided -> return invalid
+                return Err(SyscallError::new(syscall::EINVAL));
+            } 
+            let mut address = match self.remote_endpoint() {
+                Some(endpoint) => format!("/scheme/tcp/{}:{}", endpoint.addr, endpoint.port),
+                None => String::from("/scheme/tcp/0.0.0.0:0"),
+            };
+
+
+            how[..usize_length].copy_from_slice(&address.len().to_le_bytes());
+            how[usize_length..address.len() + usize_length].copy_from_slice(&address.as_bytes());
+            let payload_length = self.recv_slice(&mut how[address.len() + 2 * usize_length..address.len() + 2 * usize_length + prepared_whole_iov_size]).unwrap();
+            println!("\n\n{}\n", payload_length);
+            how[address.len() + usize_length..address.len() + 2 * usize_length].copy_from_slice(&payload_length.to_le_bytes());
+            //TODO should return the length of payload but relibc uses trim on the buffer incorrectly
+            Ok(how.len())
+
+        } else if socket_file.flags & syscall::O_NONBLOCK == syscall::O_NONBLOCK || flags & flag::MSG_DONTWAIT as usize != 0 {
+            Err(SyscallError::new(syscall::EAGAIN))
+        } else {
+            Err(SyscallError::new(syscall::EWOULDBLOCK)) // internally scheduled to re-read
+        }
     }
+
 
     fn handle_get_peer_name(
         &self,
