@@ -7,11 +7,8 @@ use std::sync::Mutex;
 
 use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
-use driver_graphics::kms::properties::DPMS;
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
-use drm_sys::{
-    drm_mode_modeinfo, DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_MODE_DPMS_ON,
-};
+use drm_sys::{drm_mode_modeinfo, DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use syscall::{error::EINVAL, PAGE_SIZE};
 
 use super::Device;
@@ -41,8 +38,7 @@ impl GraphicsAdapter for Device {
         for (framebuffer_id, _) in self.framebuffers.iter().enumerate() {
             let crtc = objects.add_crtc(());
 
-            let connector = objects.add_connector(Connector { framebuffer_id }, &[crtc]);
-            objects.add_object_property(connector, DPMS, DRM_MODE_DPMS_ON.into());
+            objects.add_connector(Connector { framebuffer_id }, &[crtc]);
         }
     }
 

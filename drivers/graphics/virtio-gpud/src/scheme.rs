@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
-use driver_graphics::kms::properties::{DPMS, EDID};
+use driver_graphics::kms::properties::EDID;
 use driver_graphics::{Buffer as DrmBuffer, CursorPlane, Damage, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{
     drm_mode_modeinfo, DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_CAP_DUMB_BUFFER,
-    DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_MODE_DPMS_ON,
+    DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT,
 };
 
 use syscall::{EINVAL, PAGE_SIZE};
@@ -287,11 +287,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         for display_id in 0..self.config.num_scanouts.get() {
             let crtc = objects.add_crtc(());
 
-            let connector = objects.add_connector(VirtGpuConnector { display_id }, &[crtc]);
-            if self.has_edid {
-                objects.add_object_property(connector, EDID, 0);
-            }
-            objects.add_object_property(connector, DPMS, DRM_MODE_DPMS_ON.into());
+            objects.add_connector(VirtGpuConnector { display_id }, &[crtc]);
         }
     }
 

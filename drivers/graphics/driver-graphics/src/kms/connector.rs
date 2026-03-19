@@ -2,10 +2,13 @@ use std::ffi::c_char;
 use std::fmt::Debug;
 use std::sync::Mutex;
 
-use drm_sys::{drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_TYPE_PREFERRED};
+use drm_sys::{
+    drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_DPMS_ON, DRM_MODE_TYPE_PREFERRED,
+};
 use syscall::Result;
 
 use crate::kms::objects::{KmsObjectId, KmsObjects};
+use crate::kms::properties::{DPMS, EDID};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
@@ -35,6 +38,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             mm_width: 0,
             mm_height: 0,
             subpixel: DrmSubpixelOrder::Unknown,
+            properties: vec![(EDID, 0), (DPMS, DRM_MODE_DPMS_ON as u64)],
             driver_data,
         }));
         self.connectors.push(connector_id);
@@ -68,7 +72,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 }
 
 #[derive(Debug)]
-pub struct KmsConnector<T: Debug> {
+pub struct KmsConnector<T> {
     pub encoder_id: KmsObjectId,
     pub modes: Vec<drm_mode_modeinfo>,
     pub connector_type: u32,
@@ -77,6 +81,7 @@ pub struct KmsConnector<T: Debug> {
     pub mm_width: u32,
     pub mm_height: u32,
     pub subpixel: DrmSubpixelOrder,
+    pub properties: Vec<(KmsObjectId, u64)>,
     pub driver_data: T,
 }
 

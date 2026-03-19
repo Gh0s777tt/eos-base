@@ -45,7 +45,6 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             id,
             Arc::new(KmsObject {
                 kind: Box::new(data.into()),
-                properties: Mutex::new(vec![]),
             }),
         );
         self.next_id.0 += 1;
@@ -78,6 +77,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             fb_id: KmsObjectId::INVALID,
             gamma_size: 0,
             mode: None,
+            properties: vec![],
             driver_data,
         }));
         self.crtcs.push(id);
@@ -149,7 +149,12 @@ impl From<KmsObjectId> for u64 {
 #[derive(Debug)]
 pub(crate) struct KmsObject<T: GraphicsAdapter> {
     kind: Box<KmsObjectKind<T>>,
-    pub(crate) properties: Mutex<Vec<(KmsObjectId, u64)>>,
+}
+
+impl<T: GraphicsAdapter> KmsObject<T> {
+    pub(super) fn kind(&self) -> &KmsObjectKind<T> {
+        &self.kind
+    }
 }
 
 macro_rules! define_object_kinds {
@@ -207,6 +212,7 @@ pub struct KmsCrtc<T> {
     pub fb_id: KmsObjectId,
     pub gamma_size: u32,
     pub mode: Option<drm_mode_modeinfo>,
+    pub properties: Vec<(KmsObjectId, u64)>,
     pub driver_data: T,
 }
 
