@@ -88,33 +88,35 @@ impl GraphicsAdapter for FbAdapter {
         &mut self,
         objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self::Crtc>>,
-        connectors: &[KmsObjectId],
         mode: Option<drm_mode_modeinfo>,
         buffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
         damage: Damage,
     ) {
-        crtc.lock().unwrap().mode = mode;
+        let mut crtc = crtc.lock().unwrap();
+        crtc.mode = mode;
 
-        let framebuffer_id = objects
-            .get_connector(connectors[0])
-            .unwrap()
-            .lock()
-            .unwrap()
-            .driver_data
-            .framebuffer_id;
-        let framebuffer = &mut self.framebuffers[framebuffer_id];
+        for connector in objects.connectors() {
+            let connector = connector.lock().unwrap();
 
-        if let Some(buffer) = buffer {
-            buffer.buffer.sync(framebuffer, damage)
-        } else {
-            let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
-            for row in 0..framebuffer.height {
-                unsafe {
-                    ptr::write_bytes(
-                        onscreen_ptr.add(row * framebuffer.stride),
-                        0,
-                        framebuffer.width,
-                    );
+            if connector.crtc_id != objects.crtc_ids()[crtc.crtc_index as usize] {
+                continue;
+            }
+
+            let framebuffer_id = connector.driver_data.framebuffer_id;
+            let framebuffer = &mut self.framebuffers[framebuffer_id];
+
+            if let Some(buffer) = buffer {
+                buffer.buffer.sync(framebuffer, damage)
+            } else {
+                let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
+                for row in 0..framebuffer.height {
+                    unsafe {
+                        ptr::write_bytes(
+                            onscreen_ptr.add(row * framebuffer.stride),
+                            0,
+                            framebuffer.width,
+                        );
+                    }
                 }
             }
         }

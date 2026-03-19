@@ -402,68 +402,72 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         &mut self,
         objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self::Crtc>>,
-        connectors: &[KmsObjectId],
         mode: Option<drm_mode_modeinfo>,
         framebuffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
         damage: Damage,
     ) {
         futures::executor::block_on(async {
-            crtc.lock().unwrap().mode = mode;
+            let mut crtc = crtc.lock().unwrap();
+            crtc.mode = mode;
 
-            let display_id = objects
-                .get_connector(connectors[0])
-                .unwrap()
-                .lock()
-                .unwrap()
-                .driver_data
-                .display_id;
+            for connector in objects.connectors() {
+                let connector = connector.lock().unwrap();
 
-            let Some(framebuffer) = framebuffer else {
-                let scanout_request = Dma::new(SetScanout::new(
-                    display_id,
-                    ResourceId::NONE,
-                    GpuRect::new(0, 0, 0, 0),
-                ))
-                .unwrap();
-                let header = self.send_request(scanout_request).await.unwrap();
-                assert_eq!(header.ty, CommandTy::RespOkNodata);
-                self.displays[display_id as usize].active_resource = None;
-                return;
-            };
+                if connector.crtc_id != objects.crtc_ids()[crtc.crtc_index as usize] {
+                    continue;
+                }
 
-            let req = Dma::new(XferToHost2d::new(
-                framebuffer.buffer.id,
-                GpuRect {
-                    x: 0,
-                    y: 0,
-                    width: framebuffer.width,
-                    height: framebuffer.height,
-                },
-                0,
-            ))
-            .unwrap();
-            let header = self.send_request(req).await.unwrap();
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
+                let display_id = connector.driver_data.display_id;
 
-            // FIXME once we support resizing we also need to check that the current and target size match
-            if self.displays[display_id as usize].active_resource != Some(framebuffer.buffer.id) {
-                let scanout_request = Dma::new(SetScanout::new(
-                    display_id,
+                let Some(framebuffer) = framebuffer else {
+                    let scanout_request = Dma::new(SetScanout::new(
+                        display_id,
+                        ResourceId::NONE,
+                        GpuRect::new(0, 0, 0, 0),
+                    ))
+                    .unwrap();
+                    let header = self.send_request(scanout_request).await.unwrap();
+                    assert_eq!(header.ty, CommandTy::RespOkNodata);
+                    self.displays[display_id as usize].active_resource = None;
+                    return;
+                };
+
+                let req = Dma::new(XferToHost2d::new(
                     framebuffer.buffer.id,
-                    GpuRect::new(0, 0, framebuffer.width, framebuffer.height),
+                    GpuRect {
+                        x: 0,
+                        y: 0,
+                        width: framebuffer.width,
+                        height: framebuffer.height,
+                    },
+                    0,
                 ))
                 .unwrap();
-                let header = self.send_request(scanout_request).await.unwrap();
+                let header = self.send_request(req).await.unwrap();
                 assert_eq!(header.ty, CommandTy::RespOkNodata);
-                self.displays[display_id as usize].active_resource = Some(framebuffer.buffer.id);
-            }
 
-            let flush = ResourceFlush::new(
-                framebuffer.buffer.id,
-                damage.clip(framebuffer.width, framebuffer.height).into(),
-            );
-            let header = self.send_request(Dma::new(flush).unwrap()).await.unwrap();
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
+                // FIXME once we support resizing we also need to check that the current and target size match
+                if self.displays[display_id as usize].active_resource != Some(framebuffer.buffer.id)
+                {
+                    let scanout_request = Dma::new(SetScanout::new(
+                        display_id,
+                        framebuffer.buffer.id,
+                        GpuRect::new(0, 0, framebuffer.width, framebuffer.height),
+                    ))
+                    .unwrap();
+                    let header = self.send_request(scanout_request).await.unwrap();
+                    assert_eq!(header.ty, CommandTy::RespOkNodata);
+                    self.displays[display_id as usize].active_resource =
+                        Some(framebuffer.buffer.id);
+                }
+
+                let flush = ResourceFlush::new(
+                    framebuffer.buffer.id,
+                    damage.clip(framebuffer.width, framebuffer.height).into(),
+                );
+                let header = self.send_request(Dma::new(flush).unwrap()).await.unwrap();
+                assert_eq!(header.ty, CommandTy::RespOkNodata);
+            }
         });
     }
 

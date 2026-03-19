@@ -9,7 +9,7 @@ use drm_sys::{
 use syscall::Result;
 
 use crate::kms::objects::{KmsObjectId, KmsObjects};
-use crate::kms::properties::{define_object_props, KmsPropertyData, DPMS, EDID};
+use crate::kms::properties::{define_object_props, KmsPropertyData, CRTC_ID, DPMS, EDID};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
@@ -42,6 +42,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             properties: KmsConnector::base_properties(),
             dpms: KmsDpms::Off,
             edid: KmsObjectId::INVALID,
+            crtc_id: KmsObjectId::INVALID,
             driver_data,
         }));
         self.connectors.push(connector_id);
@@ -87,6 +88,7 @@ pub struct KmsConnector<T> {
     pub properties: Vec<KmsPropertyData<Self>>,
     pub dpms: KmsDpms,
     pub edid: KmsObjectId,
+    pub crtc_id: KmsObjectId,
     pub driver_data: T,
 }
 
@@ -96,6 +98,9 @@ define_object_props!(object, KmsConnector<T> {
     }
     DPMS {
         get => object.dpms as u64,
+    }
+    CRTC_ID {
+        get => u64::from(object.crtc_id.0),
     }
 });
 

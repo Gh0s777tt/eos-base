@@ -4,7 +4,8 @@ use std::mem;
 
 use drm_sys::{
     DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON, DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND,
-    DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY, DRM_PROP_NAME_LEN,
+    DRM_MODE_OBJECT_CRTC, DRM_MODE_OBJECT_FB, DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY,
+    DRM_PLANE_TYPE_PRIMARY, DRM_PROP_NAME_LEN,
 };
 use syscall::{Error, Result, EINVAL};
 
@@ -28,7 +29,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             KmsPropertyKind::Bitmask(_bitmask_flags) => {
                 // FIXME check overlapping flag numbers
             }
-            KmsPropertyKind::Object => {}
+            KmsPropertyKind::Object { type_: _ } => {}
             KmsPropertyKind::SignedRange(start, end) => assert!(start < end),
         }
 
@@ -129,7 +130,7 @@ pub enum KmsPropertyKind {
     Enum(Vec<(KmsPropertyName, u64)>),
     Blob,
     Bitmask(Vec<(KmsPropertyName, u64)>),
-    Object,
+    Object { type_: u32 },
     SignedRange(i64, i64),
 }
 
@@ -178,8 +179,8 @@ macro_rules! define_properties {
     (@prop_kind blob) => {
         KmsPropertyKind::Blob
     };
-    (@prop_kind object) => {
-        KmsPropertyKind::Object
+    (@prop_kind object { $type:ident }) => {
+        KmsPropertyKind::Object { type_: $type }
     };
     (@prop_kind srange { $start:expr, $end:expr }) => {
         KmsPropertyKind::SignedRange($start, $end)
@@ -188,7 +189,7 @@ macro_rules! define_properties {
 
 define_properties! {
     // Connector + Plane
-    CRTC_ID: object [atomic],
+    CRTC_ID: object { DRM_MODE_OBJECT_CRTC } [atomic],
 
     // Connector
     EDID: blob [immutable],
@@ -209,7 +210,7 @@ define_properties! {
         Primary = u64::from(DRM_PLANE_TYPE_PRIMARY),
         Cursor = u64::from(DRM_PLANE_TYPE_CURSOR),
     } [immutable],
-    FB_ID: object [atomic],
+    FB_ID: object { DRM_MODE_OBJECT_FB } [atomic],
     CRTC_X: srange { i64::from(i32::MIN), i64::from(i32::MAX) } [atomic],
     CRTC_Y: srange { i64::from(i32::MIN), i64::from(i32::MAX) } [atomic],
     CRTC_W: range { 0, u64::from(u32::MAX) } [atomic],

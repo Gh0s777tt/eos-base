@@ -103,7 +103,6 @@ pub trait GraphicsAdapter: Sized + Debug {
         &mut self,
         objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self::Crtc>>,
-        connectors: &[KmsObjectId],
         mode: Option<drm_mode_modeinfo>,
         framebuffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
         damage: Damage,
@@ -238,7 +237,9 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                     );
 
                     for (display_id, fb) in vt_state.display_fbs.iter().enumerate() {
-                        let crtc = self.inner.objects.crtcs().nth(display_id).unwrap();
+                        let crtc_id = self.inner.objects.crtc_ids()[display_id];
+                        let crtc = self.inner.objects.get_crtc(crtc_id).unwrap();
+                        let connector_id = self.inner.objects.connector_ids()[display_id];
 
                         crtc.lock().unwrap().fb_id = fb.unwrap_or(KmsObjectId::INVALID);
 
@@ -255,7 +256,6 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                         self.inner.adapter.set_crtc(
                             &self.inner.objects,
                             crtc,
-                            &[self.inner.objects.connector_ids()[display_id]],
                             mode,
                             fb,
                             Damage {
@@ -266,8 +266,13 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                             },
                         );
 
-                        crtc.lock().unwrap().target_connectors =
-                            vec![self.inner.objects.connector_ids()[display_id]];
+                        self.inner
+                            .objects
+                            .get_connector(connector_id)
+                            .unwrap()
+                            .lock()
+                            .unwrap()
+                            .crtc_id = crtc_id;
                     }
 
                     if self.inner.adapter.hw_cursor_size().is_some() {
@@ -570,7 +575,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         self.adapter.set_crtc(
                             &self.objects,
                             crtc,
-                            &connector_ids,
                             mode,
                             fb.as_deref(),
                             Damage {
@@ -581,7 +585,14 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             },
                         );
                         crtc.lock().unwrap().fb_id = KmsObjectId(data.fb_id());
-                        crtc.lock().unwrap().target_connectors = connector_ids;
+
+                        for connector in connector_ids {
+                            self.objects
+                                .get_connector(connector)?
+                                .lock()
+                                .unwrap()
+                                .crtc_id = KmsObjectId(data.crtc_id());
+                        }
                     }
                     self.vts.get_mut(vt).unwrap().display_fbs[display_id] = if data.fb_id() != 0 {
                         Some(KmsObjectId(data.fb_id()))
@@ -702,9 +713,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                                     .collect::<Vec<_>>(),
                             );
                         }
-                        KmsPropertyKind::Object => {
+                        KmsPropertyKind::Object { type_ } => {
                             data.set_flags(flags | DRM_MODE_PROP_OBJECT);
-                            data.set_values_ptr(&[]);
+                            data.set_values_ptr(&[u64::from(*type_)]);
                             data.set_enum_blob_ptr(&[]);
                         }
                         &KmsPropertyKind::SignedRange(start, end) => {
@@ -773,7 +784,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             self.adapter.set_crtc(
                                 &self.objects,
                                 crtc,
-                                &[self.objects.connector_ids()[display_id]],
                                 None,
                                 None,
                                 Damage {
@@ -811,16 +821,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     if *vt == self.active_vt {
                         for crtc in self.objects.crtcs() {
                             if crtc.lock().unwrap().fb_id == KmsObjectId(data.fb_id()) {
-                                let connectors = crtc.lock().unwrap().target_connectors.clone();
                                 let mode = crtc.lock().unwrap().mode;
-                                self.adapter.set_crtc(
-                                    &self.objects,
-                                    crtc,
-                                    &connectors,
-                                    mode,
-                                    Some(fb),
-                                    damage,
-                                );
+                                self.adapter
+                                    .set_crtc(&self.objects, crtc, mode, Some(fb), damage);
                             }
                         }
                     }
