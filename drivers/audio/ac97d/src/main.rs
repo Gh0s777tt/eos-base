@@ -1,6 +1,5 @@
 //#![deny(warnings)]
 
-extern crate bitflags;
 extern crate event;
 extern crate spin;
 extern crate syscall;
