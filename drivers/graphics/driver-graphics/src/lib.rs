@@ -241,7 +241,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                         let crtc = self.inner.objects.get_crtc(crtc_id).unwrap();
                         let connector_id = self.inner.objects.connector_ids()[display_id];
 
-                        crtc.lock().unwrap().state.fb_id = fb.unwrap_or(KmsObjectId::INVALID);
+                        crtc.lock().unwrap().state.fb_id = *fb;
 
                         let fb = fb.map(|fb| {
                             self.inner
@@ -538,7 +538,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         .lock()
                         .unwrap();
                     // Don't touch set_connectors, that is only used by MODE_SET_CRTC
-                    data.set_fb_id(crtc.state.fb_id.0);
+                    data.set_fb_id(crtc.state.fb_id.unwrap_or(KmsObjectId::INVALID).0);
                     // FIXME fill x and y with the data from the primary plane
                     data.set_x(0);
                     data.set_y(0);
@@ -561,11 +561,14 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         .take(data.count_connectors() as usize)
                         .map(|&id| KmsObjectId(id))
                         .collect();
-                    let fb = if data.fb_id() != 0 {
-                        Some(self.objects.get_framebuffer(KmsObjectId(data.fb_id()))?)
+                    let fb_id = if data.fb_id() != 0 {
+                        Some(KmsObjectId(data.fb_id()))
                     } else {
                         None
                     };
+                    let fb = fb_id
+                        .map(|fb_id| self.objects.get_framebuffer(fb_id))
+                        .transpose()?;
                     let mode = if data.mode_valid() != 0 {
                         Some(data.mode())
                     } else {
@@ -584,7 +587,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                                 height: mode.map_or(0, |m| m.vdisplay as u32),
                             },
                         );
-                        crtc.lock().unwrap().state.fb_id = KmsObjectId(data.fb_id());
+                        crtc.lock().unwrap().state.fb_id = fb_id;
 
                         for connector in connector_ids {
                             self.objects
@@ -781,7 +784,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                                 continue;
                             }
                             let crtc = self.objects.crtcs().nth(display_id).unwrap();
-                            crtc.lock().unwrap().state.fb_id = KmsObjectId::INVALID;
+                            crtc.lock().unwrap().state.fb_id = None;
                             self.adapter.set_crtc(
                                 &self.objects,
                                 crtc,
@@ -821,7 +824,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     if *vt == self.active_vt {
                         for crtc in self.objects.crtcs() {
-                            if crtc.lock().unwrap().state.fb_id == KmsObjectId(data.fb_id()) {
+                            if crtc.lock().unwrap().state.fb_id == Some(KmsObjectId(data.fb_id())) {
                                 let mode = crtc.lock().unwrap().state.mode;
                                 self.adapter
                                     .set_crtc(&self.objects, crtc, mode, Some(fb), damage);
@@ -886,7 +889,14 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let crtc_id = self.objects.crtc_ids()[i as usize];
                     let crtc = self.objects.get_crtc(crtc_id).unwrap();
                     data.set_crtc_id(crtc_id.0);
-                    data.set_fb_id(crtc.lock().unwrap().state.fb_id.0);
+                    data.set_fb_id(
+                        crtc.lock()
+                            .unwrap()
+                            .state
+                            .fb_id
+                            .unwrap_or(KmsObjectId::INVALID)
+                            .0,
+                    );
                     data.set_possible_crtcs(1 << i);
                     data.set_format_type_ptr(&[DrmFourcc::Argb8888 as u32]);
                     Ok(0)

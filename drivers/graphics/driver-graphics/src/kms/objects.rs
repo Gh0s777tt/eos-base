@@ -77,7 +77,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             gamma_size: 0,
             properties: KmsCrtc::base_properties(),
             state: KmsCrtcState {
-                fb_id: KmsObjectId::INVALID,
+                fb_id: None,
                 mode: None,
                 driver_data: driver_data_state,
             },
@@ -208,7 +208,7 @@ pub struct KmsCrtc<T: GraphicsAdapter> {
 
 #[derive(Debug, Clone)]
 pub struct KmsCrtcState<T: GraphicsAdapter> {
-    pub fb_id: KmsObjectId,
+    pub fb_id: Option<KmsObjectId>,
     pub mode: Option<drm_mode_modeinfo>,
     pub driver_data: <T::Crtc as KmsCrtcDriver>::State,
 }
