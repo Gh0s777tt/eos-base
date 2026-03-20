@@ -101,11 +101,21 @@ pub struct KmsConnector<T: GraphicsAdapter> {
     pub driver_data: T::Connector,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct KmsConnectorState<T: GraphicsAdapter> {
     pub dpms: KmsDpms,
     pub crtc_id: KmsObjectId,
     pub driver_data: <T::Connector as KmsConnectorDriver>::State,
+}
+
+impl<T: GraphicsAdapter> Clone for KmsConnectorState<T> {
+    fn clone(&self) -> Self {
+        Self {
+            dpms: self.dpms.clone(),
+            crtc_id: self.crtc_id.clone(),
+            driver_data: self.driver_data.clone(),
+        }
+    }
 }
 
 define_object_props!(object, KmsConnector<T: GraphicsAdapter> {

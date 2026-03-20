@@ -206,11 +206,21 @@ pub struct KmsCrtc<T: GraphicsAdapter> {
     pub driver_data: T::Crtc,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct KmsCrtcState<T: GraphicsAdapter> {
     pub fb_id: Option<KmsObjectId>,
     pub mode: Option<drm_mode_modeinfo>,
     pub driver_data: <T::Crtc as KmsCrtcDriver>::State,
+}
+
+impl<T: GraphicsAdapter> Clone for KmsCrtcState<T> {
+    fn clone(&self) -> Self {
+        Self {
+            fb_id: self.fb_id.clone(),
+            mode: self.mode.clone(),
+            driver_data: self.driver_data.clone(),
+        }
+    }
 }
 
 define_object_props!(object, KmsCrtc<T: GraphicsAdapter> {});
