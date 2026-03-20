@@ -143,18 +143,20 @@ impl FbbootlogScheme {
     }
 
     fn handle_resize(map: &mut V2DisplayMap, text_screen: &mut TextScreen) {
-        let (width, height) = match map.display_handle.first_display().and_then(|handle| {
-            Ok(map.display_handle.get_connector(handle, true)?.modes()[0].size())
-        }) {
-            Ok((width, height)) => (width.into(), height.into()),
+        let mode = match map
+            .display_handle
+            .first_display()
+            .and_then(|handle| Ok(map.display_handle.get_connector(handle, true)?.modes()[0]))
+        {
+            Ok(mode) => mode,
             Err(err) => {
                 eprintln!("fbbootlogd: failed to get display size: {}", err);
-                map.buffer.size()
+                return;
             }
         };
 
-        if (width, height) != map.buffer.size() {
-            match text_screen.resize(map, width, height) {
+        if (u32::from(mode.size().0), u32::from(mode.size().1)) != map.buffer.size() {
+            match text_screen.resize(map, mode) {
                 Ok(()) => eprintln!("fbbootlogd: mapped display"),
                 Err(err) => {
                     eprintln!("fbbootlogd: failed to create or map framebuffer: {}", err);

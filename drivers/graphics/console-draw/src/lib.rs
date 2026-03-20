@@ -6,7 +6,7 @@ use std::{cmp, io, mem, ptr};
 
 use drm::buffer::{Buffer, DrmFourcc};
 use drm::control::dumbbuffer::{DumbBuffer, DumbMapping};
-use drm::control::{framebuffer, ClipRect, Device};
+use drm::control::{connector, crtc, framebuffer, ClipRect, Device, Mode};
 use graphics_ipc::V2GraphicsHandle;
 use orbclient::FONT;
 
@@ -52,6 +52,8 @@ impl Damage {
 
 pub struct V2DisplayMap {
     pub display_handle: V2GraphicsHandle,
+    connector: connector::Handle,
+    crtc: crtc::Handle,
     fb: framebuffer::Handle,
     pub buffer: DumbBuffer,
     mapping: DumbMapping<'static>,
@@ -87,6 +89,8 @@ impl V2DisplayMap {
 
         Ok(Self {
             display_handle,
+            connector,
+            crtc,
             fb,
             buffer,
             mapping: map,
@@ -344,7 +348,7 @@ impl TextScreen {
         damage
     }
 
-    pub fn resize(&mut self, map: &mut V2DisplayMap, width: u32, height: u32) -> io::Result<()> {
+    pub fn resize(&mut self, map: &mut V2DisplayMap, mode: Mode) -> io::Result<()> {
         // FIXME fold row when target is narrower and maybe unfold when it is wider
         fn copy_row(
             old_map: &mut DisplayMap,
@@ -361,9 +365,11 @@ impl TextScreen {
             }
         }
 
-        let mut new_buffer =
-            map.display_handle
-                .create_dumb_buffer((width, height), DrmFourcc::Argb8888, 32)?;
+        let mut new_buffer = map.display_handle.create_dumb_buffer(
+            (u32::from(mode.size().0), u32::from(mode.size().1)),
+            DrmFourcc::Argb8888,
+            32,
+        )?;
         let new_fb = map.display_handle.add_framebuffer(&new_buffer, 24, 32)?;
 
         let new_mapping = map.display_handle.map_dumb_buffer(&mut new_buffer)?;
@@ -402,6 +408,14 @@ impl TextScreen {
         let old_buffer = mem::replace(&mut map.buffer, new_buffer);
         let old_fb = mem::replace(&mut map.fb, new_fb);
         map.mapping = new_mapping;
+
+        map.display_handle.set_crtc(
+            map.crtc,
+            Some(map.fb),
+            (0, 0),
+            &[map.connector],
+            Some(mode),
+        )?;
 
         let _ = map.display_handle.destroy_dumb_buffer(old_buffer);
         let _ = map.display_handle.destroy_framebuffer(old_fb);
