@@ -2,16 +2,21 @@ use std::ffi::c_char;
 use std::fmt::Debug;
 use std::sync::Mutex;
 
-use drm_sys::{drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_TYPE_PREFERRED};
+use drm_sys::{
+    drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON,
+    DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND, DRM_MODE_TYPE_PREFERRED,
+};
 use syscall::Result;
 
 use crate::kms::objects::{KmsObjectId, KmsObjects};
+use crate::kms::properties::{define_object_props, KmsPropertyData, CRTC_ID, DPMS, EDID};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
     pub fn add_connector(
         &mut self,
         driver_data: T::Connector,
+        driver_data_state: <T::Connector as KmsConnectorDriver>::State,
         crtcs: &[KmsObjectId],
     ) -> KmsObjectId {
         let mut possible_crtcs = 0;
@@ -35,6 +40,13 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             mm_width: 0,
             mm_height: 0,
             subpixel: DrmSubpixelOrder::Unknown,
+            properties: KmsConnector::base_properties(),
+            edid: KmsObjectId::INVALID,
+            state: KmsConnectorState {
+                dpms: KmsDpms::On,
+                crtc_id: KmsObjectId::INVALID,
+                driver_data: driver_data_state,
+            },
             driver_data,
         }));
         self.connectors.push(connector_id);
@@ -67,8 +79,16 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 }
 
+pub trait KmsConnectorDriver: Debug {
+    type State: Clone + Debug;
+}
+
+impl KmsConnectorDriver for () {
+    type State = ();
+}
+
 #[derive(Debug)]
-pub struct KmsConnector<T: Debug> {
+pub struct KmsConnector<T: KmsConnectorDriver> {
     pub encoder_id: KmsObjectId,
     pub modes: Vec<drm_mode_modeinfo>,
     pub connector_type: u32,
@@ -77,10 +97,32 @@ pub struct KmsConnector<T: Debug> {
     pub mm_width: u32,
     pub mm_height: u32,
     pub subpixel: DrmSubpixelOrder,
+    pub properties: Vec<KmsPropertyData<Self>>,
+    pub edid: KmsObjectId,
+    pub state: KmsConnectorState<T::State>,
     pub driver_data: T,
 }
 
-impl<T: Debug> KmsConnector<T> {
+#[derive(Debug, Clone)]
+pub struct KmsConnectorState<T> {
+    pub dpms: KmsDpms,
+    pub crtc_id: KmsObjectId,
+    pub driver_data: T,
+}
+
+define_object_props!(object, KmsConnector<T: KmsConnectorDriver> {
+    EDID {
+        get => u64::from(object.edid.0),
+    }
+    DPMS {
+        get => object.state.dpms as u64,
+    }
+    CRTC_ID {
+        get => u64::from(object.state.crtc_id.0),
+    }
+});
+
+impl<T: KmsConnectorDriver> KmsConnector<T> {
     pub fn update_from_size(&mut self, width: u32, height: u32) {
         self.modes = vec![Self::modeinfo_for_size(width, height)];
     }
@@ -179,6 +221,15 @@ pub enum DrmSubpixelOrder {
     VerticalRGB,
     VerticalBGR,
     None,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(u64)]
+pub enum KmsDpms {
+    On = DRM_MODE_DPMS_ON as u64,
+    Standby = DRM_MODE_DPMS_STANDBY as u64,
+    Suspend = DRM_MODE_DPMS_SUSPEND as u64,
+    Off = DRM_MODE_DPMS_OFF as u64,
 }
 
 // FIXME can we represent connector and encoder using a single struct?

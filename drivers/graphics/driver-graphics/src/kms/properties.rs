@@ -1,15 +1,15 @@
 use std::ffi::c_char;
 use std::fmt::Debug;
 use std::mem;
-use std::sync::Mutex;
 
 use drm_sys::{
     DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON, DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND,
-    DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY, DRM_PROP_NAME_LEN,
+    DRM_MODE_OBJECT_CRTC, DRM_MODE_OBJECT_FB, DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY,
+    DRM_PLANE_TYPE_PRIMARY, DRM_PROP_NAME_LEN,
 };
 use syscall::{Error, Result, EINVAL};
 
-use crate::kms::objects::{KmsObjectId, KmsObjects};
+use crate::kms::objects::{KmsObject, KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
@@ -29,7 +29,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             KmsPropertyKind::Bitmask(_bitmask_flags) => {
                 // FIXME check overlapping flag numbers
             }
-            KmsPropertyKind::Object => {}
+            KmsPropertyKind::Object { type_: _ } => {}
             KmsPropertyKind::SignedRange(start, end) => assert!(start < end),
         }
 
@@ -50,28 +50,36 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         self.get(id)
     }
 
-    pub fn add_object_property(&mut self, object: KmsObjectId, property: KmsObjectId, value: u64) {
-        let object = self.objects.get_mut(&object).unwrap();
-        // FIXME validate property uniqueness and value
-        object.properties.lock().unwrap().push((property, value));
-    }
-
-    pub fn set_object_property(&mut self, object: KmsObjectId, property: KmsObjectId, value: u64) {
-        let object = self.objects.get_mut(&object).unwrap();
-        // FIXME validate property existence and value
-        for (prop, val) in object.properties.lock().unwrap().iter_mut() {
-            if *prop == property {
-                *val = value;
-            }
-        }
-    }
-
-    pub fn get_object_properties(
-        &self,
-        id: KmsObjectId,
-    ) -> Result<&Mutex<Vec<(KmsObjectId, u64)>>> {
+    pub fn get_object_properties_data(&self, id: KmsObjectId) -> Result<(Vec<u32>, Vec<u64>)> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        Ok(&object.properties)
+        match &**object {
+            KmsObject::Crtc(crtc) => {
+                let crtc = crtc.lock().unwrap();
+                let props = &crtc.properties;
+                Ok((
+                    props.iter().map(|prop| prop.id.0).collect::<Vec<_>>(),
+                    props
+                        .iter()
+                        .map(|prop| (prop.getter)(&crtc))
+                        .collect::<Vec<_>>(),
+                ))
+            }
+            KmsObject::Connector(connector) => {
+                let connector = connector.lock().unwrap();
+                let props = &connector.properties;
+                Ok((
+                    props.iter().map(|prop| prop.id.0).collect::<Vec<_>>(),
+                    props
+                        .iter()
+                        .map(|prop| (prop.getter)(&connector))
+                        .collect::<Vec<_>>(),
+                ))
+            }
+            KmsObject::Encoder(_)
+            | KmsObject::Property(_)
+            | KmsObject::Framebuffer(_)
+            | KmsObject::Blob(_) => Ok((vec![], vec![])),
+        }
     }
 
     pub fn add_blob(&mut self, data: Vec<u8>) -> KmsObjectId {
@@ -122,8 +130,14 @@ pub enum KmsPropertyKind {
     Enum(Vec<(KmsPropertyName, u64)>),
     Blob,
     Bitmask(Vec<(KmsPropertyName, u64)>),
-    Object,
+    Object { type_: u32 },
     SignedRange(i64, i64),
+}
+
+#[derive(Debug)]
+pub struct KmsPropertyData<T> {
+    pub id: KmsObjectId,
+    pub getter: fn(&T) -> u64,
 }
 
 #[derive(Debug)]
@@ -165,8 +179,8 @@ macro_rules! define_properties {
     (@prop_kind blob) => {
         KmsPropertyKind::Blob
     };
-    (@prop_kind object) => {
-        KmsPropertyKind::Object
+    (@prop_kind object { $type:ident }) => {
+        KmsPropertyKind::Object { type_: $type }
     };
     (@prop_kind srange { $start:expr, $end:expr }) => {
         KmsPropertyKind::SignedRange($start, $end)
@@ -175,7 +189,7 @@ macro_rules! define_properties {
 
 define_properties! {
     // Connector + Plane
-    CRTC_ID: object [atomic],
+    CRTC_ID: object { DRM_MODE_OBJECT_CRTC } [atomic],
 
     // Connector
     EDID: blob [immutable],
@@ -196,7 +210,7 @@ define_properties! {
         Primary = u64::from(DRM_PLANE_TYPE_PRIMARY),
         Cursor = u64::from(DRM_PLANE_TYPE_CURSOR),
     } [immutable],
-    FB_ID: object [atomic],
+    FB_ID: object { DRM_MODE_OBJECT_FB } [atomic],
     CRTC_X: srange { i64::from(i32::MIN), i64::from(i32::MAX) } [atomic],
     CRTC_Y: srange { i64::from(i32::MIN), i64::from(i32::MAX) } [atomic],
     CRTC_W: range { 0, u64::from(u32::MAX) } [atomic],
@@ -207,3 +221,21 @@ define_properties! {
     SRC_H: range { 0, u64::from(u32::MAX) } [atomic],
     FB_DAMAGE_CLIPS: blob [atomic],
 }
+
+macro_rules! define_object_props {
+    ($object:ident, $obj:ident$(<$($T:ident$(: $bound:ident)?),*>)? { $(
+        $prop:ident {
+            get => $get:expr,
+        }
+    )* }) => {
+        impl$(<$($T$(: $bound)?),*>)? $obj$(<$($T),*>)? {
+            pub(super) fn base_properties() -> Vec<KmsPropertyData<Self>> {
+                vec![$(KmsPropertyData {
+                    id: $prop,
+                    getter: |$object| $get
+                }),*]
+            }
+        }
+    };
+}
+pub(super) use define_object_props;

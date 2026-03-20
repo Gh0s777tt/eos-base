@@ -10,7 +10,9 @@ use drm_sys::{
 use syscall::{Error, Result, EINVAL};
 
 use crate::kms::connector::{KmsConnector, KmsEncoder};
-use crate::kms::properties::{init_standard_props, KmsBlob, KmsProperty};
+use crate::kms::properties::{
+    define_object_props, init_standard_props, KmsBlob, KmsProperty, KmsPropertyData,
+};
 use crate::GraphicsAdapter;
 
 #[derive(Debug)]
@@ -20,7 +22,7 @@ pub struct KmsObjects<T: GraphicsAdapter> {
     pub(crate) encoders: Vec<KmsObjectId>,
     crtcs: Vec<KmsObjectId>,
     framebuffers: Vec<KmsObjectId>,
-    pub(crate) objects: HashMap<KmsObjectId, Arc<KmsObjectData<T>>>,
+    pub(crate) objects: HashMap<KmsObjectId, Arc<KmsObject<T>>>,
     _marker: PhantomData<T>,
 }
 
@@ -39,15 +41,9 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         objects
     }
 
-    pub(crate) fn add<U: Into<KmsObjectKind<T>>>(&mut self, data: U) -> KmsObjectId {
+    pub(crate) fn add<U: Into<KmsObject<T>>>(&mut self, data: U) -> KmsObjectId {
         let id = self.next_id;
-        self.objects.insert(
-            id,
-            Arc::new(KmsObjectData {
-                kind: Box::new(data.into()),
-                properties: Mutex::new(vec![]),
-            }),
-        );
+        self.objects.insert(id, Arc::new(data.into()));
         self.next_id.0 += 1;
 
         id
@@ -55,10 +51,10 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub(crate) fn get<'a, U: 'a>(&'a self, id: KmsObjectId) -> Result<&'a U>
     where
-        &'a U: TryFrom<&'a KmsObjectKind<T>>,
+        &'a U: TryFrom<&'a KmsObject<T>>,
     {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        if let Ok(object) = (&*object.kind).try_into() {
+        if let Ok(object) = (&**object).try_into() {
             Ok(object)
         } else {
             Err(Error::new(EINVAL))
@@ -67,17 +63,24 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub fn object_type(&self, id: KmsObjectId) -> Result<u32> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        Ok(object.kind.object_type())
+        Ok(object.object_type())
     }
 
-    pub fn add_crtc(&mut self, driver_data: T::Crtc) -> KmsObjectId {
+    pub fn add_crtc(
+        &mut self,
+        driver_data: T::Crtc,
+        driver_data_state: <T::Crtc as KmsCrtcDriver>::State,
+    ) -> KmsObjectId {
         let crtc_index = self.crtcs.len() as u32;
         let id = self.add(Mutex::new(KmsCrtc {
             crtc_index,
-            target_connectors: vec![],
-            fb_id: KmsObjectId::INVALID,
             gamma_size: 0,
-            mode: None,
+            properties: KmsCrtc::base_properties(),
+            state: KmsCrtcState {
+                fb_id: KmsObjectId::INVALID,
+                mode: None,
+                driver_data: driver_data_state,
+            },
             driver_data,
         }));
         self.crtcs.push(id);
@@ -109,11 +112,10 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 
     pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
-        let kind = match self.objects.get(&id).map(|object| &**object) {
-            Some(KmsObjectData { kind, .. }) => kind,
-            _ => return Err(Error::new(EINVAL)),
+        let Some(object) = self.objects.get(&id).map(|object| &**object) else {
+            return Err(Error::new(EINVAL));
         };
-        let KmsObjectKind::Framebuffer(_) = **kind else {
+        let KmsObject::Framebuffer(_) = object else {
             return Err(Error::new(EINVAL));
         };
         self.objects.remove(&id).unwrap();
@@ -146,22 +148,16 @@ impl From<KmsObjectId> for u64 {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct KmsObjectData<T: GraphicsAdapter> {
-    kind: Box<KmsObjectKind<T>>,
-    pub(crate) properties: Mutex<Vec<(KmsObjectId, u64)>>,
-}
-
 macro_rules! define_object_kinds {
     (<$T:ident> $(
         $variant:ident($data:ty) = $type:ident,
     )*) => {
         #[derive(Debug)]
-        pub(crate) enum KmsObjectKind<$T: GraphicsAdapter> {
+        pub(crate) enum KmsObject<$T: GraphicsAdapter> {
             $($variant($data),)*
         }
 
-        impl<$T: GraphicsAdapter> KmsObjectKind<$T> {
+        impl<$T: GraphicsAdapter> KmsObject<$T> {
             fn object_type(&self) -> u32 {
                 match self {
                     $(Self::$variant(_) => $type,)*
@@ -169,20 +165,19 @@ macro_rules! define_object_kinds {
             }
         }
 
-
         $(
-            impl<$T: GraphicsAdapter> From<$data> for KmsObjectKind<$T> {
+            impl<$T: GraphicsAdapter> From<$data> for KmsObject<$T> {
                 fn from(value: $data) -> Self {
                     Self::$variant(value)
                 }
             }
 
-            impl<'a, $T: GraphicsAdapter> TryFrom<&'a KmsObjectKind<$T>> for &'a $data {
+            impl<'a, $T: GraphicsAdapter> TryFrom<&'a KmsObject<$T>> for &'a $data {
                 type Error = ();
 
-                fn try_from(value: &'a KmsObjectKind<T>) -> Result<Self, Self::Error> {
+                fn try_from(value: &'a KmsObject<T>) -> Result<Self, Self::Error> {
                     match value {
-                        KmsObjectKind::$variant(data) => Ok(data),
+                        KmsObject::$variant(data) => Ok(data),
                         _ => Err(()),
                     }
                 }
@@ -200,16 +195,31 @@ define_object_kinds! { <T>
     Blob(KmsBlob) = DRM_MODE_OBJECT_BLOB,
 }
 
+pub trait KmsCrtcDriver: Debug {
+    type State: Clone + Debug;
+}
+
+impl KmsCrtcDriver for () {
+    type State = ();
+}
+
 #[derive(Debug)]
-pub struct KmsCrtc<T> {
+pub struct KmsCrtc<T: KmsCrtcDriver> {
     pub crtc_index: u32,
-    // FIXME maybe have this on connector instead?
-    pub target_connectors: Vec<KmsObjectId>,
-    pub fb_id: KmsObjectId,
     pub gamma_size: u32,
+    pub properties: Vec<KmsPropertyData<Self>>,
+    pub state: KmsCrtcState<T::State>,
+    pub driver_data: T,
+}
+
+#[derive(Debug, Clone)]
+pub struct KmsCrtcState<T> {
+    pub fb_id: KmsObjectId,
     pub mode: Option<drm_mode_modeinfo>,
     pub driver_data: T,
 }
+
+define_object_props!(object, KmsCrtc<T: KmsCrtcDriver> {});
 
 #[derive(Debug)]
 pub struct KmsFramebuffer<T, Buf> {

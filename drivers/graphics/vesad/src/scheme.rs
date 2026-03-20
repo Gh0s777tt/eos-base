@@ -3,13 +3,10 @@ use std::convert::TryInto;
 use std::ptr::{self, NonNull};
 use std::sync::Mutex;
 
-use driver_graphics::kms::connector::KmsConnectorStatus;
+use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
 use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
-use driver_graphics::kms::properties::DPMS;
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
-use drm_sys::{
-    drm_mode_modeinfo, DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT, DRM_MODE_DPMS_ON,
-};
+use drm_sys::{drm_mode_modeinfo, DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use syscall::{EINVAL, PAGE_SIZE};
 
 #[derive(Debug)]
@@ -22,6 +19,10 @@ pub struct Connector {
     width: u32,
     height: u32,
     framebuffer_id: usize,
+}
+
+impl KmsConnectorDriver for Connector {
+    type State = ();
 }
 
 impl GraphicsAdapter for FbAdapter {
@@ -41,17 +42,17 @@ impl GraphicsAdapter for FbAdapter {
 
     fn init(&mut self, objects: &mut KmsObjects<Self>) {
         for (framebuffer_id, framebuffer) in self.framebuffers.iter().enumerate() {
-            let crtc = objects.add_crtc(());
+            let crtc = objects.add_crtc((), ());
 
-            let connector = objects.add_connector(
+            objects.add_connector(
                 Connector {
                     width: framebuffer.width as u32,
                     height: framebuffer.height as u32,
                     framebuffer_id,
                 },
+                (),
                 &[crtc],
             );
-            objects.add_object_property(connector, DPMS, DRM_MODE_DPMS_ON.into());
         }
     }
 
@@ -92,33 +93,35 @@ impl GraphicsAdapter for FbAdapter {
         &mut self,
         objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self::Crtc>>,
-        connectors: &[KmsObjectId],
         mode: Option<drm_mode_modeinfo>,
         buffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
         damage: Damage,
     ) {
-        crtc.lock().unwrap().mode = mode;
+        let mut crtc = crtc.lock().unwrap();
+        crtc.state.mode = mode;
 
-        let framebuffer_id = objects
-            .get_connector(connectors[0])
-            .unwrap()
-            .lock()
-            .unwrap()
-            .driver_data
-            .framebuffer_id;
-        let framebuffer = &mut self.framebuffers[framebuffer_id];
+        for connector in objects.connectors() {
+            let connector = connector.lock().unwrap();
 
-        if let Some(buffer) = buffer {
-            buffer.buffer.sync(framebuffer, damage)
-        } else {
-            let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
-            for row in 0..framebuffer.height {
-                unsafe {
-                    ptr::write_bytes(
-                        onscreen_ptr.add(row * framebuffer.stride),
-                        0,
-                        framebuffer.width,
-                    );
+            if connector.state.crtc_id != objects.crtc_ids()[crtc.crtc_index as usize] {
+                continue;
+            }
+
+            let framebuffer_id = connector.driver_data.framebuffer_id;
+            let framebuffer = &mut self.framebuffers[framebuffer_id];
+
+            if let Some(buffer) = buffer {
+                buffer.buffer.sync(framebuffer, damage)
+            } else {
+                let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
+                for row in 0..framebuffer.height {
+                    unsafe {
+                        ptr::write_bytes(
+                            onscreen_ptr.add(row * framebuffer.stride),
+                            0,
+                            framebuffer.width,
+                        );
+                    }
                 }
             }
         }
