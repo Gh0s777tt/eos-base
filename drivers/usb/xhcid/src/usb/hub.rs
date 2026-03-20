@@ -93,7 +93,7 @@ pub enum HubPortFeature {
 }
 
 bitflags::bitflags! {
-    #[derive(Default)]
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     #[repr(transparent)]
     pub struct HubPortStatusV2: u32 {
         const CONNECTION = 1 << 0;
@@ -120,7 +120,7 @@ bitflags::bitflags! {
 unsafe impl plain::Plain for HubPortStatusV2 {}
 
 bitflags::bitflags! {
-    #[derive(Default)]
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     #[repr(transparent)]
     pub struct HubPortStatusV3: u32 {
         const CONNECTION = 1 << 0;
