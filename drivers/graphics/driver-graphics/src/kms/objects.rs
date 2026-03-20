@@ -22,7 +22,7 @@ pub struct KmsObjects<T: GraphicsAdapter> {
     pub(crate) encoders: Vec<KmsObjectId>,
     crtcs: Vec<KmsObjectId>,
     framebuffers: Vec<KmsObjectId>,
-    pub(crate) objects: HashMap<KmsObjectId, Arc<KmsObject<T>>>,
+    pub(crate) objects: HashMap<KmsObjectId, KmsObject<T>>,
     _marker: PhantomData<T>,
 }
 
@@ -43,7 +43,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub(crate) fn add<U: Into<KmsObject<T>>>(&mut self, data: U) -> KmsObjectId {
         let id = self.next_id;
-        self.objects.insert(id, Arc::new(data.into()));
+        self.objects.insert(id, data.into());
         self.next_id.0 += 1;
 
         id
@@ -54,7 +54,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         &'a U: TryFrom<&'a KmsObject<T>>,
     {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        if let Ok(object) = (&**object).try_into() {
+        if let Ok(object) = object.try_into() {
             Ok(object)
         } else {
             Err(Error::new(EINVAL))
@@ -112,7 +112,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 
     pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
-        let Some(object) = self.objects.get(&id).map(|object| &**object) else {
+        let Some(object) = self.objects.get(&id) else {
             return Err(Error::new(EINVAL));
         };
         let KmsObject::Framebuffer(_) = object else {

@@ -577,7 +577,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             &self.objects,
                             crtc,
                             mode,
-                            fb.as_deref(),
+                            fb,
                             Damage {
                                 x: data.x(),
                                 y: data.y(),
