@@ -22,7 +22,7 @@ pub struct KmsObjects<T: GraphicsAdapter> {
     pub(crate) encoders: Vec<KmsObjectId>,
     crtcs: Vec<KmsObjectId>,
     framebuffers: Vec<KmsObjectId>,
-    pub(crate) objects: HashMap<KmsObjectId, Arc<KmsObject<T>>>,
+    pub(crate) objects: HashMap<KmsObjectId, KmsObject<T>>,
     _marker: PhantomData<T>,
 }
 
@@ -43,7 +43,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub(crate) fn add<U: Into<KmsObject<T>>>(&mut self, data: U) -> KmsObjectId {
         let id = self.next_id;
-        self.objects.insert(id, Arc::new(data.into()));
+        self.objects.insert(id, data.into());
         self.next_id.0 += 1;
 
         id
@@ -54,7 +54,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         &'a U: TryFrom<&'a KmsObject<T>>,
     {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        if let Ok(object) = (&**object).try_into() {
+        if let Ok(object) = object.try_into() {
             Ok(object)
         } else {
             Err(Error::new(EINVAL))
@@ -77,7 +77,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             gamma_size: 0,
             properties: KmsCrtc::base_properties(),
             state: KmsCrtcState {
-                fb_id: KmsObjectId::INVALID,
+                fb_id: None,
                 mode: None,
                 driver_data: driver_data_state,
             },
@@ -92,27 +92,24 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         &self.crtcs
     }
 
-    pub fn crtcs(&self) -> impl Iterator<Item = &Mutex<KmsCrtc<T::Crtc>>> + use<'_, T> {
+    pub fn crtcs(&self) -> impl Iterator<Item = &Mutex<KmsCrtc<T>>> + use<'_, T> {
         self.crtcs
             .iter()
-            .map(|&id| self.get::<Mutex<KmsCrtc<T::Crtc>>>(id).unwrap())
+            .map(|&id| self.get::<Mutex<KmsCrtc<T>>>(id).unwrap())
     }
 
-    pub fn get_crtc(&self, id: KmsObjectId) -> Result<&Mutex<KmsCrtc<T::Crtc>>> {
+    pub fn get_crtc(&self, id: KmsObjectId) -> Result<&Mutex<KmsCrtc<T>>> {
         self.get(id)
     }
 
-    pub fn add_framebuffer(
-        &mut self,
-        fb: KmsFramebuffer<T::Framebuffer, T::Buffer>,
-    ) -> KmsObjectId {
+    pub fn add_framebuffer(&mut self, fb: KmsFramebuffer<T>) -> KmsObjectId {
         let id = self.add(fb);
         self.framebuffers.push(id);
         id
     }
 
     pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
-        let Some(object) = self.objects.get(&id).map(|object| &**object) else {
+        let Some(object) = self.objects.get(&id) else {
             return Err(Error::new(EINVAL));
         };
         let KmsObject::Framebuffer(_) = object else {
@@ -127,10 +124,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         &self.framebuffers
     }
 
-    pub fn get_framebuffer(
-        &self,
-        id: KmsObjectId,
-    ) -> Result<&KmsFramebuffer<T::Framebuffer, T::Buffer>> {
+    pub fn get_framebuffer(&self, id: KmsObjectId) -> Result<&KmsFramebuffer<T>> {
         self.get(id)
     }
 }
@@ -187,11 +181,11 @@ macro_rules! define_object_kinds {
 }
 
 define_object_kinds! { <T>
-    Crtc(Mutex<KmsCrtc<T::Crtc>>) = DRM_MODE_OBJECT_CRTC,
-    Connector(Mutex<KmsConnector<T::Connector>>) = DRM_MODE_OBJECT_CONNECTOR,
+    Crtc(Mutex<KmsCrtc<T>>) = DRM_MODE_OBJECT_CRTC,
+    Connector(Mutex<KmsConnector<T>>) = DRM_MODE_OBJECT_CONNECTOR,
     Encoder(KmsEncoder) = DRM_MODE_OBJECT_ENCODER,
     Property(KmsProperty) = DRM_MODE_OBJECT_PROPERTY,
-    Framebuffer(KmsFramebuffer<T::Framebuffer, T::Buffer>) = DRM_MODE_OBJECT_FB,
+    Framebuffer(KmsFramebuffer<T>) = DRM_MODE_OBJECT_FB,
     Blob(KmsBlob) = DRM_MODE_OBJECT_BLOB,
 }
 
@@ -204,30 +198,40 @@ impl KmsCrtcDriver for () {
 }
 
 #[derive(Debug)]
-pub struct KmsCrtc<T: KmsCrtcDriver> {
+pub struct KmsCrtc<T: GraphicsAdapter> {
     pub crtc_index: u32,
     pub gamma_size: u32,
     pub properties: Vec<KmsPropertyData<Self>>,
-    pub state: KmsCrtcState<T::State>,
-    pub driver_data: T,
+    pub state: KmsCrtcState<T>,
+    pub driver_data: T::Crtc,
 }
-
-#[derive(Debug, Clone)]
-pub struct KmsCrtcState<T> {
-    pub fb_id: KmsObjectId,
-    pub mode: Option<drm_mode_modeinfo>,
-    pub driver_data: T,
-}
-
-define_object_props!(object, KmsCrtc<T: KmsCrtcDriver> {});
 
 #[derive(Debug)]
-pub struct KmsFramebuffer<T, Buf> {
+pub struct KmsCrtcState<T: GraphicsAdapter> {
+    pub fb_id: Option<KmsObjectId>,
+    pub mode: Option<drm_mode_modeinfo>,
+    pub driver_data: <T::Crtc as KmsCrtcDriver>::State,
+}
+
+impl<T: GraphicsAdapter> Clone for KmsCrtcState<T> {
+    fn clone(&self) -> Self {
+        Self {
+            fb_id: self.fb_id.clone(),
+            mode: self.mode.clone(),
+            driver_data: self.driver_data.clone(),
+        }
+    }
+}
+
+define_object_props!(object, KmsCrtc<T: GraphicsAdapter> {});
+
+#[derive(Debug)]
+pub struct KmsFramebuffer<T: GraphicsAdapter> {
     pub width: u32,
     pub height: u32,
     pub pitch: u32,
     pub bpp: u32,
     pub depth: u32,
-    pub buffer: Arc<Buf>,
-    pub driver_data: T,
+    pub buffer: Arc<T::Buffer>,
+    pub driver_data: T::Framebuffer,
 }

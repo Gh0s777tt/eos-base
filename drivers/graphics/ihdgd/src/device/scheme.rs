@@ -6,9 +6,9 @@ use std::ptr::{self, NonNull};
 use std::sync::Mutex;
 
 use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
-use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects};
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
-use drm_sys::{drm_mode_modeinfo, DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
+use drm_sys::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use syscall::{error::EINVAL, PAGE_SIZE};
 
 use super::Device;
@@ -38,6 +38,8 @@ impl GraphicsAdapter for Device {
     }
 
     fn init(&mut self, objects: &mut KmsObjects<Self>) {
+        self.init_inner();
+
         // FIXME enumerate actual connectors
         for (framebuffer_id, _) in self.framebuffers.iter().enumerate() {
             let crtc = objects.add_crtc((), ());
@@ -84,13 +86,16 @@ impl GraphicsAdapter for Device {
     fn set_crtc(
         &mut self,
         objects: &KmsObjects<Self>,
-        crtc: &Mutex<KmsCrtc<Self::Crtc>>,
-        mode: Option<drm_mode_modeinfo>,
-        buffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
+        crtc: &Mutex<KmsCrtc<Self>>,
+        state: KmsCrtcState<Self>,
         damage: Damage,
-    ) {
+    ) -> syscall::Result<()> {
         let mut crtc = crtc.lock().unwrap();
-        crtc.state.mode = mode;
+        let buffer = state
+            .fb_id
+            .map(|fb_id| objects.get_framebuffer(fb_id))
+            .transpose()?;
+        crtc.state = state;
 
         for connector in objects.connectors() {
             let connector = connector.lock().unwrap();
@@ -117,6 +122,8 @@ impl GraphicsAdapter for Device {
                 }
             }
         }
+
+        Ok(())
     }
 
     fn hw_cursor_size(&self) -> Option<(u32, u32)> {

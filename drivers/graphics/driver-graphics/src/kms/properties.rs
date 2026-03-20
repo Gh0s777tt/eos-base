@@ -52,7 +52,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub fn get_object_properties_data(&self, id: KmsObjectId) -> Result<(Vec<u32>, Vec<u64>)> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        match &**object {
+        match object {
             KmsObject::Crtc(crtc) => {
                 let crtc = crtc.lock().unwrap();
                 let props = &crtc.properties;

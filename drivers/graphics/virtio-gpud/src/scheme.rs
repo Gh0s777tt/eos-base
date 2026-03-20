@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
-use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects};
 use driver_graphics::{Buffer as DrmBuffer, CursorPlane, Damage, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{
-    drm_mode_modeinfo, DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_CAP_DUMB_BUFFER,
+    DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_CAP_DUMB_BUFFER,
     DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT,
 };
 
@@ -405,14 +405,17 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     fn set_crtc(
         &mut self,
         objects: &KmsObjects<Self>,
-        crtc: &Mutex<KmsCrtc<Self::Crtc>>,
-        mode: Option<drm_mode_modeinfo>,
-        framebuffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
+        crtc: &Mutex<KmsCrtc<Self>>,
+        state: KmsCrtcState<Self>,
         damage: Damage,
-    ) {
+    ) -> syscall::Result<()> {
         futures::executor::block_on(async {
             let mut crtc = crtc.lock().unwrap();
-            crtc.state.mode = mode;
+            let framebuffer = state
+                .fb_id
+                .map(|fb_id| objects.get_framebuffer(fb_id))
+                .transpose()?;
+            crtc.state = state;
 
             for connector in objects.connectors() {
                 let connector = connector.lock().unwrap();
@@ -433,7 +436,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
                     let header = self.send_request(scanout_request).await.unwrap();
                     assert_eq!(header.ty, CommandTy::RespOkNodata);
                     self.displays[display_id as usize].active_resource = None;
-                    return;
+                    return Ok(());
                 };
 
                 let req = Dma::new(XferToHost2d::new(
@@ -472,7 +475,9 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
                 let header = self.send_request(Dma::new(flush).unwrap()).await.unwrap();
                 assert_eq!(header.ty, CommandTy::RespOkNodata);
             }
-        });
+
+            Ok(())
+        })
     }
 
     fn hw_cursor_size(&self) -> Option<(u32, u32)> {
