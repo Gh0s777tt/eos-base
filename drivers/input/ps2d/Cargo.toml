@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-bitflags = "1"
+bitflags.workspace = true
 log.workspace = true
 orbclient.workspace = true
 redox_event.workspace = true
