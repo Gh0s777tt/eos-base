@@ -74,6 +74,7 @@ exclude = ["bootstrap"]
 # Remember to also update bootstrap dependencies, those are not in the workspace
 [workspace.dependencies]
 anyhow = "1"
+bitflags = "2"
 drm = "0.14.2"
 drm-sys = "0.8.1"
 libc = "0.2.181"

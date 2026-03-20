@@ -9,6 +9,7 @@ use common::io::{Io, Mmio};
 // Sticky register values may preserve values through chip hardware reset
 
 bitflags! {
+    #[derive(Debug)]
     pub struct PortFlags: u32 {
         const CCS = 1 << 0; // ROS
         const PED = 1 << 1; // RW1CS

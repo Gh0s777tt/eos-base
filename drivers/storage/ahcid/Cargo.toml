@@ -5,7 +5,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bitflags = "1.2"
 byteorder = "1.2"
 log.workspace = true
 redox_syscall = { workspace = true, features = ["std"] }

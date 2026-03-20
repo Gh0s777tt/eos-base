@@ -13,7 +13,7 @@ name = "xhcid_interface"
 path = "src/lib.rs"
 
 [dependencies]
-bitflags = "1"
+bitflags.workspace = true
 chashmap = "2.2.2"
 crossbeam-channel = "0.4"
 futures = "0.3"

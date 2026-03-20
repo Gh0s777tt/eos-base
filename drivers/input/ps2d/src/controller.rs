@@ -45,6 +45,7 @@ bitflags! {
 }
 
 bitflags! {
+    #[derive(Clone, Copy, Debug)]
     pub struct ConfigFlags: u8 {
         const FIRST_INTERRUPT = 1 << 0;
         const SECOND_INTERRUPT = 1 << 1;
