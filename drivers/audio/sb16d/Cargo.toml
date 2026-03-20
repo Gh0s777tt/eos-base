@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bitflags = "2"
+bitflags.workspace = true
 common = { path = "../../common" }
 libredox.workspace = true
 log.workspace = true

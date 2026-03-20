@@ -7,7 +7,7 @@ authors = ["Anhad Singh <andypython@protonmail.com>"]
 
 [dependencies]
 static_assertions = "1.1.0"
-bitflags = "2.3.2"
+bitflags.workspace = true
 redox_syscall.workspace = true
 libredox.workspace = true
 log.workspace = true

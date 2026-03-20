@@ -10,7 +10,7 @@ license = "MIT"
 
 [dependencies]
 anyhow.workspace = true
-bitflags = "2"
+bitflags.workspace = true
 log.workspace = true
 orbclient.workspace = true
 redox_syscall.workspace = true
