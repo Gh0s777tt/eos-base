@@ -6,7 +6,7 @@ use std::ptr::{self, NonNull};
 use std::sync::Mutex;
 
 use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
-use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{KmsCrtc, KmsFramebuffer, KmsObjectId, KmsObjects};
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
 use drm_sys::{drm_mode_modeinfo, DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use syscall::{error::EINVAL, PAGE_SIZE};
@@ -84,9 +84,9 @@ impl GraphicsAdapter for Device {
     fn set_crtc(
         &mut self,
         objects: &KmsObjects<Self>,
-        crtc: &Mutex<KmsCrtc<Self::Crtc>>,
+        crtc: &Mutex<KmsCrtc<Self>>,
         mode: Option<drm_mode_modeinfo>,
-        buffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
+        buffer: Option<&KmsFramebuffer<Self>>,
         damage: Damage,
     ) {
         let mut crtc = crtc.lock().unwrap();

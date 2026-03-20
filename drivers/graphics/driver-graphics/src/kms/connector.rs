@@ -58,15 +58,13 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         &self.connectors
     }
 
-    pub fn connectors(
-        &self,
-    ) -> impl Iterator<Item = &Mutex<KmsConnector<T::Connector>>> + use<'_, T> {
+    pub fn connectors(&self) -> impl Iterator<Item = &Mutex<KmsConnector<T>>> + use<'_, T> {
         self.connectors
             .iter()
             .map(|&id| self.get_connector(id).unwrap())
     }
 
-    pub fn get_connector(&self, id: KmsObjectId) -> Result<&Mutex<KmsConnector<T::Connector>>> {
+    pub fn get_connector(&self, id: KmsObjectId) -> Result<&Mutex<KmsConnector<T>>> {
         self.get(id)
     }
 
@@ -88,7 +86,7 @@ impl KmsConnectorDriver for () {
 }
 
 #[derive(Debug)]
-pub struct KmsConnector<T: KmsConnectorDriver> {
+pub struct KmsConnector<T: GraphicsAdapter> {
     pub encoder_id: KmsObjectId,
     pub modes: Vec<drm_mode_modeinfo>,
     pub connector_type: u32,
@@ -99,18 +97,18 @@ pub struct KmsConnector<T: KmsConnectorDriver> {
     pub subpixel: DrmSubpixelOrder,
     pub properties: Vec<KmsPropertyData<Self>>,
     pub edid: KmsObjectId,
-    pub state: KmsConnectorState<T::State>,
-    pub driver_data: T,
+    pub state: KmsConnectorState<T>,
+    pub driver_data: T::Connector,
 }
 
 #[derive(Debug, Clone)]
-pub struct KmsConnectorState<T> {
+pub struct KmsConnectorState<T: GraphicsAdapter> {
     pub dpms: KmsDpms,
     pub crtc_id: KmsObjectId,
-    pub driver_data: T,
+    pub driver_data: <T::Connector as KmsConnectorDriver>::State,
 }
 
-define_object_props!(object, KmsConnector<T: KmsConnectorDriver> {
+define_object_props!(object, KmsConnector<T: GraphicsAdapter> {
     EDID {
         get => u64::from(object.edid.0),
     }
@@ -122,9 +120,9 @@ define_object_props!(object, KmsConnector<T: KmsConnectorDriver> {
     }
 });
 
-impl<T: KmsConnectorDriver> KmsConnector<T> {
+impl<T: GraphicsAdapter> KmsConnector<T> {
     pub fn update_from_size(&mut self, width: u32, height: u32) {
-        self.modes = vec![Self::modeinfo_for_size(width, height)];
+        self.modes = vec![modeinfo_for_size(width, height)];
     }
 
     pub fn update_from_edid(&mut self, edid: &[u8]) {
@@ -151,7 +149,7 @@ impl<T: KmsConnectorDriver> KmsConnector<T> {
                 match descriptor {
                     edid::Descriptor::DetailedTiming(detailed_timing) => {
                         // FIXME extract full information
-                        Some(Self::modeinfo_for_size(
+                        Some(modeinfo_for_size(
                             u32::from(detailed_timing.horizontal_active_pixels),
                             u32::from(detailed_timing.vertical_active_lines),
                         ))
@@ -168,40 +166,40 @@ impl<T: KmsConnectorDriver> KmsConnector<T> {
 
         // FIXME update the EDID property
     }
+}
 
-    pub(crate) fn modeinfo_for_size(width: u32, height: u32) -> drm_mode_modeinfo {
-        let mut modeinfo = drm_mode_modeinfo {
-            // The actual visible display size
-            hdisplay: width as u16,
-            vdisplay: height as u16,
+pub(crate) fn modeinfo_for_size(width: u32, height: u32) -> drm_mode_modeinfo {
+    let mut modeinfo = drm_mode_modeinfo {
+        // The actual visible display size
+        hdisplay: width as u16,
+        vdisplay: height as u16,
 
-            // These are used to calculate the refresh rate
-            clock: 60 * width * height / 1000,
-            htotal: width as u16,
-            vtotal: height as u16,
-            vscan: 0,
-            vrefresh: 60,
+        // These are used to calculate the refresh rate
+        clock: 60 * width * height / 1000,
+        htotal: width as u16,
+        vtotal: height as u16,
+        vscan: 0,
+        vrefresh: 60,
 
-            type_: drm_sys::DRM_MODE_TYPE_PREFERRED | drm_sys::DRM_MODE_TYPE_DRIVER,
-            name: [0; 32],
+        type_: drm_sys::DRM_MODE_TYPE_PREFERRED | drm_sys::DRM_MODE_TYPE_DRIVER,
+        name: [0; 32],
 
-            // These only matter when modesetting physical display adapters. For
-            // those we should be able to parse the EDID blob.
-            hsync_start: width as u16,
-            hsync_end: width as u16,
-            hskew: 0,
-            vsync_start: height as u16,
-            vsync_end: height as u16,
-            flags: 0,
-        };
+        // These only matter when modesetting physical display adapters. For
+        // those we should be able to parse the EDID blob.
+        hsync_start: width as u16,
+        hsync_end: width as u16,
+        hskew: 0,
+        vsync_start: height as u16,
+        vsync_end: height as u16,
+        flags: 0,
+    };
 
-        let name = format!("{width}x{height}").into_bytes();
-        for (to, from) in modeinfo.name.iter_mut().zip(name) {
-            *to = from as c_char;
-        }
-
-        modeinfo
+    let name = format!("{width}x{height}").into_bytes();
+    for (to, from) in modeinfo.name.iter_mut().zip(name) {
+        *to = from as c_char;
     }
+
+    modeinfo
 }
 
 #[derive(Debug, Copy, Clone)]

@@ -21,7 +21,7 @@ use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP};
 
-use crate::kms::connector::{KmsConnector, KmsConnectorDriver};
+use crate::kms::connector::{self, KmsConnectorDriver};
 use crate::kms::objects::{self, KmsCrtc, KmsCrtcDriver, KmsObjectId, KmsObjects};
 use crate::kms::properties::KmsPropertyKind;
 
@@ -102,9 +102,9 @@ pub trait GraphicsAdapter: Sized + Debug {
     fn set_crtc(
         &mut self,
         objects: &KmsObjects<Self>,
-        crtc: &Mutex<KmsCrtc<Self::Crtc>>,
+        crtc: &Mutex<KmsCrtc<Self>>,
         mode: Option<drm_mode_modeinfo>,
-        framebuffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
+        framebuffer: Option<&objects::KmsFramebuffer<Self>>,
         damage: Damage,
     );
 
@@ -250,8 +250,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                                 .expect("removed framebuffers should be unset")
                         });
 
-                        let mode =
-                            fb.map(|fb| KmsConnector::<()>::modeinfo_for_size(fb.width, fb.height));
+                        let mode = fb.map(|fb| connector::modeinfo_for_size(fb.width, fb.height));
 
                         self.inner.adapter.set_crtc(
                             &self.inner.objects,

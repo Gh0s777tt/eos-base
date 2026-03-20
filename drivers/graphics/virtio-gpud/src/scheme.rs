@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
-use driver_graphics::kms::objects::{self, KmsCrtc, KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{KmsCrtc, KmsFramebuffer, KmsObjectId, KmsObjects};
 use driver_graphics::{Buffer as DrmBuffer, CursorPlane, Damage, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{
     drm_mode_modeinfo, DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_CAP_DUMB_BUFFER,
@@ -405,9 +405,9 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     fn set_crtc(
         &mut self,
         objects: &KmsObjects<Self>,
-        crtc: &Mutex<KmsCrtc<Self::Crtc>>,
+        crtc: &Mutex<KmsCrtc<Self>>,
         mode: Option<drm_mode_modeinfo>,
-        framebuffer: Option<&objects::KmsFramebuffer<Self::Framebuffer, Self::Buffer>>,
+        framebuffer: Option<&KmsFramebuffer<Self>>,
         damage: Damage,
     ) {
         futures::executor::block_on(async {
