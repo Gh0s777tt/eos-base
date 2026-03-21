@@ -5,9 +5,8 @@ use std::convert::{TryFrom, TryInto};
 use std::{cmp, io, mem, ptr};
 
 use drm::buffer::{Buffer, DrmFourcc};
-use drm::control::dumbbuffer::{DumbBuffer, DumbMapping};
 use drm::control::{connector, crtc, framebuffer, ClipRect, Device, Mode};
-use graphics_ipc::V2GraphicsHandle;
+use graphics_ipc::{CpuBackedBuffer, V2GraphicsHandle};
 use orbclient::FONT;
 
 #[derive(Debug, Copy, Clone)]
@@ -55,8 +54,7 @@ pub struct V2DisplayMap {
     connector: connector::Handle,
     crtc: crtc::Handle,
     fb: framebuffer::Handle,
-    pub buffer: DumbBuffer,
-    mapping: DumbMapping<'static>,
+    pub buffer: CpuBackedBuffer,
 }
 
 impl V2DisplayMap {
@@ -75,17 +73,15 @@ impl V2DisplayMap {
                 .possible_crtcs(),
         )[0];
 
-        let mut buffer = display_handle.create_dumb_buffer(
+        let buffer = CpuBackedBuffer::new(
+            &display_handle,
             (width.into(), height.into()),
             DrmFourcc::Argb8888,
             32,
         )?;
-        let fb = display_handle.add_framebuffer(&buffer, 32, 32)?;
+        let fb = display_handle.add_framebuffer(buffer.buffer(), 32, 32)?;
 
         display_handle.set_crtc(crtc, Some(fb), (0, 0), &[connector], Some(mode))?;
-
-        let map = display_handle.map_dumb_buffer(&mut buffer)?;
-        let map = unsafe { mem::transmute::<DumbMapping<'_>, DumbMapping<'static>>(map) };
 
         Ok(Self {
             display_handle,
@@ -93,22 +89,31 @@ impl V2DisplayMap {
             crtc,
             fb,
             buffer,
-            mapping: map,
         })
     }
 
     unsafe fn console_map(&mut self) -> DisplayMap {
+        let size = self.buffer.buffer().size();
+        let shadow_buf = self.buffer.shadow_buf();
+
         DisplayMap {
             offscreen: ptr::slice_from_raw_parts_mut(
-                self.mapping.as_mut_ptr() as *mut u32,
-                self.mapping.len() / 4,
+                shadow_buf.as_mut_ptr() as *mut u32,
+                shadow_buf.len() / 4,
             ),
-            width: self.buffer.size().0 as usize,
-            height: self.buffer.size().1 as usize,
+            width: size.0 as usize,
+            height: size.1 as usize,
         }
     }
 
-    pub fn dirty_fb(&self, damage: Damage) -> io::Result<()> {
+    pub fn dirty_fb(&mut self, damage: Damage) -> io::Result<()> {
+        let pitch = self.buffer.buffer().pitch();
+        self.buffer
+            .sync_range((damage.y..damage.y + damage.height).map(|row| {
+                let start = (row * pitch + damage.x * 4) as usize;
+                start..start + damage.width as usize * 4
+            }));
+
         self.display_handle.dirty_framebuffer(
             self.fb,
             &[ClipRect::new(
@@ -365,28 +370,30 @@ impl TextScreen {
             }
         }
 
-        let mut new_buffer = map.display_handle.create_dumb_buffer(
+        let mut new_buffer = CpuBackedBuffer::new(
+            &map.display_handle,
             (u32::from(mode.size().0), u32::from(mode.size().1)),
             DrmFourcc::Argb8888,
             32,
         )?;
-        let new_fb = map.display_handle.add_framebuffer(&new_buffer, 24, 32)?;
+        let new_fb = map
+            .display_handle
+            .add_framebuffer(new_buffer.buffer(), 24, 32)?;
 
-        let new_mapping = map.display_handle.map_dumb_buffer(&mut new_buffer)?;
-        let mut new_mapping =
-            unsafe { mem::transmute::<DumbMapping<'_>, DumbMapping<'static>>(new_mapping) };
-
-        new_mapping.fill(0);
+        new_buffer.shadow_buf().fill(0);
 
         {
             let old_map = unsafe { &mut map.console_map() };
+
+            let new_size = new_buffer.buffer().size();
+            let new_shadow_buf = new_buffer.shadow_buf();
             let new_map = &mut DisplayMap {
                 offscreen: ptr::slice_from_raw_parts_mut(
-                    new_mapping.as_mut_ptr() as *mut u32,
-                    new_mapping.len() / 4,
+                    new_shadow_buf.as_mut_ptr() as *mut u32,
+                    new_shadow_buf.len() / 4,
                 ),
-                width: new_buffer.size().0 as usize,
-                height: new_buffer.size().1 as usize,
+                width: new_size.0 as usize,
+                height: new_size.1 as usize,
             };
 
             if new_map.height >= old_map.height {
@@ -406,9 +413,9 @@ impl TextScreen {
         }
 
         let old_buffer = mem::replace(&mut map.buffer, new_buffer);
-        let old_fb = mem::replace(&mut map.fb, new_fb);
-        map.mapping = new_mapping;
+        old_buffer.destroy(&map.display_handle)?;
 
+        let old_fb = mem::replace(&mut map.fb, new_fb);
         map.display_handle.set_crtc(
             map.crtc,
             Some(map.fb),
@@ -416,8 +423,6 @@ impl TextScreen {
             &[map.connector],
             Some(mode),
         )?;
-
-        let _ = map.display_handle.destroy_dumb_buffer(old_buffer);
         let _ = map.display_handle.destroy_framebuffer(old_fb);
 
         Ok(())

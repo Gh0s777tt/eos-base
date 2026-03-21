@@ -39,8 +39,8 @@ impl Display {
             Ok(map) => {
                 log::debug!(
                     "fbcond: Mapped new display with size {}x{}",
-                    map.buffer.size().0,
-                    map.buffer.size().1,
+                    map.buffer.buffer().size().0,
+                    map.buffer.buffer().size().1,
                 );
                 self.map = Some(map)
             }
@@ -59,12 +59,12 @@ impl Display {
         {
             Ok(mode) => mode,
             Err(err) => {
-                eprintln!("fbbootlogd: failed to get display size: {}", err);
+                eprintln!("fbcond: failed to get display size: {}", err);
                 return;
             }
         };
 
-        if (u32::from(mode.size().0), u32::from(mode.size().1)) != map.buffer.size() {
+        if (u32::from(mode.size().0), u32::from(mode.size().1)) != map.buffer.buffer().size() {
             match text_screen.resize(map, mode) {
                 Ok(()) => eprintln!("fbcond: mapped display"),
                 Err(err) => {
@@ -76,7 +76,7 @@ impl Display {
     }
 
     pub fn sync_rect(&mut self, damage: Damage) {
-        if let Some(map) = &self.map {
+        if let Some(map) = &mut self.map {
             map.dirty_fb(damage).unwrap();
         }
     }
