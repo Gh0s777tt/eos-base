@@ -1,5 +1,9 @@
+use std::ops::Range;
+
 use common::io::{Io, MmioPtr};
+use range_alloc::RangeAllocator;
 use syscall::error::Result;
+use syscall::{Error, EIO};
 
 use super::MmioRegion;
 
@@ -27,6 +31,47 @@ pub struct Plane {
 }
 
 impl Plane {
+    pub fn modeset(&mut self, alloc_buffers: &mut RangeAllocator<u32>) -> syscall::Result<()> {
+        // FIXME handle runtime buffer reconfiguration
+        //TODO: enable DBUF if more buffers needed
+        //TODO: more blocks would mean better power usage
+        // Minimum is 8 blocks for linear planes, 160 blocks is recommended for pre-OS init
+        let buffer_size = 160;
+        let buffer = alloc_buffers.allocate_range(buffer_size).map_err(|err| {
+            log::warn!(
+                "failed to allocate {} buffer blocks: {:?}",
+                buffer_size,
+                err
+            );
+            Error::new(EIO)
+        })?;
+        self.buf_cfg.write(buffer.start | (buffer.end << 16));
+
+        //TODO: correct watermark calculation
+        self.wm[0].write(PLANE_WM_ENABLE | (2 << PLANE_WM_LINES_SHIFT) | buffer.len() as u32);
+        for i in 1..self.wm.len() {
+            self.wm[i].writef(PLANE_WM_ENABLE, false);
+        }
+        self.wm_trans.writef(PLANE_WM_ENABLE, false);
+
+        Ok(())
+    }
+
+    pub fn set_framebuffer(&mut self, stride_16: u32, surf: Range<u32>, width: u32, height: u32) {
+        self.size.write((width - 1) | ((height - 1) << 16));
+        self.stride.write(stride_16);
+
+        self.surf.write(surf.start);
+
+        // Disable gamma
+        if let Some(color_ctl) = &mut self.color_ctl {
+            color_ctl.write(self.color_ctl_gamma_disable);
+        }
+
+        //TODO: more PLANE_CTL bits
+        self.ctl.write(PLANE_CTL_ENABLE | self.ctl_source_rgb_8888);
+    }
+
     pub fn dump(&self) {
         eprint!("Plane {}", self.name);
         eprint!(" buf_cfg {:08X}", self.buf_cfg.read());

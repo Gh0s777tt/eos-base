@@ -747,30 +747,11 @@ impl Device {
                 // Configure and enable planes
                 //TODO: THIS IS HACKY
                 if let Some(plane) = pipe.planes.first_mut() {
-                    //TODO: enable DBUF if more buffers needed
-                    //TODO: more blocks would mean better power usage
-                    // Minimum is 8 blocks for linear planes, 160 blocks is recommended for pre-OS init
-                    let buffer_size = 160;
-                    let buffer = self
-                        .alloc_buffers
-                        .allocate_range(buffer_size)
-                        .map_err(|err| {
-                            log::warn!(
-                                "failed to allocate {} buffer blocks: {:?}",
-                                buffer_size,
-                                err
-                            );
-                            Error::new(EIO)
-                        })?;
-                    plane.buf_cfg.write(buffer.start | (buffer.end << 16));
-
                     let width = timing.horizontal_active_pixels as u32;
                     let height = timing.vertical_active_lines as u32;
-                    plane.size.write((width - 1) | ((height - 1) << 16));
 
                     //TODO: documentation on this is not great
                     let stride_16 = (width + 15) / 16;
-                    plane.stride.write(stride_16);
                     let stride = stride_16 * 16;
 
                     //TODO: how is memory allocated for PLANE_SURF?
@@ -786,14 +767,6 @@ impl Device {
                             );
                             Error::new(EIO)
                         })?;
-                    plane.surf.write(surf.start);
-
-                    //TODO: correct watermark calculation
-                    plane.wm[0].write(PLANE_WM_ENABLE | (2 << PLANE_WM_LINES_SHIFT) | buffer_size);
-                    for i in 1..plane.wm.len() {
-                        plane.wm[i].writef(PLANE_WM_ENABLE, false);
-                    }
-                    plane.wm_trans.writef(PLANE_WM_ENABLE, false);
 
                     self.framebuffers.push(unsafe {
                         DeviceFb::new(
@@ -805,15 +778,8 @@ impl Device {
                         )
                     });
 
-                    // Disable gamma
-                    if let Some(color_ctl) = &mut plane.color_ctl {
-                        color_ctl.write(plane.color_ctl_gamma_disable);
-                    }
-
-                    //TODO: more PLANE_CTL bits
-                    plane
-                        .ctl
-                        .write(PLANE_CTL_ENABLE | plane.ctl_source_rgb_8888);
+                    plane.modeset(&mut self.alloc_buffers)?;
+                    plane.set_framebuffer(stride_16, surf, width, height);
                 }
 
                 //TODO: VGA and panel fitter steps?
