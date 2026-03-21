@@ -59,7 +59,7 @@ impl Display {
         {
             Ok(mode) => mode,
             Err(err) => {
-                eprintln!("fbbootlogd: failed to get display size: {}", err);
+                eprintln!("fbcond: failed to get display size: {}", err);
                 return;
             }
         };
