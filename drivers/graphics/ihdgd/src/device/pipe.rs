@@ -31,7 +31,8 @@ impl DeviceFb {
         clear: bool,
     ) -> Self {
         let virt = (gm.virt + surf as usize) as *mut u32;
-        let onscreen = ptr::slice_from_raw_parts_mut(virt, (stride * height) as usize);
+        let onscreen =
+            ptr::slice_from_raw_parts_mut(virt, (stride * height) as usize / size_of::<u32>());
         if clear {
             (&mut *onscreen).fill(0);
         }
@@ -51,11 +52,10 @@ impl DeviceFb {
         height: u32,
     ) -> syscall::Result<Self> {
         //TODO: documentation on this is not great
-        let stride_16 = (width + 15) / 16;
-        let stride = stride_16 * 16;
+        let stride = (width * 4).next_multiple_of(64);
 
         //TODO: how is memory allocated for PLANE_SURF?
-        let surf_size = (stride * height * 4).next_multiple_of(4096);
+        let surf_size = (stride * height).next_multiple_of(4096);
         let surf = alloc_surfaces.allocate_range(surf_size).map_err(|err| {
             log::warn!(
                 "failed to allocate surface of size {}: {:?}",
@@ -136,12 +136,12 @@ impl Plane {
         let size = self.size.read();
         let width = (size & 0xFFFF) + 1;
         let height = ((size >> 16) & 0xFFFF) + 1;
-        let stride_16 = self.stride.read() & 0x7FF;
+        let stride_64 = self.stride.read() & 0x7FF;
         //TODO: this will be wrong for tiled planes
-        let stride = stride_16 * 16;
+        let stride = stride_64 * 64;
         let surf = self.surf.read() & 0xFFFFF000;
         //TODO: read bits per pixel
-        let surf_size = (stride * height * 4).next_multiple_of(4096);
+        let surf_size = (stride * height).next_multiple_of(4096);
         alloc_surfaces
             .allocate_exact_range(surf..(surf + surf_size))
             .unwrap_or_else(|err| {
@@ -156,10 +156,10 @@ impl Plane {
 
     pub fn set_framebuffer(&mut self, fb: &DeviceFb) {
         //TODO: documentation on this is not great
-        let stride_16 = fb.stride / 16;
+        let stride_64 = fb.stride / 64;
 
         self.size.write((fb.width - 1) | ((fb.height - 1) << 16));
-        self.stride.write(stride_16);
+        self.stride.write(stride_64);
 
         self.surf.write(fb.surf);
 
