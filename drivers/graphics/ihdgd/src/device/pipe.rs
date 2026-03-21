@@ -43,6 +43,30 @@ impl DeviceFb {
             stride,
         }
     }
+
+    pub fn alloc(
+        gm: &MmioRegion,
+        alloc_surfaces: &mut RangeAllocator<u32>,
+        width: u32,
+        height: u32,
+    ) -> syscall::Result<Self> {
+        //TODO: documentation on this is not great
+        let stride_16 = (width + 15) / 16;
+        let stride = stride_16 * 16;
+
+        //TODO: how is memory allocated for PLANE_SURF?
+        let surf_size = (stride * height * 4).next_multiple_of(4096);
+        let surf = alloc_surfaces.allocate_range(surf_size).map_err(|err| {
+            log::warn!(
+                "failed to allocate surface of size {}: {:?}",
+                surf_size,
+                err
+            );
+            Error::new(EIO)
+        })?;
+
+        Ok(unsafe { DeviceFb::new(gm, surf.start, width, height, stride, true) })
+    }
 }
 
 pub struct Plane {

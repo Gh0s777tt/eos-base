@@ -719,26 +719,7 @@ impl Device {
                     let width = timing.horizontal_active_pixels as u32;
                     let height = timing.vertical_active_lines as u32;
 
-                    //TODO: documentation on this is not great
-                    let stride_16 = (width + 15) / 16;
-                    let stride = stride_16 * 16;
-
-                    //TODO: how is memory allocated for PLANE_SURF?
-                    let surf_size = (stride * height * 4).next_multiple_of(4096);
-                    let surf = self
-                        .alloc_surfaces
-                        .allocate_range(surf_size)
-                        .map_err(|err| {
-                            log::warn!(
-                                "failed to allocate surface of size {}: {:?}",
-                                surf_size,
-                                err
-                            );
-                            Error::new(EIO)
-                        })?;
-
-                    let fb =
-                        unsafe { DeviceFb::new(&self.gm, surf.start, width, height, stride, true) };
+                    let fb = DeviceFb::alloc(&self.gm, &mut self.alloc_surfaces, width, height)?;
 
                     plane.modeset(&mut self.alloc_buffers)?;
                     plane.set_framebuffer(&fb);
