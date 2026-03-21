@@ -127,7 +127,12 @@ impl Plane {
         unsafe { DeviceFb::new(gm, surf, width, height, stride, true) }
     }
 
-    pub fn set_framebuffer(&mut self, fb: &DeviceFb) {
+    pub fn set_framebuffer(&mut self, fb: Option<&DeviceFb>) {
+        let Some(fb) = fb else {
+            self.ctl.write(0); // Disable plane
+            return;
+        };
+
         //TODO: documentation on this is not great
         let stride_64 = fb.stride / 64;
 
