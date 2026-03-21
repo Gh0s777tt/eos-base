@@ -25,7 +25,6 @@ use self::pipe::*;
 mod power;
 use self::power::*;
 mod scheme;
-use self::scheme::*;
 mod transcoder;
 use self::transcoder::*;
 
@@ -433,40 +432,10 @@ impl Device {
         for pipe in self.pipes.iter() {
             for plane in pipe.planes.iter() {
                 if plane.ctl.readf(PLANE_CTL_ENABLE) {
-                    let buf_cfg = plane.buf_cfg.read();
-                    let buffer_start = buf_cfg & 0x7FF;
-                    let buffer_end = (buf_cfg >> 16) & 0x7FF;
-                    self.alloc_buffers
-                        .allocate_exact_range(buffer_start..(buffer_end + 1))
-                        .unwrap_or_else(|err| {
-                            panic!(
-                                "failed to allocate pre-existing buffer blocks {} to {}: {:?}",
-                                buffer_start, buffer_end, err
-                            );
-                        });
+                    plane.fetch_modeset(&mut self.alloc_buffers);
 
-                    let size = plane.size.read();
-                    let width = (size & 0xFFFF) + 1;
-                    let height = ((size >> 16) & 0xFFFF) + 1;
-                    let stride_16 = plane.stride.read() & 0x7FF;
-                    //TODO: this will be wrong for tiled planes
-                    let stride = stride_16 * 16;
-                    let surf = plane.surf.read() & 0xFFFFF000;
-                    //TODO: read bits per pixel
-                    let surf_size = (stride * height * 4).next_multiple_of(4096);
-                    self.alloc_surfaces.allocate_exact_range(surf .. (surf + surf_size)).unwrap_or_else(|err| {
-                        panic!("failed to allocate pre-existing surface at 0x{:x} of size {}: {:?}", surf, surf_size, err);
-                    });
-
-                    self.framebuffers.push(unsafe {
-                        DeviceFb::new(
-                            (self.gm.virt + surf as usize) as *mut u32,
-                            width as usize,
-                            height as usize,
-                            stride as usize,
-                            false,
-                        )
-                    });
+                    self.framebuffers
+                        .push(plane.fetch_framebuffer(&self.gm, &mut self.alloc_surfaces));
                 }
             }
         }
@@ -747,73 +716,15 @@ impl Device {
                 // Configure and enable planes
                 //TODO: THIS IS HACKY
                 if let Some(plane) = pipe.planes.first_mut() {
-                    //TODO: enable DBUF if more buffers needed
-                    //TODO: more blocks would mean better power usage
-                    // Minimum is 8 blocks for linear planes, 160 blocks is recommended for pre-OS init
-                    let buffer_size = 160;
-                    let buffer = self
-                        .alloc_buffers
-                        .allocate_range(buffer_size)
-                        .map_err(|err| {
-                            log::warn!(
-                                "failed to allocate {} buffer blocks: {:?}",
-                                buffer_size,
-                                err
-                            );
-                            Error::new(EIO)
-                        })?;
-                    plane.buf_cfg.write(buffer.start | (buffer.end << 16));
-
                     let width = timing.horizontal_active_pixels as u32;
                     let height = timing.vertical_active_lines as u32;
-                    plane.size.write((width - 1) | ((height - 1) << 16));
 
-                    //TODO: documentation on this is not great
-                    let stride_16 = (width + 15) / 16;
-                    plane.stride.write(stride_16);
-                    let stride = stride_16 * 16;
+                    let fb = DeviceFb::alloc(&self.gm, &mut self.alloc_surfaces, width, height)?;
 
-                    //TODO: how is memory allocated for PLANE_SURF?
-                    let surf_size = (stride * height * 4).next_multiple_of(4096);
-                    let surf = self
-                        .alloc_surfaces
-                        .allocate_range(surf_size)
-                        .map_err(|err| {
-                            log::warn!(
-                                "failed to allocate surface of size {}: {:?}",
-                                surf_size,
-                                err
-                            );
-                            Error::new(EIO)
-                        })?;
-                    plane.surf.write(surf.start);
+                    plane.modeset(&mut self.alloc_buffers)?;
+                    plane.set_framebuffer(&fb);
 
-                    //TODO: correct watermark calculation
-                    plane.wm[0].write(PLANE_WM_ENABLE | (2 << PLANE_WM_LINES_SHIFT) | buffer_size);
-                    for i in 1..plane.wm.len() {
-                        plane.wm[i].writef(PLANE_WM_ENABLE, false);
-                    }
-                    plane.wm_trans.writef(PLANE_WM_ENABLE, false);
-
-                    self.framebuffers.push(unsafe {
-                        DeviceFb::new(
-                            (self.gm.virt + surf.start as usize) as *mut u32,
-                            width as usize,
-                            height as usize,
-                            stride as usize,
-                            true,
-                        )
-                    });
-
-                    // Disable gamma
-                    if let Some(color_ctl) = &mut plane.color_ctl {
-                        color_ctl.write(plane.color_ctl_gamma_disable);
-                    }
-
-                    //TODO: more PLANE_CTL bits
-                    plane
-                        .ctl
-                        .write(PLANE_CTL_ENABLE | plane.ctl_source_rgb_8888);
+                    self.framebuffers.push(fb);
                 }
 
                 //TODO: VGA and panel fitter steps?

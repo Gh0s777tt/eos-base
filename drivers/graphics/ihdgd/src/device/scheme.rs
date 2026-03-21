@@ -11,6 +11,7 @@ use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
 use drm_sys::{DRM_CAP_DUMB_BUFFER, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT};
 use syscall::{error::EINVAL, PAGE_SIZE};
 
+use super::pipe::DeviceFb;
 use super::Device;
 
 #[derive(Debug)]
@@ -114,9 +115,9 @@ impl GraphicsAdapter for Device {
                 for row in 0..framebuffer.height {
                     unsafe {
                         ptr::write_bytes(
-                            onscreen_ptr.add(row * framebuffer.stride),
+                            onscreen_ptr.add((row * framebuffer.stride) as usize),
                             0,
-                            framebuffer.width,
+                            framebuffer.width as usize,
                         );
                     }
                 }
@@ -132,34 +133,6 @@ impl GraphicsAdapter for Device {
 
     fn handle_cursor(&mut self, _cursor: &CursorPlane<Self::Buffer>, _dirty_fb: bool) {
         unimplemented!("ihdgd does not support this function");
-    }
-}
-
-pub struct DeviceFb {
-    pub onscreen: *mut [u32],
-    pub width: usize,
-    pub height: usize,
-    pub stride: usize,
-}
-
-impl DeviceFb {
-    pub unsafe fn new(
-        virt: *mut u32,
-        width: usize,
-        height: usize,
-        stride: usize,
-        clear: bool,
-    ) -> Self {
-        let onscreen = ptr::slice_from_raw_parts_mut(virt, stride * height);
-        if clear {
-            (&mut *onscreen).fill(0);
-        }
-        Self {
-            onscreen,
-            width,
-            height,
-            stride,
-        }
     }
 }
 
@@ -227,7 +200,7 @@ impl DumbFb {
             unsafe {
                 ptr::copy(
                     offscreen_ptr.add(row * self.width + start_x),
-                    onscreen_ptr.add(row * framebuffer.stride + start_x),
+                    onscreen_ptr.add(row * framebuffer.stride as usize + start_x),
                     w,
                 );
             }

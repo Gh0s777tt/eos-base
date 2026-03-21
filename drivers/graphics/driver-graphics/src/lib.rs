@@ -292,10 +292,6 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
                             .handle_cursor(&vt_state.cursor_plane, true);
                     }
                 }
-
-                VtEventKind::Resize => {
-                    log::warn!("driver-graphics: resize is not implemented yet")
-                }
             }
         }
     }

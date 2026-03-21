@@ -1,5 +1,9 @@
+use std::ptr;
+
 use common::io::{Io, MmioPtr};
+use range_alloc::RangeAllocator;
 use syscall::error::Result;
+use syscall::{Error, EIO};
 
 use super::MmioRegion;
 
@@ -7,6 +11,63 @@ pub const PLANE_CTL_ENABLE: u32 = 1 << 31;
 
 pub const PLANE_WM_ENABLE: u32 = 1 << 31;
 pub const PLANE_WM_LINES_SHIFT: u32 = 14;
+
+#[derive(Debug)]
+pub struct DeviceFb {
+    pub onscreen: *mut [u32],
+    pub surf: u32,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+}
+
+impl DeviceFb {
+    pub unsafe fn new(
+        gm: &MmioRegion,
+        surf: u32,
+        width: u32,
+        height: u32,
+        stride: u32,
+        clear: bool,
+    ) -> Self {
+        let virt = (gm.virt + surf as usize) as *mut u32;
+        let onscreen = ptr::slice_from_raw_parts_mut(virt, (stride * height) as usize);
+        if clear {
+            (&mut *onscreen).fill(0);
+        }
+        Self {
+            onscreen,
+            surf,
+            width,
+            height,
+            stride,
+        }
+    }
+
+    pub fn alloc(
+        gm: &MmioRegion,
+        alloc_surfaces: &mut RangeAllocator<u32>,
+        width: u32,
+        height: u32,
+    ) -> syscall::Result<Self> {
+        //TODO: documentation on this is not great
+        let stride_16 = (width + 15) / 16;
+        let stride = stride_16 * 16;
+
+        //TODO: how is memory allocated for PLANE_SURF?
+        let surf_size = (stride * height * 4).next_multiple_of(4096);
+        let surf = alloc_surfaces.allocate_range(surf_size).map_err(|err| {
+            log::warn!(
+                "failed to allocate surface of size {}: {:?}",
+                surf_size,
+                err
+            );
+            Error::new(EIO)
+        })?;
+
+        Ok(unsafe { DeviceFb::new(gm, surf.start, width, height, stride, true) })
+    }
+}
 
 pub struct Plane {
     pub name: &'static str,
@@ -27,6 +88,90 @@ pub struct Plane {
 }
 
 impl Plane {
+    pub fn fetch_modeset(&self, alloc_buffers: &mut RangeAllocator<u32>) {
+        let buf_cfg = self.buf_cfg.read();
+        let buffer_start = buf_cfg & 0x7FF;
+        let buffer_end = (buf_cfg >> 16) & 0x7FF;
+        alloc_buffers
+            .allocate_exact_range(buffer_start..(buffer_end + 1))
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to allocate pre-existing buffer blocks {} to {}: {:?}",
+                    buffer_start, buffer_end, err
+                );
+            });
+    }
+
+    pub fn modeset(&mut self, alloc_buffers: &mut RangeAllocator<u32>) -> syscall::Result<()> {
+        // FIXME handle runtime buffer reconfiguration
+        //TODO: enable DBUF if more buffers needed
+        //TODO: more blocks would mean better power usage
+        // Minimum is 8 blocks for linear planes, 160 blocks is recommended for pre-OS init
+        let buffer_size = 160;
+        let buffer = alloc_buffers.allocate_range(buffer_size).map_err(|err| {
+            log::warn!(
+                "failed to allocate {} buffer blocks: {:?}",
+                buffer_size,
+                err
+            );
+            Error::new(EIO)
+        })?;
+        self.buf_cfg.write(buffer.start | (buffer.end << 16));
+
+        //TODO: correct watermark calculation
+        self.wm[0].write(PLANE_WM_ENABLE | (2 << PLANE_WM_LINES_SHIFT) | buffer.len() as u32);
+        for i in 1..self.wm.len() {
+            self.wm[i].writef(PLANE_WM_ENABLE, false);
+        }
+        self.wm_trans.writef(PLANE_WM_ENABLE, false);
+
+        Ok(())
+    }
+
+    pub fn fetch_framebuffer(
+        &self,
+        gm: &MmioRegion,
+        alloc_surfaces: &mut RangeAllocator<u32>,
+    ) -> DeviceFb {
+        let size = self.size.read();
+        let width = (size & 0xFFFF) + 1;
+        let height = ((size >> 16) & 0xFFFF) + 1;
+        let stride_16 = self.stride.read() & 0x7FF;
+        //TODO: this will be wrong for tiled planes
+        let stride = stride_16 * 16;
+        let surf = self.surf.read() & 0xFFFFF000;
+        //TODO: read bits per pixel
+        let surf_size = (stride * height * 4).next_multiple_of(4096);
+        alloc_surfaces
+            .allocate_exact_range(surf..(surf + surf_size))
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to allocate pre-existing surface at 0x{:x} of size {}: {:?}",
+                    surf, surf_size, err
+                );
+            });
+
+        unsafe { DeviceFb::new(gm, surf, width, height, stride, true) }
+    }
+
+    pub fn set_framebuffer(&mut self, fb: &DeviceFb) {
+        //TODO: documentation on this is not great
+        let stride_16 = fb.stride / 16;
+
+        self.size.write((fb.width - 1) | ((fb.height - 1) << 16));
+        self.stride.write(stride_16);
+
+        self.surf.write(fb.surf);
+
+        // Disable gamma
+        if let Some(color_ctl) = &mut self.color_ctl {
+            color_ctl.write(self.color_ctl_gamma_disable);
+        }
+
+        //TODO: more PLANE_CTL bits
+        self.ctl.write(PLANE_CTL_ENABLE | self.ctl_source_rgb_8888);
+    }
+
     pub fn dump(&self) {
         eprint!("Plane {}", self.name);
         eprint!(" buf_cfg {:08X}", self.buf_cfg.read());
