@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::ptr;
 
 use common::io::{Io, MmioPtr};
 use range_alloc::RangeAllocator;
@@ -11,6 +11,39 @@ pub const PLANE_CTL_ENABLE: u32 = 1 << 31;
 
 pub const PLANE_WM_ENABLE: u32 = 1 << 31;
 pub const PLANE_WM_LINES_SHIFT: u32 = 14;
+
+#[derive(Debug)]
+pub struct DeviceFb {
+    pub onscreen: *mut [u32],
+    pub surf: u32,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+}
+
+impl DeviceFb {
+    pub unsafe fn new(
+        gm: &MmioRegion,
+        surf: u32,
+        width: u32,
+        height: u32,
+        stride: u32,
+        clear: bool,
+    ) -> Self {
+        let virt = (gm.virt + surf as usize) as *mut u32;
+        let onscreen = ptr::slice_from_raw_parts_mut(virt, (stride * height) as usize);
+        if clear {
+            (&mut *onscreen).fill(0);
+        }
+        Self {
+            onscreen,
+            surf,
+            width,
+            height,
+            stride,
+        }
+    }
+}
 
 pub struct Plane {
     pub name: &'static str,
@@ -57,11 +90,14 @@ impl Plane {
         Ok(())
     }
 
-    pub fn set_framebuffer(&mut self, stride_16: u32, surf: Range<u32>, width: u32, height: u32) {
-        self.size.write((width - 1) | ((height - 1) << 16));
+    pub fn set_framebuffer(&mut self, fb: &DeviceFb) {
+        //TODO: documentation on this is not great
+        let stride_16 = fb.stride / 16;
+
+        self.size.write((fb.width - 1) | ((fb.height - 1) << 16));
         self.stride.write(stride_16);
 
-        self.surf.write(surf.start);
+        self.surf.write(fb.surf);
 
         // Disable gamma
         if let Some(color_ctl) = &mut self.color_ctl {

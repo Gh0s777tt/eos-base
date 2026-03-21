@@ -25,7 +25,6 @@ use self::pipe::*;
 mod power;
 use self::power::*;
 mod scheme;
-use self::scheme::*;
 mod transcoder;
 use self::transcoder::*;
 
@@ -459,13 +458,7 @@ impl Device {
                     });
 
                     self.framebuffers.push(unsafe {
-                        DeviceFb::new(
-                            (self.gm.virt + surf as usize) as *mut u32,
-                            width as usize,
-                            height as usize,
-                            stride as usize,
-                            false,
-                        )
+                        DeviceFb::new(&self.gm, surf, width, height, stride, false)
                     });
                 }
             }
@@ -768,18 +761,13 @@ impl Device {
                             Error::new(EIO)
                         })?;
 
-                    self.framebuffers.push(unsafe {
-                        DeviceFb::new(
-                            (self.gm.virt + surf.start as usize) as *mut u32,
-                            width as usize,
-                            height as usize,
-                            stride as usize,
-                            true,
-                        )
-                    });
+                    let fb =
+                        unsafe { DeviceFb::new(&self.gm, surf.start, width, height, stride, true) };
 
                     plane.modeset(&mut self.alloc_buffers)?;
-                    plane.set_framebuffer(stride_16, surf, width, height);
+                    plane.set_framebuffer(&fb);
+
+                    self.framebuffers.push(fb);
                 }
 
                 //TODO: VGA and panel fitter steps?
