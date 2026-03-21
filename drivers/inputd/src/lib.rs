@@ -165,7 +165,7 @@ impl DisplayHandle {
 
     pub fn read_vt_event(&mut self) -> io::Result<Option<VtEvent>> {
         let mut event = VtEvent {
-            kind: VtEventKind::Resize,
+            kind: VtEventKind::Activate,
             vt: usize::MAX,
             width: u32::MAX,
             height: u32::MAX,
@@ -212,7 +212,6 @@ impl ControlHandle {
 #[repr(usize)]
 pub enum VtEventKind {
     Activate,
-    Resize,
 }
 
 #[derive(Debug)]

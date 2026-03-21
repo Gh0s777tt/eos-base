@@ -443,33 +443,6 @@ impl SchemeSync for InputScheme {
                     }
                 },
 
-                EventOption::Resize(resize_event) => {
-                    for handle in self.handles.values_mut() {
-                        match handle {
-                            Handle::Display {
-                                pending,
-                                notified,
-                                device,
-                                ..
-                            } => {
-                                if self.display.as_ref() == Some(device) {
-                                    pending.push(VtEvent {
-                                        kind: VtEventKind::Resize,
-                                        vt: self.active_vt.unwrap(),
-                                        width: resize_event.width,
-                                        height: resize_event.height,
-
-                                        // TODO(andypython): Figure out how to get the stride.
-                                        stride: resize_event.width,
-                                    });
-                                    *notified = false;
-                                }
-                            }
-                            _ => continue,
-                        }
-                    }
-                }
-
                 _ => continue,
             }
 

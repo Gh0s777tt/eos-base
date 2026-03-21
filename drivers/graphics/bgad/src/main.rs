@@ -48,8 +48,6 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
         display: ProducerHandle::new().ok(),
     };
 
-    scheme.update_size();
-
     register_sync_scheme(&socket, "bga", &mut scheme).expect("bgad: failed to register bga scheme");
 
     daemon.ready();

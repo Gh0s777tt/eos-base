@@ -13,20 +13,6 @@ pub struct BgaScheme {
     pub display: Option<ProducerHandle>,
 }
 
-impl BgaScheme {
-    pub fn update_size(&mut self) {
-        if let Some(ref mut display) = self.display {
-            let _ = display.write_event(
-                orbclient::ResizeEvent {
-                    width: self.bga.width() as u32,
-                    height: self.bga.height() as u32,
-                }
-                .to_event(),
-            );
-        }
-    }
-}
-
 const SCHEME_ROOT_ID: usize = 1;
 
 impl SchemeSync for BgaScheme {
@@ -97,8 +83,6 @@ impl SchemeSync for BgaScheme {
         };
 
         self.bga.set_size(width, height);
-
-        self.update_size();
 
         Ok(buf.len())
     }
