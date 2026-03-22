@@ -1,37 +1,33 @@
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use xhcid_interface::{PortId, XhciClientHandle};
 
 fn main() {
     common::init();
-    let matches = App::new("usbctl")
+    let matches = Command::new("usbctl")
         .arg(
-            Arg::with_name("SCHEME")
-                .takes_value(true)
+            Arg::new("SCHEME")
+                .num_args(1)
                 .required(true)
                 .long("scheme")
-                .short("s"),
+                .short('s'),
         )
         .subcommand(
-            App::new("port")
-                .arg(Arg::with_name("PORT").takes_value(true).required(true))
-                .subcommand(App::new("status"))
+            Command::new("port")
+                .arg(Arg::new("PORT").num_args(1).required(true))
+                .subcommand(Command::new("status"))
                 .subcommand(
-                    App::new("endpoint")
-                        .arg(
-                            Arg::with_name("ENDPOINT_NUM")
-                                .takes_value(true)
-                                .required(true),
-                        )
-                        .subcommand(App::new("status")),
+                    Command::new("endpoint")
+                        .arg(Arg::new("ENDPOINT_NUM").num_args(1).required(true))
+                        .subcommand(Command::new("status")),
                 ),
         )
         .get_matches();
 
-    let scheme = matches.value_of("SCHEME").expect("no scheme");
+    let scheme = matches.get_one::<String>("SCHEME").expect("no scheme");
 
     if let Some(port_scmd_matches) = matches.subcommand_matches("port") {
         let port = port_scmd_matches
-            .value_of("PORT")
+            .get_one::<String>("PORT")
             .expect("invalid utf-8 for PORT argument")
             .parse::<PortId>()
             .expect("expected PORT ID");
@@ -44,7 +40,7 @@ fn main() {
             println!("{}", state.as_str());
         } else if let Some(endp_scmd_matches) = port_scmd_matches.subcommand_matches("endpoint") {
             let endp_num = endp_scmd_matches
-                .value_of("ENDPOINT_NUM")
+                .get_one::<String>("ENDPOINT_NUM")
                 .expect("no valid ENDPOINT_NUM")
                 .parse::<u8>()
                 .expect("expected ENDPOINT_NUM to be an 8-bit integer");

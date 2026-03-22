@@ -75,6 +75,7 @@ exclude = ["bootstrap"]
 [workspace.dependencies]
 anyhow = "1"
 bitflags = "2"
+clap = "4"
 drm = "0.14.2"
 drm-sys = "0.8.1"
 libc = "0.2.181"
