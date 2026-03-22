@@ -11,7 +11,7 @@ log.workspace = true
 thiserror = "1.0.40"
 static_assertions.workspace = true
 futures = { version = "0.3.28", features = ["executor"] }
-spin = "*"
+spin.workspace = true
 
 redox_event.workspace = true
 redox_syscall = { workspace = true, features = ["std"] }
