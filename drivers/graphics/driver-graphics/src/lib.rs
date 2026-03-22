@@ -112,8 +112,7 @@ pub trait GraphicsAdapter: Sized + Debug {
 }
 
 pub trait Buffer: Debug {
-    fn width(&self) -> u32;
-    fn height(&self) -> u32;
+    fn size(&self) -> usize;
 }
 
 pub trait Framebuffer: Debug {}
@@ -868,10 +867,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     }
 
                     // FIXME use a better scheme for creating map offsets
-                    assert!(
-                        ((buffers[&buffer_id].width() * buffers[&buffer_id].height() * 4) as usize)
-                            < MAP_FAKE_OFFSET_MULTIPLIER
-                    );
+                    assert!(buffers[&buffer_id].size() < MAP_FAKE_OFFSET_MULTIPLIER);
 
                     data.set_offset((buffer_id as usize * MAP_FAKE_OFFSET_MULTIPLIER) as u64);
 

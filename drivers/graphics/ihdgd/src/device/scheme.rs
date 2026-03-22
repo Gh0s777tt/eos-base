@@ -175,12 +175,8 @@ impl Drop for DumbFb {
 }
 
 impl Buffer for DumbFb {
-    fn width(&self) -> u32 {
-        self.width as u32
-    }
-
-    fn height(&self) -> u32 {
-        self.height as u32
+    fn size(&self) -> usize {
+        self.width * self.height * 4
     }
 }
 

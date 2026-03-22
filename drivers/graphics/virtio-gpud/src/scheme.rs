@@ -57,12 +57,8 @@ impl<'a> fmt::Debug for VirtGpuFramebuffer<'a> {
 }
 
 impl DrmBuffer for VirtGpuFramebuffer<'_> {
-    fn width(&self) -> u32 {
-        self.width
-    }
-
-    fn height(&self) -> u32 {
-        self.height
+    fn size(&self) -> usize {
+        (self.width * self.height * 4) as usize
     }
 }
 
