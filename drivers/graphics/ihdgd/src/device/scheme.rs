@@ -75,8 +75,8 @@ impl GraphicsAdapter for Device {
         // FIXME fetch EDID
     }
 
-    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
-        DumbFb::new(width as usize, height as usize)
+    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> (Self::Buffer, u32) {
+        (DumbFb::new(width as usize, height as usize), width * 4)
     }
 
     fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8 {

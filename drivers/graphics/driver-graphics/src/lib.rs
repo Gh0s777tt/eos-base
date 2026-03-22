@@ -94,7 +94,7 @@ pub trait GraphicsAdapter: Sized + Debug {
 
     fn probe_connector(&mut self, objects: &mut KmsObjects<Self>, id: KmsObjectId);
 
-    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer;
+    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> (Self::Buffer, u32);
     fn map_dumb_buffer(&mut self, buffer: &Self::Buffer) -> *mut u8;
 
     fn create_framebuffer(&mut self, buffer: &Self::Buffer) -> Self::Framebuffer;
@@ -842,17 +842,19 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_CREATE_DUMB => ipc::DrmModeCreateDumb::with(payload, |mut data| {
-                    if data.bpp() != 32 {
+                    if data.bpp() != 32 || data.flags() != 0 {
                         return Err(Error::new(EINVAL));
                     }
 
-                    let buffer = self.adapter.create_dumb_buffer(data.width(), data.height());
+                    let (buffer, pitch) =
+                        self.adapter.create_dumb_buffer(data.width(), data.height());
+
+                    data.set_pitch(pitch);
+                    data.set_size(buffer.size() as u64);
 
                     *next_id += 1;
                     buffers.insert(*next_id, Arc::new(buffer));
                     data.set_handle(*next_id as u32);
-                    data.set_pitch(data.width() * 4);
-                    data.set_size(u64::from(data.width()) * u64::from(data.height()) * 4);
                     Ok(0)
                 }),
                 ipc::MODE_MAP_DUMB => ipc::DrmModeMapDumb::with(payload, |mut data| {

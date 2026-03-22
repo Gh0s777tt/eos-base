@@ -247,12 +247,12 @@ impl VirtGpuAdapter<'_> {
     fn disable_cursor(&mut self) {
         if self.hidden_cursor.is_none() {
             let (width, height) = self.hw_cursor_size().unwrap();
-            let cursor = self.create_dumb_buffer(width, height);
+            let (cursor, stride) = self.create_dumb_buffer(width, height);
             unsafe {
                 core::ptr::write_bytes(
                     cursor.sgl.as_ptr() as *mut u8,
                     0,
-                    (width * height * 4) as usize,
+                    (stride * height) as usize,
                 );
             }
             self.hidden_cursor = Some(Arc::new(cursor));
@@ -332,7 +332,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         });
     }
 
-    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
+    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> (Self::Buffer, u32) {
         futures::executor::block_on(async {
             let bpp = 32;
             let fb_size = width as usize * height as usize * bpp / 8;
@@ -381,13 +381,16 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             self.control_queue.send(command).await;
             assert_eq!(header.ty, CommandTy::RespOkNodata);
 
-            VirtGpuFramebuffer {
-                queue: self.control_queue.clone(),
-                id: res_id,
-                sgl,
-                width,
-                height,
-            }
+            (
+                VirtGpuFramebuffer {
+                    queue: self.control_queue.clone(),
+                    id: res_id,
+                    sgl,
+                    width,
+                    height,
+                },
+                width * 4,
+            )
         })
     }
 

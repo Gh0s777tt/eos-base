@@ -80,8 +80,11 @@ impl GraphicsAdapter for FbAdapter {
         connector.update_from_size(connector.driver_data.width, connector.driver_data.height);
     }
 
-    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> Self::Buffer {
-        GraphicScreen::new(width as usize, height as usize)
+    fn create_dumb_buffer(&mut self, width: u32, height: u32) -> (Self::Buffer, u32) {
+        (
+            GraphicScreen::new(width as usize, height as usize),
+            width * 4,
+        )
     }
 
     fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8 {
