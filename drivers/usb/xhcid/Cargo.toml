@@ -17,15 +17,15 @@ bitflags.workspace = true
 chashmap = "2.2.2"
 crossbeam-channel = "0.4"
 futures = "0.3"
-plain = "0.2"
+plain.workspace = true
 lazy_static = "1.4"
 log.workspace = true
 redox_event.workspace = true
 redox-scheme.workspace = true
 redox_syscall.workspace = true
 serde.workspace = true
-serde_json = "1"
-smallvec = { version = "1", features = ["serde"] }
+serde_json.workspace = true
+smallvec = { workspace = true, features = ["serde"] }
 thiserror = "1"
 toml.workspace = true
 

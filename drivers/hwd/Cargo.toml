@@ -5,9 +5,9 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-fdt = "0.1.5"
+fdt.workspace = true
 log.workspace = true
-ron = "0.8.1"
+ron.workspace = true
 libredox = { workspace = true, default-features = false, features = ["std", "call"] }
 
 amlserde = { path = "../amlserde" }

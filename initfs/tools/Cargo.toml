@@ -22,7 +22,7 @@ clap = {workspace = true, features = ["cargo"]}
 env_logger = "0.8"
 log.workspace = true
 pathdiff = "0.2.1"
-plain = "0.2"
+plain.workspace = true
 twox-hash = "1.6"
 
 redox-initfs = {path = ".."}

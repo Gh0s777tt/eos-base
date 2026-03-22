@@ -14,7 +14,7 @@ redox_syscall.workspace = true
 redox-scheme.workspace = true
 libredox = { workspace = true, features = ["call"] }
 indexmap = "2.5.0"
-slab = "0.4.9"
+slab.workspace = true
 
 [lints]
 workspace = true

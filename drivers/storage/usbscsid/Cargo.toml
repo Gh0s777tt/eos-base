@@ -11,7 +11,7 @@ license = "MIT"
 [dependencies]
 base64 = "0.11" # Only for debugging
 libredox.workspace = true
-plain = "0.2"
+plain.workspace = true
 driver-block = { path = "../driver-block" }
 daemon = { path = "../../../daemon" }
 redox_event.workspace = true

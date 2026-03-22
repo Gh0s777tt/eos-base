@@ -14,12 +14,12 @@ path = "src/lib.rs"
 
 [dependencies]
 bincode = "1.2"
-fdt = "0.1.5"
+fdt.workspace = true
 libc.workspace = true
 log.workspace = true
 pci_types = "0.10.1"
-pico-args = { version = "0.5", features = ["combined-flags"] }
-plain = "0.2"
+pico-args = { workspace = true, features = ["combined-flags"] }
+plain.workspace = true
 redox-scheme.workspace = true
 redox_syscall.workspace = true
 serde.workspace = true
