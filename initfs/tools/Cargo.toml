@@ -18,7 +18,7 @@ path = "src/bin/dump.rs"
 
 [dependencies]
 anyhow.workspace = true
-clap = {version = "4", features = ["cargo"]}
+clap = {workspace = true, features = ["cargo"]}
 env_logger = "0.8"
 log.workspace = true
 pathdiff = "0.2.1"
