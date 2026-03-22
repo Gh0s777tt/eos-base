@@ -9,17 +9,17 @@ edition = "2018"
 
 [dependencies]
 acpi = { git = "https://github.com/jackpot51/acpi.git" }
+arrayvec = "0.7.6"
 log.workspace = true
 num-derive = "0.3"
 num-traits = "0.2"
-parking_lot = "0.12"
-plain = "0.2.3"
+parking_lot.workspace = true
+plain.workspace = true
 redox_syscall.workspace = true
 redox_event.workspace = true
 rustc-hash = "1.1.0"
 thiserror = "1"
-ron = "0.8.1"
-arrayvec = "0.7.6"
+ron.workspace = true
 serde.workspace = true
 
 amlserde = { path = "../amlserde" }

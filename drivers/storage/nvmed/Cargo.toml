@@ -5,15 +5,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arrayvec = "0.7"
 bitflags.workspace = true
 futures = "0.3"
 libredox.workspace = true
 log.workspace = true
-parking_lot = "0.12.1"
+parking_lot.workspace = true
 redox_event.workspace = true
 redox_syscall = { workspace = true, features = ["std"] }
-smallvec = "1"
+smallvec.workspace = true
 
 executor = { path = "../../executor" }
 common = { path = "../../common" }

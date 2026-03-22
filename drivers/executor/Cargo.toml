@@ -9,7 +9,7 @@ license = "MIT"
 [dependencies]
 log.workspace = true
 redox_event.workspace = true
-slab = "0.4.9"
+slab.workspace = true
 
 [lints]
 workspace = true

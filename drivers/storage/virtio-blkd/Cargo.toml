@@ -9,7 +9,7 @@ authors = ["Anhad Singh <andypython@protonmail.com>"]
 anyhow.workspace = true
 log.workspace = true
 thiserror = "1.0.40"
-static_assertions = "1.1.0"
+static_assertions.workspace = true
 futures = { version = "0.3.28", features = ["executor"] }
 spin = "*"
 

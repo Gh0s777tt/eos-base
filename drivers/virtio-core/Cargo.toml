@@ -6,7 +6,7 @@ edition = "2021"
 authors = ["Anhad Singh <andypython@protonmail.com>"]
 
 [dependencies]
-static_assertions = "1.1.0"
+static_assertions.workspace = true
 bitflags.workspace = true
 redox_syscall.workspace = true
 libredox.workspace = true

@@ -7,8 +7,7 @@ edition = "2021"
 [dependencies]
 bitbang-hal = "0.3"
 drm-sys.workspace = true
-#TODO: edid is abandoned, fork it an maintain?
-edid = "0.3.0"
+edid.workspace = true #TODO: edid is abandoned, fork it and maintain?
 #TODO: waiting for bitbang-hal to update to embedded-hal 1.0
 embedded-hal = { version = "0.2.7", features = ["unproven"] }
 log.workspace = true

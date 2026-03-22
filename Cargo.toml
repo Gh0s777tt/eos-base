@@ -78,10 +78,16 @@ bitflags = "2"
 clap = "4"
 drm = "0.14.2"
 drm-sys = "0.8.1"
+edid = "0.3.0" #TODO: edid is abandoned, fork it and maintain?
+fdt = "0.1.5"
 libc = "0.2.181"
 log = "0.4"
 libredox = "0.1.14"
 orbclient = "0.3.51"
+parking_lot = "0.12"
+pico-args = "0.5"
+plain = "0.2.3"
+ransid = "0.4"
 redox_event = "0.4.6"
 redox-ioctl = { git = "https://gitlab.redox-os.org/redox-os/relibc.git" }
 redox-log = { git = "https://gitlab.redox-os.org/redox-os/redox-log.git" }
@@ -89,7 +95,12 @@ redox-rt = { git = "https://gitlab.redox-os.org/redox-os/relibc.git", default-fe
 redox-scheme = "0.11.0"
 redox_syscall = "0.7.3"
 redox_termios = "0.1.3"
+ron = "0.8.1"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+slab = "0.4.9"
+smallvec = "1"
+static_assertions = "1.1.0"
 toml = "1"
 
 [workspace.lints.clippy]

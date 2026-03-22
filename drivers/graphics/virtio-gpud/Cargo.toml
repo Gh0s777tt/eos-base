@@ -8,7 +8,7 @@ authors = ["Anhad Singh <andypython@protonmail.com>"]
 [dependencies]
 drm-sys.workspace = true
 log.workspace = true
-static_assertions = "1.1.0"
+static_assertions.workspace = true
 futures = { version = "0.3.28", features = ["executor"] }
 anyhow.workspace = true
 
