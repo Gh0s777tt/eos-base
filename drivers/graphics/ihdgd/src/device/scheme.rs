@@ -203,7 +203,7 @@ impl DumbFb {
             unsafe {
                 ptr::copy(
                     offscreen_ptr.add(row * self.width + start_x),
-                    onscreen_ptr.add(row * framebuffer.stride as usize + start_x),
+                    onscreen_ptr.add(row * framebuffer.stride as usize / 4 + start_x),
                     w,
                 );
             }
