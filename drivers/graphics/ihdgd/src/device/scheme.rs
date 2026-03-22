@@ -10,7 +10,7 @@ use drm_sys::{
 };
 use syscall::error::EINVAL;
 
-use super::pipe::DeviceFb;
+use super::buffer::GpuBuffer;
 use super::Device;
 
 #[derive(Debug)]
@@ -22,9 +22,9 @@ impl KmsCrtcDriver for Crtc {
     type State = ();
 }
 
-impl Buffer for DeviceFb {
+impl Buffer for GpuBuffer {
     fn size(&self) -> usize {
-        (self.stride * self.height) as usize
+        self.size as usize
     }
 }
 
@@ -32,7 +32,7 @@ impl GraphicsAdapter for Device {
     type Connector = ();
     type Crtc = Crtc;
 
-    type Buffer = DeviceFb;
+    type Buffer = GpuBuffer;
     type Framebuffer = ();
 
     fn name(&self) -> &'static [u8] {
@@ -70,13 +70,11 @@ impl GraphicsAdapter for Device {
     }
 
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> (Self::Buffer, u32) {
-        let fb = DeviceFb::alloc(&self.gm, &mut self.ggtt, width, height).unwrap();
-        let stride = fb.stride;
-        (fb, stride)
+        GpuBuffer::alloc_dumb(&self.gm, &mut self.ggtt, width, height).unwrap()
     }
 
-    fn map_dumb_buffer(&mut self, framebuffer: &Self::Buffer) -> *mut u8 {
-        framebuffer.buffer.virt
+    fn map_dumb_buffer(&mut self, buffer: &Self::Buffer) -> *mut u8 {
+        buffer.virt
     }
 
     fn create_framebuffer(&mut self, _buffer: &Self::Buffer) -> Self::Framebuffer {
@@ -98,7 +96,7 @@ impl GraphicsAdapter for Device {
         crtc.state = state;
 
         if let Some(primary_plane) = self.pipes[crtc.driver_data.pipe_idx].planes.first_mut() {
-            primary_plane.set_framebuffer(fb.as_ref().map(|fb| &*fb.buffer));
+            primary_plane.set_framebuffer(fb);
         }
 
         Ok(())

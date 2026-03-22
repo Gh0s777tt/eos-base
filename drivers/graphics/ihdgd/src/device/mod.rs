@@ -13,6 +13,7 @@ mod aux;
 mod bios;
 use self::bios::*;
 mod buffer;
+use self::buffer::*;
 mod ddi;
 use self::ddi::*;
 mod dpll;
@@ -436,7 +437,7 @@ impl Device {
         })
     }
 
-    fn add_kms_pipe(objects: &mut KmsObjects<Self>, pipe_idx: usize, fb: DeviceFb) {
+    fn add_kms_pipe(objects: &mut KmsObjects<Self>, pipe_idx: usize, fb: KmsFramebuffer<Self>) {
         let crtc_id = objects.add_crtc(Crtc { pipe_idx }, ());
 
         let connector_id = objects.add_connector((), (), &[crtc_id]);
@@ -445,15 +446,7 @@ impl Device {
         connector.update_from_size(fb.width, fb.height);
         drop(connector);
 
-        let fb_id = objects.add_framebuffer(KmsFramebuffer {
-            width: fb.width,
-            height: fb.height,
-            pitch: fb.stride,
-            bpp: 32,
-            depth: 24,
-            buffer: Arc::new(fb),
-            driver_data: (),
-        });
+        let fb_id = objects.add_framebuffer(fb);
         objects
             .get_crtc(crtc_id)
             .unwrap()
@@ -758,7 +751,18 @@ impl Device {
                     let width = timing.horizontal_active_pixels as u32;
                     let height = timing.vertical_active_lines as u32;
 
-                    let fb = DeviceFb::alloc(&self.gm, &mut self.ggtt, width, height)?;
+                    let (buffer, stride) =
+                        GpuBuffer::alloc_dumb(&self.gm, &mut self.ggtt, width, height)?;
+
+                    let fb = KmsFramebuffer {
+                        width,
+                        height,
+                        pitch: stride,
+                        bpp: 32,
+                        depth: 32,
+                        buffer: Arc::new(buffer),
+                        driver_data: (),
+                    };
 
                     plane.modeset(&mut self.alloc_buffers)?;
                     plane.set_framebuffer(Some(&fb));
