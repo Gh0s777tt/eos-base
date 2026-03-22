@@ -10,7 +10,7 @@ libredox.workspace = true
 log.workspace = true
 redox_event.workspace = true
 redox_syscall.workspace = true
-spin = "0.9"
+spin.workspace = true
 
 daemon = { path = "../../../daemon" }
 pcid = { path = "../../pcid" }

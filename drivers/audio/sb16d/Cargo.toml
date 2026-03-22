@@ -12,7 +12,7 @@ log.workspace = true
 daemon = { path = "../../../daemon" }
 redox_event.workspace = true
 redox_syscall.workspace = true
-spin = "0.9"
+spin.workspace = true
 redox-scheme.workspace = true
 
 [lints]
