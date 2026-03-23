@@ -16,7 +16,7 @@ driver-block = { path = "../driver-block" }
 daemon = { path = "../../../daemon" }
 redox_event.workspace = true
 redox_syscall = { workspace = true, features = ["std"] }
-thiserror = "1"
+thiserror.workspace = true
 xhcid = { path = "../../usb/xhcid" }
 
 [lints]

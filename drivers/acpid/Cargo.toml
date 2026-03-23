@@ -18,7 +18,7 @@ plain.workspace = true
 redox_syscall.workspace = true
 redox_event.workspace = true
 rustc-hash = "1.1.0"
-thiserror = "1"
+thiserror.workspace = true
 ron.workspace = true
 serde.workspace = true
 
