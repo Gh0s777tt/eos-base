@@ -19,6 +19,8 @@ mod gmbus;
 pub use self::gmbus::*;
 mod gpio;
 pub use self::gpio::*;
+mod ggtt;
+use ggtt::*;
 mod hal;
 pub use self::hal::*;
 mod pipe;
@@ -153,7 +155,6 @@ enum VideoInput {
 pub struct Device {
     kind: DeviceKind,
     alloc_buffers: RangeAllocator<u32>,
-    alloc_surfaces: RangeAllocator<u32>,
     bios: Option<Bios>,
     ddis: Vec<Ddi>,
     dpclka_cfgcr0: Option<MmioPtr<u32>>,
@@ -162,6 +163,7 @@ pub struct Device {
     framebuffers: Vec<DeviceFb>,
     int: Interrupter,
     gttmm: Arc<MmioRegion>,
+    ggtt: GlobalGtt,
     gm: MmioRegion,
     gmbus: Gmbus,
     pipes: Vec<Pipe>,
@@ -175,7 +177,6 @@ impl fmt::Debug for Device {
         f.debug_struct("Device")
             .field("kind", &self.kind)
             .field("alloc_buffers", &self.alloc_buffers)
-            .field("alloc_surfaces", &self.alloc_surfaces)
             .field("gttmm", &self.gttmm)
             .field("gm", &self.gm)
             .field("ref_freq", &self.ref_freq)
@@ -290,6 +291,16 @@ impl Device {
             None
         };
 
+        let ggtt = unsafe {
+            GlobalGtt::new(
+                pcid_handle,
+                gttmm.clone(),
+                //TODO: how to use 64-bit surface addresses?
+                gm.size.min(u32::MAX as usize) as u32,
+            )
+        };
+        //unsafe { ggtt.reset() };
+
         // GMBUS seems to be stable for all generations
         let gmbus = unsafe { Gmbus::new(&gttmm)? };
 
@@ -402,12 +413,9 @@ impl Device {
 
         //TODO: get number of available buffers
         let buffers = 1024;
-        //TODO: how to use 64-bit surface addresses?
-        let surface_memory = gm.size.min(u32::max_value() as usize) as u32;
         Ok(Self {
             kind,
             alloc_buffers: RangeAllocator::new(0..buffers),
-            alloc_surfaces: RangeAllocator::new(0..surface_memory),
             bios,
             ddis,
             dpclka_cfgcr0,
@@ -416,6 +424,7 @@ impl Device {
             framebuffers: Vec::new(),
             int,
             gttmm,
+            ggtt,
             gm,
             gmbus,
             pipes,
@@ -428,7 +437,6 @@ impl Device {
     pub fn init_inner(&mut self) {
         // Discover current framebuffers
         self.alloc_buffers.reset();
-        self.alloc_surfaces.reset();
         self.framebuffers.clear();
         for pipe in self.pipes.iter() {
             for plane in pipe.planes.iter() {
@@ -436,7 +444,7 @@ impl Device {
                     plane.fetch_modeset(&mut self.alloc_buffers);
 
                     self.framebuffers
-                        .push(plane.fetch_framebuffer(&self.gm, &mut self.alloc_surfaces));
+                        .push(plane.fetch_framebuffer(&self.gm, &mut self.ggtt));
                 }
             }
         }
@@ -720,7 +728,7 @@ impl Device {
                     let width = timing.horizontal_active_pixels as u32;
                     let height = timing.vertical_active_lines as u32;
 
-                    let fb = DeviceFb::alloc(&self.gm, &mut self.alloc_surfaces, width, height)?;
+                    let fb = DeviceFb::alloc(&self.gm, &mut self.ggtt, width, height)?;
 
                     plane.modeset(&mut self.alloc_buffers)?;
                     plane.set_framebuffer(&fb);
