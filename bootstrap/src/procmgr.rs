@@ -381,6 +381,7 @@ struct Process {
     pgid: ProcessId,
     sid: ProcessId,
     name: ArrayString<NAME_CAPAC>,
+    prio: u32,
 
     ruid: u32,
     euid: u32,
@@ -636,6 +637,7 @@ impl<'a> ProcScheme<'a> {
                     egid: 0,
                     sgid: 0,
                     name: ArrayString::<32>::from_str("[init]").unwrap(),
+                    prio: 20,
 
                     status: ProcessStatus::PossiblyRunnable,
                     disabled_setpgid: false,
@@ -678,6 +680,7 @@ impl<'a> ProcScheme<'a> {
             egid,
             sgid,
             name,
+            prio,
             ..
         } = *proc_guard.borrow();
 
@@ -710,6 +713,7 @@ impl<'a> ProcScheme<'a> {
             egid,
             sgid,
             name,
+            prio,
 
             status: ProcessStatus::PossiblyRunnable,
             disabled_setpgid: false,
@@ -753,7 +757,7 @@ impl<'a> ProcScheme<'a> {
             pid: pid.0 as u32,
             euid: proc.euid,
             egid: proc.egid,
-            ens: 0,
+            prio: proc.prio,
             debug_name: arraystring_to_bytes(proc.name),
         })?;
 
