@@ -727,7 +727,7 @@ impl<'a> ProcScheme<'a> {
         }));
         if let Err(err) = new_process
             .borrow_mut()
-            .sync_kernel_attrs(child_pid, &self.auth)
+            .sync_kernel_attrs(&self.auth)
         {
             log::warn!("Failed to set kernel attrs when forking: {err}");
         }
@@ -1593,7 +1593,7 @@ impl<'a> ProcScheme<'a> {
         if let Some(new_sgid) = new_sgid {
             proc.sgid = new_sgid;
         }
-        if let Err(err) = proc.sync_kernel_attrs(pid, &self.auth) {
+        if let Err(err) = proc.sync_kernel_attrs(&self.auth) {
             log::warn!("Failed to sync proc attrs in setresugid: {err}");
         }
         Ok(())
@@ -2375,7 +2375,7 @@ impl<'a> ProcScheme<'a> {
             .borrow_mut();
 
         proc.name = ArrayString::from_str(&new_name[..new_name.len().min(NAME_CAPAC)]).unwrap();
-        if let Err(err) = proc.sync_kernel_attrs(pid, &self.auth) {
+        if let Err(err) = proc.sync_kernel_attrs(&self.auth) {
             log::warn!("Failed to set kernel attrs when renaming proc: {err}");
         }
         Ok(())
@@ -2552,22 +2552,30 @@ fn arraystring_to_bytes<const C: usize>(s: ArrayString<C>) -> [u8; C] {
     buf[..min].copy_from_slice(&s.as_bytes()[..min]);
     buf
 }
+
 impl Process {
-    fn sync_kernel_attrs(&mut self, my_pid: ProcessId, auth: &FdGuard) -> Result<()> {
+    fn sync_kernel_attrs(&mut self, auth: &FdGuard) -> Result<()> {
         // TODO: continue with other threads if one fails?
         for thread_rc in &self.threads {
-            let thread = thread_rc.borrow();
-            let attr_fd = thread
-                .fd
-                .dup(alloc::format!("auth-{}-attrs", auth.as_raw_fd()).as_bytes())?;
-            attr_fd.write(&ProcSchemeAttrs {
-                pid: my_pid.0 as u32,
-                euid: self.euid,
-                egid: self.egid,
-                ens: 0,
-                debug_name: arraystring_to_bytes(self.name),
-            })?;
+            let mut thread = thread_rc.borrow_mut();
+            thread.sync_kernel_attrs(self, auth)?;
         }
+        Ok(())
+    }
+}
+
+impl Thread {
+    fn sync_kernel_attrs(&mut self, process: &Process, auth: &FdGuard) -> Result<()> {
+        let attr_fd = self
+            .fd
+            .dup(alloc::format!("auth-{}-attrs", auth.as_raw_fd()).as_bytes())?;
+        attr_fd.write(&ProcSchemeAttrs {
+            pid: process.pid.0 as u32,
+            euid: process.euid,
+            egid: process.egid,
+            prio: process.prio,
+            debug_name: arraystring_to_bytes(process.name),
+        })?;
         Ok(())
     }
 }
