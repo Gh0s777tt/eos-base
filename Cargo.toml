@@ -115,3 +115,7 @@ precedence = "deny"
 
 [patch."https://gitlab.redox-os.org/redox-os/relibc.git"]
 #redox-ioctl = { path = "../../relibc/source/redox-ioctl" }
+
+[patch.crates-io]
+redox_syscall = { path = "../../redox_syscall" }
+libredox = { path = "../../libredox" }
