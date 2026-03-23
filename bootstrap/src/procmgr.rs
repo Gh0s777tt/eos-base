@@ -1067,6 +1067,26 @@ impl<'a> ProcScheme<'a> {
                     // setrens is no longer implemented as procmgr call
                     // FIXME remove this ProcCall variant
                     ProcCall::Setrens => Response::ready_err(EINVAL, op),
+                    ProcCall::SetProcPriority => {
+                        let target_pid = NonZeroUsize::new(metadata[1] as usize).map_or(fd_pid, |n| ProcessId(n.get()));
+
+                        let new_prio = metadata[2] as u32;
+
+                        Ready(Response::new(
+                            self.on_setprocprio(fd_pid, target_pid, new_prio).map(|()| 0),
+                            op
+                        ))
+                    },
+                    ProcCall::GetProcPriority => {
+                        let target_pid = NonZeroUsize::new(metadata[1] as usize)
+                            .map_or(fd_pid, |n| ProcessId(n.get()));
+
+                        Ready(Response::new(
+                            self.on_getprocprio(fd_pid, target_pid).map(|prio| prio as usize),
+                            op,
+                        ))
+                    },
+
                 }
             }
             Handle::Ps(_) => Response::ready_err(EOPNOTSUPP, op),
@@ -2535,7 +2555,44 @@ impl<'a> ProcScheme<'a> {
 
         Ok(string.into_bytes())
     }
+
+    fn on_setprocprio(
+        &mut self,
+        caller_pid: ProcessId,
+        target_pid: ProcessId,
+        new_prio: u32,
+    ) -> Result<()> {
+        if new_prio >= 40 {
+            return Err(Error::new(EINVAL));
+        }
+
+        let caller_euid = self.processes.get(&caller_pid).ok_or(Error::new(ESRCH))?.borrow().euid;
+
+        let target_rc = self.processes.get(&target_pid).ok_or(Error::new(ESRCH))?;
+        let mut target = target_rc.borrow_mut();
+
+        if caller_euid != 0 && caller_euid != target.euid {
+            return Err(Error::new(EPERM));
+        }
+
+        target.prio = new_prio;
+
+        if let Err(err) = target.sync_kernel_attrs(&self.auth) {
+            log::warn!("Failed to sync proc attrs in setprocprio: {err}");
+        }
+        Ok(())
+    }
+
+    fn on_getprocprio(
+        &self,
+        caller_pid: ProcessId,
+        target_pid: ProcessId,
+    ) -> Result<u32> {
+        let target_rc = self.processes.get(&target_pid).ok_or(Error::new(ESRCH))?;
+        Ok(target_rc.borrow().prio)
+    }
 }
+
 #[derive(Clone, Copy, Debug)]
 enum KillMode {
     Idempotent,
