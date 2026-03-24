@@ -16,9 +16,9 @@ use crate::VirtaddrTranslationHandle;
 pub struct Sgl {
     /// A raw pointer to the SGL in virtual memory
     virt: *mut u8,
-    /// The length of the allocated memory, guaranteed to be a multiple of [PAGE_SIZE].
+    /// The length of the allocated memory, guaranteed to be a multiple of [`PAGE_SIZE`].
     aligned_length: usize,
-    /// The length of the allocated memory. This value is NOT guaranteed to be a multiple of [PAGE_SIZE]
+    /// The length of the allocated memory. This value is NOT guaranteed to be a multiple of [`PAGE_SIZE`]
     unaligned_length: NonZeroUsize,
     /// The vector of chunks tracked by this [Sgl] object. This is the sparsely-populated vector in the SGL algorithm.
     chunks: Vec<Chunk>,
@@ -42,7 +42,7 @@ impl Sgl {
     ///
     /// # Arguments
     ///
-    /// 'unaligned_length: [usize]' - The length of the SGL, not necessarily aligned to the nearest
+    /// '`unaligned_length`: [usize]' - The length of the SGL, not necessarily aligned to the nearest
     /// page.
     pub fn new(unaligned_length: usize) -> Result<Self> {
         let unaligned_length = NonZeroUsize::new(unaligned_length).ok_or(Error::new(EINVAL))?;

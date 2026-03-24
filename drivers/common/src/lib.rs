@@ -2,11 +2,10 @@
 //!
 //! This includes direct memory access via [dma], and Scatter-Gather List support via [sgl].  It also
 //! provides various memory management structures for use with drivers, and some logging support.
-#![warn(missing_docs)]
 
 use libredox::call::MmapArgs;
 use libredox::flag::{self, O_CLOEXEC, O_RDONLY, O_RDWR, O_WRONLY};
-use libredox::{errno::EINVAL, error::*, Fd};
+use libredox::{errno::EINVAL, error::{Result, Error}, Fd};
 use syscall::{ProcSchemeVerb, PAGE_SIZE};
 
 /// The Direct Memory Access (DMA) API for drivers
@@ -25,6 +24,13 @@ use std::sync::OnceLock;
 
 static MEMORY_ROOT_FD: OnceLock<libredox::Fd> = OnceLock::new();
 
+/// Initializes a file descriptor to be used as the root memory for a driver.
+///
+/// # Panics
+///
+/// This function will panic if:
+/// - `libredox` is unable to open a file descriptor.
+/// - The memory root file descriptor has already been set (this function has already been called).
 pub fn init() {
     if MEMORY_ROOT_FD
         .set(
@@ -37,6 +43,11 @@ pub fn init() {
     }
 }
 
+/// Gets the memory root file descriptor.
+///
+/// # Panics
+///
+/// This function will panic if `init` has not already been called first.
 pub fn memory_root_fd() -> &'static libredox::Fd {
     MEMORY_ROOT_FD
         .get()
@@ -82,8 +93,8 @@ impl Default for MemoryType {
 
 /// Represents the protection level of an area of memory.
 ///
-/// This structure shouldn't be used directly -- instead, use the [Prot::RO] (Read-Only),
-/// [Prot::WO] (Write-Only) and [Prot::RW] (Read-Write) constants to specify the memory's protection
+/// This structure shouldn't be used directly -- instead, use the [`Prot::RO`] (Read-Only),
+/// [`Prot::WO`] (Write-Only) and [`Prot::RW`] (Read-Write) constants to specify the memory's protection
 /// level.
 #[derive(Clone, Copy, Debug)]
 pub struct Prot {
@@ -114,16 +125,14 @@ impl Prot {
     };
 }
 
-// TODO: Safe, as the kernel ensures it doesn't conflict with any other memory described in the
-// memory map for regular RAM.
 /// Maps physical memory to virtual memory
 ///
 /// # Arguments
 ///
-/// * 'base_phys: [usize]' - The base address of the physical memory to map.
-/// * 'len: [usize]'       - The length of the physical memory to map (Should be a multiple of [PAGE_SIZE]
+/// * '`base_phys`: [usize]' - The base address of the physical memory to map.
+/// * 'len: [usize]'       - The length of the physical memory to map (Should be a multiple of [`PAGE_SIZE`]
 /// * '_: [Prot]'          - The memory protection level of the mapping.
-/// * 'type: [MemoryType]' - The caching behavior specification of the memory.
+/// * 'type: [`MemoryType`]' - The caching behavior specification of the memory.
 ///
 /// # Returns
 ///
@@ -135,14 +144,18 @@ impl Prot {
 ///
 /// This function will return an error if:
 /// - An invalid value is provided to 'read' or 'write'
-/// - The system could not open a file descriptor to the memory scheme for the specified [MemoryType].
-/// - The system failed to map the physical address to a virtual address. See [libredox::call::mmap]
+/// - The system could not open a file descriptor to the memory scheme for the specified [`MemoryType`].
+/// - The system failed to map the physical address to a virtual address. See [`libredox::call::mmap`]
 ///
+/// # Safety
+///
+/// Safe, as the kernel ensures it doesn't conflict with any other memory described in the memory
+/// map for regular RAM.
 ///
 /// # Notes
 /// - This function is unsafe, and upon using it you will be responsible for freeing the memory with
-///   [libredox::call::munmap]. If you want a safe accessor, use [PhysBorrowed] instead.
-/// - The MemoryType specified is used to tell the function which memory scheme to access. (i.e
+///   [`libredox::call::munmap`]. If you want a safe accessor, use [`PhysBorrowed`] instead.
+/// - The `MemoryType` specified is used to tell the function which memory scheme to access. (i.e
 ///   /scheme/memory/physical@wb, /scheme/memory/physical@uc, etc).
 pub unsafe fn physmap(
     base_phys: usize,
@@ -216,14 +229,14 @@ pub struct PhysBorrowed {
     len: usize,
 }
 impl PhysBorrowed {
-    /// Constructs a PhysBorrowed instance.
+    /// Constructs a `PhysBorrowed` instance.
     ///
     /// # Arguments
     /// See [physmap] for a description of the parameters.
     ///
     /// # Returns
     /// A '[Result]' which contains the following:
-    /// - A '[PhysBorrowed]' which represents the newly mapped region.
+    /// - A '[`PhysBorrowed`]' which represents the newly mapped region.
     /// - An 'Err' if a memory mapping error occurs.
     ///
     /// # Errors
@@ -242,7 +255,7 @@ impl PhysBorrowed {
     /// - self.mem - A pointer to the mapped region in virtual memory.
     ///
     /// # Notes
-    /// - The pointer may live beyond the lifetime of [PhysBorrowed], so dereferences to the pointer
+    /// - The pointer may live beyond the lifetime of [`PhysBorrowed`], so dereferences to the pointer
     ///   must be treated as unsafe.
     ///
     pub fn as_ptr(&self) -> *mut () {
@@ -252,7 +265,7 @@ impl PhysBorrowed {
     /// Gets the length of the mapped region.
     ///
     /// # Returns
-    /// - self.len - The length of the mapped region. It should be a multiple of [PAGE_SIZE]
+    /// - self.len - The length of the mapped region. It should be a multiple of [`PAGE_SIZE`]
     pub fn mapped_len(&self) -> usize {
         self.len
     }
