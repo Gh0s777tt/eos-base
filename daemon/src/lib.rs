@@ -1,3 +1,4 @@
+//! A library for creating and managing daemons for RedoxOS.
 #![feature(never_type)]
 
 use std::io::{self, PipeWriter, Read, Write};
@@ -19,22 +20,26 @@ unsafe fn get_fd(var: &str) -> RawFd {
     fd
 }
 
+/// A long running background process that handles requests.
 #[must_use = "Daemon::ready must be called"]
 pub struct Daemon {
     write_pipe: PipeWriter,
 }
 
 impl Daemon {
+    /// Create a new daemon.
     pub fn new(f: impl FnOnce(Daemon) -> !) -> ! {
         let write_pipe = unsafe { io::PipeWriter::from_raw_fd(get_fd("INIT_NOTIFY")) };
 
         f(Daemon { write_pipe })
     }
 
+    /// Notify the process that the daemon is ready to accept requests.
     pub fn ready(mut self) {
         self.write_pipe.write_all(&[0]).unwrap();
     }
 
+    /// Executes `Command` as a child process.
     pub fn spawn(mut cmd: Command) {
         let (mut read_pipe, write_pipe) = io::pipe().unwrap();
 
@@ -71,18 +76,21 @@ impl Daemon {
     }
 }
 
+/// A long running background process that handles requests using schemes.
 #[must_use = "SchemeDaemon::ready must be called"]
 pub struct SchemeDaemon {
     write_pipe: PipeWriter,
 }
 
 impl SchemeDaemon {
+    /// Create a new daemon for use with schemes.
     pub fn new(f: impl FnOnce(SchemeDaemon) -> !) -> ! {
         let write_pipe = unsafe { io::PipeWriter::from_raw_fd(get_fd("INIT_NOTIFY")) };
 
         f(SchemeDaemon { write_pipe })
     }
 
+    /// Notify the process that the scheme daemon is ready to accept requests.
     pub fn ready_with_fd(self, cap_fd: Fd) -> syscall::Result<()> {
         syscall::call_wo(
             self.write_pipe.as_raw_fd() as usize,
@@ -93,6 +101,7 @@ impl SchemeDaemon {
         Ok(())
     }
 
+    /// Notify the process that the synchronous scheme daemon is ready to accept requests.
     pub fn ready_sync_scheme<S: SchemeSync>(
         self,
         socket: &Socket,
@@ -103,6 +112,7 @@ impl SchemeDaemon {
         self.ready_with_fd(Fd::new(cap_fd))
     }
 
+    /// Notify the process that the asynchronous scheme daemon is ready to accept requests.
     pub fn ready_async_scheme<S: SchemeAsync>(
         self,
         socket: &Socket,
@@ -113,6 +123,7 @@ impl SchemeDaemon {
         self.ready_with_fd(Fd::new(cap_fd))
     }
 
+    /// Executes `Command` as a child process registering it to the scheme namespace.
     pub fn spawn(mut cmd: Command, scheme_name: &str) {
         let (read_pipe, write_pipe) = io::pipe().unwrap();
 

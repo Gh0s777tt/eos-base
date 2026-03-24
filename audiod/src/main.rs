@@ -1,3 +1,4 @@
+//! The audio daemon for RedoxOS.
 use std::mem::MaybeUninit;
 use std::ptr::addr_of_mut;
 use std::sync::{Arc, Mutex};
