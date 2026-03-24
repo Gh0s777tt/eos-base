@@ -5,7 +5,11 @@
 
 use libredox::call::MmapArgs;
 use libredox::flag::{self, O_CLOEXEC, O_RDONLY, O_RDWR, O_WRONLY};
-use libredox::{errno::EINVAL, error::{Result, Error}, Fd};
+use libredox::{
+    errno::EINVAL,
+    error::{Error, Result},
+    Fd,
+};
 use syscall::{ProcSchemeVerb, PAGE_SIZE};
 
 /// The Direct Memory Access (DMA) API for drivers
