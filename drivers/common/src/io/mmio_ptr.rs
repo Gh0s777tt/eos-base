@@ -7,14 +7,17 @@ pub struct MmioPtr<T> {
 
 impl<T> MmioPtr<T> {
     //TODO: reads and writes are unsafe, not new.
+    /// Creates a `MmioPtr`.
     pub unsafe fn new(ptr: *mut T) -> Self {
         Self { ptr }
     }
 
+    /// Creates a const pointer from a `MmioPtr`.
     pub const fn as_ptr(&self) -> *const T {
         self.ptr
     }
 
+    /// Creates a mutable pointer from a `MmioPtr`.
     pub const fn as_mut_ptr(&mut self) -> *mut T {
         self.ptr
     }

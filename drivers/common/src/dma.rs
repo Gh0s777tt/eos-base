@@ -11,8 +11,8 @@ use crate::{memory_root_fd, MemoryType, VirtaddrTranslationHandle};
 
 /// Defines the platform-specific memory type for DMA operations
 ///
-/// - On x86 systems, DMA uses Write-back memory ([MemoryType::Writeback])
-/// - On aarch64 systems, DMA uses uncacheable memory ([MemoryType::Uncacheable])
+/// - On x86 systems, DMA uses Write-back memory ([`MemoryType::Writeback`])
+/// - On aarch64 systems, DMA uses uncacheable memory ([`MemoryType::Uncacheable`])
 const DMA_MEMTY: MemoryType = {
     if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
         // x86 ensures cache coherence with DMA memory
@@ -52,7 +52,7 @@ pub(crate) fn phys_contiguous_fd() -> Result<Fd> {
 /// Allocates a chunk of physical memory for DMA, and then maps it to virtual memory.
 ///
 /// # Arguments
-/// 'length: [usize]' - The length of the memory region. Must be a multiple of [PAGE_SIZE]
+/// 'length: [usize]' - The length of the memory region. Must be a multiple of [`PAGE_SIZE`]
 ///
 /// # Returns
 ///
@@ -63,10 +63,10 @@ pub(crate) fn phys_contiguous_fd() -> Result<Fd> {
 /// # Errors
 ///
 /// This function asserts if:
-/// - length is not a multiple of [PAGE_SIZE]
+/// - length is not a multiple of [`PAGE_SIZE`]
 ///
 /// This function returns an error if:
-/// - A file descriptor to physically contiguous memory of type [DMA_MEMTY] could not be acquired
+/// - A file descriptor to physically contiguous memory of type [`DMA_MEMTY`] could not be acquired
 /// - A virtual mapping for the physically contiguous memory could not be created
 /// - The virtual address returned by the memory manager was invalid.
 fn alloc_and_map(length: usize, handle: &VirtaddrTranslationHandle) -> Result<(usize, *mut ())> {
@@ -97,7 +97,7 @@ fn alloc_and_map(length: usize, handle: &VirtaddrTranslationHandle) -> Result<(u
 pub struct Dma<T: ?Sized> {
     /// The physical address of the memory
     phys: usize,
-    /// The page-aligned length of the memory. Will be a multiple of [PAGE_SIZE]
+    /// The page-aligned length of the memory. Will be a multiple of [`PAGE_SIZE`]
     aligned_len: usize,
     /// The pointer to the Dma memory in the virtual address space.
     virt: *mut T,
@@ -148,11 +148,11 @@ impl<T> Dma<MaybeUninit<T>> {
     /// instance of an object of type `[Dma]<T>`.
     ///
     /// # Returns
-    /// - `[Dma]<T>` - The original structure without the [MaybeUninit] wrapper around its contents.
+    /// - `[Dma]<T>` - The original structure without the [`MaybeUninit`] wrapper around its contents.
     ///
     /// # Notes
     /// - This is unsafe because it assumes that the memory stored within the `[Dma]<T>` is a valid
-    ///   instance of T. If it isn't (for example -- if it was initialized with [Dma::zeroed]),
+    ///   instance of T. If it isn't (for example -- if it was initialized with [`Dma::zeroed`]),
     ///   then the underlying memory may not contain the expected T structure.
     pub unsafe fn assume_init(self) -> Dma<T> {
         let Dma {

@@ -105,7 +105,11 @@ static_assertions = "1.1.0"
 thiserror = "2"
 toml = "1"
 
+[workspace.lints.rust]
+missing_docs = "warn" #TODO: set to deny when all public functions are documented
+
 [workspace.lints.clippy]
+missing_safety_doc = "warn" #TODO: set to deny when all safety documentation is completed
 precedence = "deny"
 
 [patch."https://gitlab.redox-os.org/redox-os/relibc.git"]

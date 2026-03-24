@@ -58,13 +58,13 @@ impl<I: Io> ReadOnly<I> {
 }
 
 impl<I: Io> ReadOnly<I> {
-    /// Calls [Io::read]
+    /// Calls [`Io::read`]
     #[inline(always)]
     pub fn read(&self) -> I::Value {
         self.inner.read()
     }
 
-    /// Calls [Io::readf]
+    /// Calls [`Io::readf`]
     #[inline(always)]
     pub fn readf(&self, flags: I::Value) -> bool {
         self.inner.readf(flags)
@@ -85,7 +85,7 @@ impl<I: Io> WriteOnly<I> {
 }
 
 impl<I: Io> WriteOnly<I> {
-    /// Calls [Io::write]
+    /// Calls [`Io::write`]
     #[inline(always)]
     pub fn write(&mut self, value: I::Value) {
         self.inner.write(value)
