@@ -249,7 +249,7 @@ where
         payload: &mut [u8],
         flags: usize,
     ) -> SyscallResult<usize>;
-    
+
     fn get_sock_opt(
         &self,
         file: &SchemeFile<Self>,
@@ -522,7 +522,10 @@ where
             }
             SocketCall::RecvMsg => {
                 let flags = metadata[1] as usize;
-                let handle = self.handles.get_mut(&fd).ok_or_else(||SyscallError::new(syscall::EBADF))?;
+                let handle = self
+                    .handles
+                    .get_mut(&fd)
+                    .ok_or_else(|| SyscallError::new(syscall::EBADF))?;
 
                 match *handle {
                     Handle::File(ref mut file) => {

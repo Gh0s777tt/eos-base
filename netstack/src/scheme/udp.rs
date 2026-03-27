@@ -11,8 +11,8 @@ use super::socket::{Context, DupResult, SchemeFile, SchemeSocket, SocketFile};
 use super::{parse_endpoint, SchemeWrapper, Smolnetd, SocketSet};
 use crate::port_set::PortSet;
 use crate::router::Router;
-use std::fmt::Write;
 use libredox::flag;
+use std::fmt::Write;
 
 const SO_SNDBUF: usize = 7;
 const SO_RCVBUF: usize = 8;
@@ -297,11 +297,16 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
         Ok(i)
     }
 
-    fn handle_recvmsg(&mut self, file: &mut SchemeFile<Self>, how:&mut [u8], flags:usize) -> SyscallResult<usize> {
+    fn handle_recvmsg(
+        &mut self,
+        file: &mut SchemeFile<Self>,
+        how: &mut [u8],
+        flags: usize,
+    ) -> SyscallResult<usize> {
         //there is a separate flags argument for MSG_DONTWAIT which is call specific not socket-wide like socket_file.flags
-        let socket_file = match file{
+        let socket_file = match file {
             SchemeFile::Socket(ref mut sock_f) => sock_f,
-            _ => return Err(SyscallError::new(syscall::EBADF))
+            _ => return Err(SyscallError::new(syscall::EBADF)),
         };
 
         if !socket_file.read_enabled {
@@ -309,26 +314,43 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
         } else if self.can_recv(&socket_file.data) {
             let usize_length = core::mem::size_of::<usize>();
             let prepared_name_len = usize::from_le_bytes(
-                how[0..usize_length].try_into().map_err(|_| SyscallError::new(syscall::EINVAL))?,
+                how[0..usize_length]
+                    .try_into()
+                    .map_err(|_| SyscallError::new(syscall::EINVAL))?,
             );
             let prepared_whole_iov_size = usize::from_le_bytes(
-                how[usize_length..2 * usize_length].try_into().map_err(|_| SyscallError::new(syscall::EINVAL))?,
+                how[usize_length..2 * usize_length]
+                    .try_into()
+                    .map_err(|_| SyscallError::new(syscall::EINVAL))?,
             );
             let prepared_msg_controllen = usize::from_le_bytes(
-                how[2 * usize_length..3 * usize_length].try_into().map_err(|_| SyscallError::new(syscall::EINVAL))?,
+                how[2 * usize_length..3 * usize_length]
+                    .try_into()
+                    .map_err(|_| SyscallError::new(syscall::EINVAL))?,
             );
-            if  3 * usize_length + prepared_name_len + prepared_msg_controllen + prepared_whole_iov_size > how.len() {//expected returned buffer size is larger than provided -> return invalid
+            if 3 * usize_length
+                + prepared_name_len
+                + prepared_msg_controllen
+                + prepared_whole_iov_size
+                > how.len()
+            {
+                //expected returned buffer size is larger than provided -> return invalid
                 return Err(SyscallError::new(syscall::EINVAL));
             }
-           
+
             //the relibc deserialization functions expect NO GAPS between the name and payload slices
             //so the payload must be temporarily stored during recv_slice
-            let mut payload_tmp = vec![0u8; prepared_whole_iov_size]; 
-            let (length, address) = self.recv_slice(&mut payload_tmp).expect("Can't recieve slice");
-            
+            let mut payload_tmp = vec![0u8; prepared_whole_iov_size];
+            let (length, address) = self
+                .recv_slice(&mut payload_tmp)
+                .expect("Can't recieve slice");
+
             //Address Handling
             let address_formatted = if prepared_name_len > 0 {
-                format!("/scheme/udp/{}:{}", address.endpoint.addr, address.endpoint.port)
+                format!(
+                    "/scheme/udp/{}:{}",
+                    address.endpoint.addr, address.endpoint.port
+                )
             } else {
                 String::from("")
             };
@@ -337,16 +359,19 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
             how[usize_length..payload_len_index].copy_from_slice(&address_formatted.as_bytes());
 
             //Payload Handling
-            how[payload_len_index..payload_len_index + usize_length].copy_from_slice(&(length as usize).to_le_bytes());
-            how[payload_len_index + usize_length..payload_len_index + usize_length + length].copy_from_slice(&payload_tmp[..length]);
+            how[payload_len_index..payload_len_index + usize_length]
+                .copy_from_slice(&(length as usize).to_le_bytes());
+            how[payload_len_index + usize_length..payload_len_index + usize_length + length]
+                .copy_from_slice(&payload_tmp[..length]);
             Ok(payload_len_index + usize_length + length)
-        } else if socket_file.flags & syscall::O_NONBLOCK == syscall::O_NONBLOCK || flags & flag::MSG_DONTWAIT as usize != 0 {
+        } else if socket_file.flags & syscall::O_NONBLOCK == syscall::O_NONBLOCK
+            || flags & flag::MSG_DONTWAIT as usize != 0
+        {
             Err(SyscallError::new(syscall::EAGAIN))
         } else {
             Err(SyscallError::new(syscall::EWOULDBLOCK)) // internally scheduled to re-read
         }
     }
-
 
     fn handle_get_peer_name(
         &self,
