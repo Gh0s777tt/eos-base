@@ -114,7 +114,7 @@ impl GraphicsAdapter for Device {
             if let Some(buffer) = buffer {
                 buffer.buffer.sync(framebuffer, damage)
             } else {
-                let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
+                let onscreen_ptr = framebuffer.buffer.virt.cast::<u32>();
                 for row in 0..framebuffer.height {
                     unsafe {
                         ptr::write_bytes(
@@ -193,7 +193,7 @@ impl DumbFb {
         let h: usize = sync_rect.height.try_into().unwrap();
 
         let offscreen_ptr = self.ptr.as_ptr() as *mut u32;
-        let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
+        let onscreen_ptr = framebuffer.buffer.virt.cast::<u32>();
 
         for row in start_y..start_y + h {
             unsafe {

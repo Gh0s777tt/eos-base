@@ -1,10 +1,9 @@
-use std::ptr;
-
 use common::io::{Io, MmioPtr};
 use range_alloc::RangeAllocator;
 use syscall::error::Result;
 use syscall::{Error, EIO};
 
+use super::buffer::GpuBuffer;
 use super::MmioRegion;
 
 pub const PLANE_CTL_ENABLE: u32 = 1 << 31;
@@ -14,8 +13,7 @@ pub const PLANE_WM_LINES_SHIFT: u32 = 14;
 
 #[derive(Debug)]
 pub struct DeviceFb {
-    pub onscreen: *mut [u32],
-    pub surf: u32,
+    pub buffer: GpuBuffer,
     pub width: u32,
     pub height: u32,
     pub stride: u32,
@@ -30,15 +28,8 @@ impl DeviceFb {
         stride: u32,
         clear: bool,
     ) -> Self {
-        let virt = (gm.virt + surf as usize) as *mut u32;
-        let onscreen =
-            ptr::slice_from_raw_parts_mut(virt, (stride * height) as usize / size_of::<u32>());
-        if clear {
-            (&mut *onscreen).fill(0);
-        }
         Self {
-            onscreen,
-            surf,
+            buffer: unsafe { GpuBuffer::new(gm, surf, stride * height, clear) },
             width,
             height,
             stride,
@@ -51,21 +42,14 @@ impl DeviceFb {
         width: u32,
         height: u32,
     ) -> syscall::Result<Self> {
-        //TODO: documentation on this is not great
-        let stride = (width * 4).next_multiple_of(64);
+        let (buffer, stride) = GpuBuffer::alloc_dumb(gm, alloc_surfaces, width, height)?;
 
-        //TODO: how is memory allocated for PLANE_SURF?
-        let surf_size = (stride * height).next_multiple_of(4096);
-        let surf = alloc_surfaces.allocate_range(surf_size).map_err(|err| {
-            log::warn!(
-                "failed to allocate surface of size {}: {:?}",
-                surf_size,
-                err
-            );
-            Error::new(EIO)
-        })?;
-
-        Ok(unsafe { DeviceFb::new(gm, surf.start, width, height, stride, true) })
+        Ok(DeviceFb {
+            buffer,
+            width,
+            height,
+            stride,
+        })
     }
 }
 
@@ -161,7 +145,7 @@ impl Plane {
         self.size.write((fb.width - 1) | ((fb.height - 1) << 16));
         self.stride.write(stride_64);
 
-        self.surf.write(fb.surf);
+        self.surf.write(fb.buffer.gm_offset);
 
         // Disable gamma
         if let Some(color_ctl) = &mut self.color_ctl {

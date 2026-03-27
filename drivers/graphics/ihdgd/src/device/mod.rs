@@ -10,6 +10,7 @@ use syscall::error::{Error, Result, EIO, ENODEV, ERANGE};
 mod aux;
 mod bios;
 use self::bios::*;
+mod buffer;
 mod ddi;
 use self::ddi::*;
 mod dpll;
