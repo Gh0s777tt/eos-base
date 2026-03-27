@@ -317,13 +317,13 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
             let prepared_msg_controllen = usize::from_le_bytes(
                 how[2 * usize_length..3 * usize_length].try_into().map_err(|_| SyscallError::new(syscall::EINVAL))?,
             );
-            if  prepared_name_len + prepared_msg_controllen + prepared_whole_iov_size > how.len() {//expected returned buffer size is larger than provided -> return invalid
+            if  3 * usize_length + prepared_name_len + prepared_msg_controllen + prepared_whole_iov_size > how.len() {//expected returned buffer size is larger than provided -> return invalid
                 return Err(SyscallError::new(syscall::EINVAL));
             }
            
             //the relibc deserialization functions expect NO GAPS between the name and payload slices
             //so the payload must be temporarily stored during recv_slice
-            let mut payload_tmp = vec![0u8; prepared_whole_iov_size - prepared_name_len]; 
+            let mut payload_tmp = vec![0u8; prepared_whole_iov_size]; 
             let (length, address) = self.recv_slice(&mut payload_tmp).expect("Can't recieve slice");
             
             //Address Handling
@@ -339,8 +339,7 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
             //Payload Handling
             how[payload_len_index..payload_len_index + usize_length].copy_from_slice(&(length as usize).to_le_bytes());
             how[payload_len_index + usize_length..payload_len_index + usize_length + length].copy_from_slice(&payload_tmp[..length]);
-            //TODO should return the length of payload but relibc uses trim on the buffer incorrectly
-            Ok(how.len())
+            Ok(payload_len_index + usize_length + length)
         } else if socket_file.flags & syscall::O_NONBLOCK == syscall::O_NONBLOCK || flags & flag::MSG_DONTWAIT as usize != 0 {
             Err(SyscallError::new(syscall::EAGAIN))
         } else {
