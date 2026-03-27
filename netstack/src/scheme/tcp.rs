@@ -327,10 +327,10 @@ impl<'a> SchemeSocket for TcpSocket<'a> {
             let prepared_msg_controllen = usize::from_le_bytes(
                 how[2 * usize_length..3 * usize_length].try_into().map_err(|_| SyscallError::new(syscall::EINVAL))?,
             );
-            if  prepared_name_len + prepared_msg_controllen + prepared_whole_iov_size > how.len() {//expected returned buffer size is larger than provided -> return invalid
+            if  3 * usize_length + prepared_name_len + prepared_msg_controllen + prepared_whole_iov_size > how.len() {//expected returned buffer size is larger than provided -> return invalid
                 return Err(SyscallError::new(syscall::EINVAL));
             } 
-            let mut address = match self.remote_endpoint() {
+            let address = match self.remote_endpoint() {
                 Some(endpoint) => format!("/scheme/tcp/{}:{}", endpoint.addr, endpoint.port),
                 None => String::from("/scheme/tcp/0.0.0.0:0"),
             };
@@ -339,11 +339,9 @@ impl<'a> SchemeSocket for TcpSocket<'a> {
             how[..usize_length].copy_from_slice(&address.len().to_le_bytes());
             how[usize_length..address.len() + usize_length].copy_from_slice(&address.as_bytes());
             let payload_length = self.recv_slice(&mut how[address.len() + 2 * usize_length..address.len() + 2 * usize_length + prepared_whole_iov_size]).unwrap();
-            println!("\n\n{}\n", payload_length);
             how[address.len() + usize_length..address.len() + 2 * usize_length].copy_from_slice(&payload_length.to_le_bytes());
-            //TODO should return the length of payload but relibc uses trim on the buffer incorrectly
-            Ok(how.len())
 
+            Ok(address.len() + 2 * usize_length + prepared_whole_iov_size)
         } else if socket_file.flags & syscall::O_NONBLOCK == syscall::O_NONBLOCK || flags & flag::MSG_DONTWAIT as usize != 0 {
             Err(SyscallError::new(syscall::EAGAIN))
         } else {
