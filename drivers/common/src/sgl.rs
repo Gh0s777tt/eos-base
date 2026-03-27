@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 use libredox::call::MmapArgs;
 use libredox::errno::EINVAL;
 use libredox::error::{Error, Result};
-use libredox::flag::{MAP_PRIVATE, PROT_READ, PROT_WRITE};
+use libredox::flag::{MAP_PRIVATE, PROT_NONE, PROT_READ, PROT_WRITE};
 use syscall::{MAP_FIXED, PAGE_SIZE};
 
 use crate::dma::phys_contiguous_fd;
@@ -54,7 +54,7 @@ impl Sgl {
         unsafe {
             let virt = libredox::call::mmap(MmapArgs {
                 flags: MAP_PRIVATE,
-                prot: PROT_READ | PROT_WRITE,
+                prot: PROT_NONE,
                 length: aligned_length,
 
                 offset: 0,
