@@ -1,8 +1,8 @@
 use std::fs::File;
-use std::ops::Range;
 use std::os::fd::{AsFd, BorrowedFd};
 use std::{io, mem, ptr};
 
+use drm::buffer::Buffer;
 use drm::control::connector::{self, State};
 use drm::control::dumbbuffer::{DumbBuffer, DumbMapping};
 use drm::control::Device as _;
@@ -86,20 +86,28 @@ impl CpuBackedBuffer {
         self.shadow.as_deref_mut().unwrap_or(&mut *self.map)
     }
 
-    pub fn sync_range(&mut self, ranges: impl Iterator<Item = Range<usize>>) {
+    pub fn sync_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
         let Some(shadow) = &self.shadow else {
             return; // No shadow buffer; all writes are already propagated to the GPU.
         };
 
-        for range in ranges {
-            assert!(range.start <= range.end);
-            assert!(range.end <= self.map.len());
+        assert!(x.checked_add(width).unwrap() <= self.buffer.size().0);
+        assert!(y.checked_add(height).unwrap() <= self.buffer.size().1);
 
+        let start_x: usize = x.try_into().unwrap();
+        let start_y: usize = y.try_into().unwrap();
+        let w: usize = width.try_into().unwrap();
+        let h: usize = height.try_into().unwrap();
+
+        let offscreen_ptr = shadow.as_ptr().cast::<u32>();
+        let onscreen_ptr = self.map.as_mut_ptr().cast::<u32>();
+
+        for row in start_y..start_y + h {
             unsafe {
                 ptr::copy_nonoverlapping(
-                    shadow.as_ptr().add(range.start),
-                    self.map.as_mut_ptr().add(range.start),
-                    range.end - range.start,
+                    offscreen_ptr.add(row * self.buffer.pitch() as usize / 4 + start_x),
+                    onscreen_ptr.add(row * self.buffer.pitch() as usize / 4 + start_x),
+                    w,
                 );
             }
         }
