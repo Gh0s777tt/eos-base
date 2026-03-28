@@ -107,12 +107,8 @@ impl V2DisplayMap {
     }
 
     pub fn dirty_fb(&mut self, damage: Damage) -> io::Result<()> {
-        let pitch = self.buffer.buffer().pitch();
         self.buffer
-            .sync_range((damage.y..damage.y + damage.height).map(|row| {
-                let start = (row * pitch + damage.x * 4) as usize;
-                start..start + damage.width as usize * 4
-            }));
+            .sync_rect(damage.x, damage.y, damage.width, damage.height);
 
         self.display_handle.dirty_framebuffer(
             self.fb,
