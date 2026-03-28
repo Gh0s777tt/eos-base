@@ -4,7 +4,7 @@ use syscall::error::Result;
 use syscall::{Error, EIO};
 
 use super::buffer::GpuBuffer;
-use super::MmioRegion;
+use super::{GlobalGtt, MmioRegion};
 
 pub const PLANE_CTL_ENABLE: u32 = 1 << 31;
 
@@ -38,11 +38,11 @@ impl DeviceFb {
 
     pub fn alloc(
         gm: &MmioRegion,
-        alloc_surfaces: &mut RangeAllocator<u32>,
+        ggtt: &mut GlobalGtt,
         width: u32,
         height: u32,
     ) -> syscall::Result<Self> {
-        let (buffer, stride) = GpuBuffer::alloc_dumb(gm, alloc_surfaces, width, height)?;
+        let (buffer, stride) = GpuBuffer::alloc_dumb(gm, ggtt, width, height)?;
 
         Ok(DeviceFb {
             buffer,
@@ -112,11 +112,7 @@ impl Plane {
         Ok(())
     }
 
-    pub fn fetch_framebuffer(
-        &self,
-        gm: &MmioRegion,
-        alloc_surfaces: &mut RangeAllocator<u32>,
-    ) -> DeviceFb {
+    pub fn fetch_framebuffer(&self, gm: &MmioRegion, ggtt: &mut GlobalGtt) -> DeviceFb {
         let size = self.size.read();
         let width = (size & 0xFFFF) + 1;
         let height = ((size >> 16) & 0xFFFF) + 1;
@@ -126,14 +122,7 @@ impl Plane {
         let surf = self.surf.read() & 0xFFFFF000;
         //TODO: read bits per pixel
         let surf_size = (stride * height).next_multiple_of(4096);
-        alloc_surfaces
-            .allocate_exact_range(surf..(surf + surf_size))
-            .unwrap_or_else(|err| {
-                panic!(
-                    "failed to allocate pre-existing surface at 0x{:x} of size {}: {:?}",
-                    surf, surf_size, err
-                );
-            });
+        ggtt.reserve(surf, surf_size);
 
         unsafe { DeviceFb::new(gm, surf, width, height, stride, true) }
     }

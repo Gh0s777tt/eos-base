@@ -1,8 +1,8 @@
-use std::{ptr, slice};
+use std::{mem, ptr, slice};
 
-use range_alloc::RangeAllocator;
-use syscall::{Error, EIO};
+use common::dma::Dma;
 
+use crate::device::ggtt::GlobalGtt;
 use crate::device::MmioRegion;
 
 #[derive(Debug)]
@@ -28,35 +28,21 @@ impl GpuBuffer {
         }
     }
 
-    pub fn alloc(
-        gm: &MmioRegion,
-        alloc_surfaces: &mut RangeAllocator<u32>,
-        size: u32,
-    ) -> syscall::Result<Self> {
-        let surf_size = size.next_multiple_of(4096);
-        let gm_offset = alloc_surfaces
-            .allocate_range(surf_size)
-            .map_err(|err| {
-                log::warn!("failed to allocate buffer of size {}: {:?}", surf_size, err);
-                Error::new(EIO)
-            })?
-            .start;
+    pub fn alloc(gm: &MmioRegion, ggtt: &mut GlobalGtt, size: u32) -> syscall::Result<Self> {
+        let gm_offset = ggtt.alloc_phys_mem(size)?;
 
         Ok(unsafe { GpuBuffer::new(gm, gm_offset, size, true) })
     }
 
     pub fn alloc_dumb(
         gm: &MmioRegion,
-        alloc_surfaces: &mut RangeAllocator<u32>,
+        ggtt: &mut GlobalGtt,
         width: u32,
         height: u32,
     ) -> syscall::Result<(Self, u32)> {
         //TODO: documentation on this is not great
         let stride = (width * 4).next_multiple_of(64);
 
-        Ok((
-            GpuBuffer::alloc(gm, alloc_surfaces, stride * height)?,
-            stride,
-        ))
+        Ok((GpuBuffer::alloc(gm, ggtt, stride * height)?, stride))
     }
 }
