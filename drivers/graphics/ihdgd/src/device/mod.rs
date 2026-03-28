@@ -392,7 +392,8 @@ impl Device {
             DeviceKind::Alchemist => {
                 // Many registers are identical to tigerlake
                 dplls = Dpll::tigerlake(&gttmm)?;
-                pipes = Pipe::tigerlake(&gttmm)?;
+                pipes = Pipe::alchemist(&gttmm)?;
+                // FIXME transcoders are probably different too
                 transcoders = Transcoder::tigerlake(&gttmm)?;
                 // Power wells are distinct
                 ddis = Ddi::alchemist(&gttmm)?;
