@@ -38,8 +38,10 @@ const DEFAULT_PRNG_MODE: u16 = 0o644;
 // Rand crate recommends at least 256 bits of entropy to seed the RNG
 const SEED_BYTES: usize = 32;
 
-/// Create a true random seed for the RNG from the Intel x64 rdrand instruction if present.
-/// Will seed with a zero (insecure) if rdrand not present.
+/// Create a true random seed for the RNG if hardware support is present.
+/// On Intel x64 from rdrand instruction.
+/// On AArch64 from RNDRRS system register.
+/// Will seed with a zero (insecure) if getting support is not present.
 fn create_rdrand_seed() -> [u8; SEED_BYTES] {
     let mut rng = [0; SEED_BYTES];
     let mut have_seeded = false;
@@ -56,6 +58,32 @@ fn create_rdrand_seed() -> [u8; SEED_BYTES] {
                 rng[i * 8..(i * 8 + 8)].copy_from_slice(&rand.to_le_bytes());
             }
             have_seeded = true;
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        fn is_cpu_feature_detected(feature: &str) -> bool {
+            if let Ok(cpu) = std::fs::read_to_string("/scheme/sys/cpu") {
+                return cpu
+                    .lines()
+                    .find_map(|s| s.strip_prefix("Features:"))
+                    .map(|s| s.split(" ").find(|s| s == &feature))
+                    .is_some();
+            }
+            false
+        }
+        if is_cpu_feature_detected("rand") {
+            let mut failure = false;
+            for i in 0..SEED_BYTES / 8 {
+                // We get 8 bytes at a time from RNDRRS register
+                let rand: u64;
+                unsafe {
+                    asm!("mrs {}, s3_3_c2_c4_1", out(reg) rand); // rndrrs
+                }
+                failure |= rand == 0;
+                rng[i * 8..(i * 8 + 8)].copy_from_slice(&rand.to_le_bytes());
+            }
+            have_seeded = !failure;
         }
     } // TODO integrate alternative entropy sources
     if !have_seeded {
