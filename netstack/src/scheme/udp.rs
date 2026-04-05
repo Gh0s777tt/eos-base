@@ -238,13 +238,7 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
             _ => {
                 let remote_endpoint = parse_endpoint(path);
                 if let SchemeFile::Socket(ref udp_handle) = *file {
-                    SchemeFile::Socket(udp_handle.clone_with_data(
-                        if remote_endpoint.is_specified() {
-                            remote_endpoint
-                        } else {
-                            return Err(SyscallError::new(syscall::EADDRNOTAVAIL));
-                        },
-                    ))
+                    SchemeFile::Socket(udp_handle.clone_with_data(remote_endpoint))
                 } else {
                     SchemeFile::Socket(SocketFile::new_with_data(socket_handle, remote_endpoint))
                 }
