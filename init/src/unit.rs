@@ -233,4 +233,26 @@ impl Unit {
 
         Ok(Unit { id, info, kind })
     }
+
+    pub fn conditions_met(&self) -> bool {
+        if let Some(condition_architecture) = &self.info.condition_architecture {
+            if !condition_architecture
+                .iter()
+                .any(|arch| arch == std::env::consts::ARCH)
+            {
+                return false;
+            }
+        }
+
+        if let Some(condition_board) = &self.info.condition_board {
+            if !condition_board
+                .iter()
+                .any(|board| Some(&**board) == option_env!("BOARD"))
+            {
+                return false;
+            }
+        }
+
+        true
+    }
 }

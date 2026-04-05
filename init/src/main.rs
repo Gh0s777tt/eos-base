@@ -209,21 +209,8 @@ fn main() {
     }
 
     'a: while let Some(unit) = pending_units.pop_front() {
-        if let Some(condition_architecture) = &unit_store.unit(&unit).info.condition_architecture {
-            if !condition_architecture
-                .iter()
-                .any(|arch| arch == std::env::consts::ARCH)
-            {
-                continue 'a;
-            }
-        }
-        if let Some(condition_board) = &unit_store.unit(&unit).info.condition_board {
-            if !condition_board
-                .iter()
-                .any(|board| Some(&**board) == option_env!("BOARD"))
-            {
-                continue 'a;
-            }
+        if !unit_store.unit(&unit).conditions_met() {
+            continue 'a;
         }
         for dep in &unit_store.unit(&unit).info.requires_weak {
             if pending_units.contains(dep) {
