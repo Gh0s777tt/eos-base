@@ -122,9 +122,6 @@ impl InputScheme {
                         pending.push(VtEvent {
                             kind: VtEventKind::Activate,
                             vt: new_active,
-                            width: 0,
-                            height: 0,
-                            stride: 0,
                         });
                         *notified = false;
                     }
@@ -250,9 +247,6 @@ impl SchemeSync for InputScheme {
                         vec![VtEvent {
                             kind: VtEventKind::Activate,
                             vt: active_vt,
-                            width: 0,
-                            height: 0,
-                            stride: 0,
                         }]
                     } else {
                         vec![]

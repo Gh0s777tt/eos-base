@@ -59,27 +59,6 @@ impl ConsumerHandle {
         self.0.as_fd()
     }
 
-    pub fn open_display(&self) -> io::Result<File> {
-        let mut buffer = [0; 1024];
-        let fd = self.0.as_raw_fd();
-        let written = libredox::call::fpath(fd as usize, &mut buffer)?;
-
-        assert!(written <= buffer.len());
-
-        let display_path = std::str::from_utf8(&buffer[..written])
-            .expect("init: display path UTF-8 check failed")
-            .to_owned();
-
-        let display_file =
-            libredox::call::open(&display_path, (O_CLOEXEC | O_NONBLOCK | O_RDWR) as _, 0)
-                .map(|socket| unsafe { File::from_raw_fd(socket as RawFd) })
-                .unwrap_or_else(|err| {
-                    panic!("failed to open display {}: {}", display_path, err);
-                });
-
-        Ok(display_file)
-    }
-
     pub fn open_display_v2(&self) -> io::Result<File> {
         let mut buffer = [0; 1024];
         let fd = self.0.as_raw_fd();
@@ -167,9 +146,6 @@ impl DisplayHandle {
         let mut event = VtEvent {
             kind: VtEventKind::Activate,
             vt: usize::MAX,
-            width: u32::MAX,
-            height: u32::MAX,
-            stride: u32::MAX,
         };
 
         let nread = self.0.read(unsafe { any_as_u8_slice_mut(&mut event) })?;
@@ -219,10 +195,6 @@ pub enum VtEventKind {
 pub struct VtEvent {
     pub kind: VtEventKind,
     pub vt: usize,
-
-    pub width: u32,
-    pub height: u32,
-    pub stride: u32,
 }
 
 pub struct ProducerHandle(File);

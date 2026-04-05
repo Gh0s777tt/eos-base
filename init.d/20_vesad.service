@@ -6,7 +6,6 @@ requires_weak = ["10_inputd.service"]
 cmd = "vesad"
 inherit_envs = [
     "FRAMEBUFFER_ADDR",
-    "FRAMEBUFFER_VIRT",
     "FRAMEBUFFER_WIDTH",
     "FRAMEBUFFER_HEIGHT",
     "FRAMEBUFFER_STRIDE",
