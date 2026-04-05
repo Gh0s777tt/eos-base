@@ -5,7 +5,6 @@ use std::io::Result;
 use std::path::{Path, PathBuf};
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
-use serde::Deserialize;
 
 use crate::script::Command;
 use crate::unit::{Unit, UnitId, UnitStore};
@@ -49,8 +48,6 @@ impl InitConfig {
     }
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SwitchRoot {
     prefix: PathBuf,
     etcdir: PathBuf,
