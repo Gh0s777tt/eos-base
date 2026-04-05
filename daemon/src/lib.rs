@@ -67,11 +67,7 @@ impl Daemon {
 
         let mut data = [0];
         match read_pipe.read_exact(&mut data) {
-            Ok(()) => {
-                if data[0] != 0 {
-                    eprintln!("daemon: {cmd:?} failed with {}", data[0]);
-                }
-            }
+            Ok(()) => {}
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
                 eprintln!("daemon: {cmd:?} exited without notifying readiness");
             }
