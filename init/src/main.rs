@@ -83,11 +83,18 @@ impl SwitchRoot {
             self.etcdir.join("init.d"),
         ];
 
-        let mut errors = vec![];
+        if self.prefix == Path::new("/scheme/initfs") {
+            let unit_id = UnitId("00_runtime.target".to_owned());
+            let mut errors = vec![];
+            let loaded_units = unit_store.load_units(unit_id.clone(), &mut errors);
+            pending_units.extend(loaded_units);
+            for error in errors {
+                eprintln!("init: {error}");
+            }
+            unit_store.set_runtime_target(unit_id);
+        }
 
-        let loaded_units =
-            unit_store.load_units(UnitId("00_runtime.target".to_owned()), &mut errors);
-        pending_units.extend(loaded_units);
+        let mut errors = vec![];
 
         if let Some(target) = self.target {
             let loaded_units = unit_store.load_units(target, &mut errors);
@@ -187,7 +194,6 @@ fn main() {
     let mut unit_store = UnitStore::new();
     let mut pending_units = VecDeque::new();
 
-    let runtime_target = UnitId("00_runtime.target".to_owned());
     let initfs_target = UnitId("90_initfs.target".to_owned());
 
     SwitchRoot {
@@ -218,12 +224,6 @@ fn main() {
                 .iter()
                 .any(|board| Some(&**board) == option_env!("BOARD"))
             {
-                continue 'a;
-            }
-        }
-        if unit_store.unit(&unit).info.default_dependencies {
-            if pending_units.contains(&runtime_target) {
-                pending_units.push_back(unit);
                 continue 'a;
             }
         }
