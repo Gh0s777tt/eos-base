@@ -1,6 +1,4 @@
-use std::{mem, ptr, slice};
-
-use common::dma::Dma;
+use std::{ptr, slice};
 
 use crate::device::ggtt::GlobalGtt;
 use crate::device::MmioRegion;
