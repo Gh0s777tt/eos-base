@@ -213,84 +213,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
             .expect("driver-graphics: failed to read display handle")
         {
             match vt_event.kind {
-                VtEventKind::Activate => {
-                    log::info!("activate {}", vt_event.vt);
-
-                    // Disable the kernel graphical debug writing once switching vt's for the
-                    // first time. This way the kernel graphical debug remains enabled if the
-                    // userspace logging infrastructure doesn't start up because for example a
-                    // kernel panic happened prior to it starting up or logd crashed.
-                    if let Some(mut disable_graphical_debug) =
-                        self.inner.disable_graphical_debug.take()
-                    {
-                        let _ = disable_graphical_debug.write(&[1]);
-                    }
-
-                    self.inner.active_vt = vt_event.vt;
-
-                    let vt_state = GraphicsSchemeInner::get_or_create_vt(
-                        &self.inner.objects,
-                        &mut self.inner.vts,
-                        vt_event.vt,
-                    );
-
-                    for (connector_idx, connector_state) in
-                        vt_state.connector_state.iter().enumerate()
-                    {
-                        let connector_id = self.inner.objects.connector_ids()[connector_idx];
-                        let mut connector = self
-                            .inner
-                            .objects
-                            .get_connector(connector_id)
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        connector.state = connector_state.clone();
-                    }
-
-                    for (crtc_idx, crtc_state) in vt_state.crtc_state.iter().enumerate() {
-                        let crtc_id = self.inner.objects.crtc_ids()[crtc_idx];
-                        let crtc = self.inner.objects.get_crtc(crtc_id).unwrap();
-                        let connector_id = self.inner.objects.connector_ids()[crtc_idx];
-
-                        let fb = crtc_state.fb_id.map(|fb_id| {
-                            self.inner
-                                .objects
-                                .get_framebuffer(fb_id)
-                                .expect("removed framebuffers should be unset")
-                        });
-
-                        self.inner
-                            .adapter
-                            .set_crtc(
-                                &self.inner.objects,
-                                crtc,
-                                crtc_state.clone(),
-                                Damage {
-                                    x: 0,
-                                    y: 0,
-                                    width: fb.map_or(0, |fb| fb.width),
-                                    height: fb.map_or(0, |fb| fb.height),
-                                },
-                            )
-                            .unwrap();
-
-                        self.inner
-                            .objects
-                            .get_connector(connector_id)
-                            .unwrap()
-                            .lock()
-                            .unwrap()
-                            .state
-                            .crtc_id = crtc_id;
-                    }
-
-                    if self.inner.adapter.hw_cursor_size().is_some() {
-                        self.inner
-                            .adapter
-                            .handle_cursor(&vt_state.cursor_plane, true);
-                    }
-                }
+                VtEventKind::Activate => self.inner.activate_vt(vt_event.vt),
             }
         }
     }
@@ -386,6 +309,71 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 buffer: None,
             },
         })
+    }
+
+    fn activate_vt(&mut self, vt: usize) {
+        log::info!("activate {}", vt);
+
+        // Disable the kernel graphical debug writing once switching vt's for the
+        // first time. This way the kernel graphical debug remains enabled if the
+        // userspace logging infrastructure doesn't start up because for example a
+        // kernel panic happened prior to it starting up or logd crashed.
+        if let Some(mut disable_graphical_debug) = self.disable_graphical_debug.take() {
+            let _ = disable_graphical_debug.write(&[1]);
+        }
+
+        self.active_vt = vt;
+
+        let vt_state = GraphicsSchemeInner::get_or_create_vt(&self.objects, &mut self.vts, vt);
+
+        for (connector_idx, connector_state) in vt_state.connector_state.iter().enumerate() {
+            let connector_id = self.objects.connector_ids()[connector_idx];
+            let mut connector = self
+                .objects
+                .get_connector(connector_id)
+                .unwrap()
+                .lock()
+                .unwrap();
+            connector.state = connector_state.clone();
+        }
+
+        for (crtc_idx, crtc_state) in vt_state.crtc_state.iter().enumerate() {
+            let crtc_id = self.objects.crtc_ids()[crtc_idx];
+            let crtc = self.objects.get_crtc(crtc_id).unwrap();
+            let connector_id = self.objects.connector_ids()[crtc_idx];
+
+            let fb = crtc_state.fb_id.map(|fb_id| {
+                self.objects
+                    .get_framebuffer(fb_id)
+                    .expect("removed framebuffers should be unset")
+            });
+
+            self.adapter
+                .set_crtc(
+                    &self.objects,
+                    crtc,
+                    crtc_state.clone(),
+                    Damage {
+                        x: 0,
+                        y: 0,
+                        width: fb.map_or(0, |fb| fb.width),
+                        height: fb.map_or(0, |fb| fb.height),
+                    },
+                )
+                .unwrap();
+
+            self.objects
+                .get_connector(connector_id)
+                .unwrap()
+                .lock()
+                .unwrap()
+                .state
+                .crtc_id = crtc_id;
+        }
+
+        if self.adapter.hw_cursor_size().is_some() {
+            self.adapter.handle_cursor(&vt_state.cursor_plane, true);
+        }
     }
 }
 
