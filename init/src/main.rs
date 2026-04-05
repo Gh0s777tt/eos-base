@@ -8,7 +8,7 @@ use libredox::flag::{O_RDONLY, O_WRONLY};
 use serde::Deserialize;
 
 use crate::script::Command;
-use crate::unit::{UnitId, UnitStore};
+use crate::unit::{Unit, UnitId, UnitStore};
 
 mod script;
 mod service;
@@ -130,9 +130,7 @@ impl SwitchRoot {
     }
 }
 
-fn run(unit: &UnitId, unit_store: &mut UnitStore, config: &mut InitConfig) -> Result<()> {
-    let unit = unit_store.unit_mut(unit);
-
+fn run(unit: &mut Unit, config: &mut InitConfig) -> Result<()> {
     match &unit.kind {
         unit::UnitKind::LegacyScript { script } => {
             for cmd in script.0.clone() {
@@ -234,7 +232,7 @@ fn main() {
             }
         }
 
-        if let Err(err) = run(&unit, &mut unit_store, &mut init_config) {
+        if let Err(err) = run(unit_store.unit_mut(&unit), &mut init_config) {
             eprintln!("init: failed to run {}: {}", unit.0, err);
         }
 
