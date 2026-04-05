@@ -167,9 +167,6 @@ impl DisplayHandle {
         let mut event = VtEvent {
             kind: VtEventKind::Activate,
             vt: usize::MAX,
-            width: u32::MAX,
-            height: u32::MAX,
-            stride: u32::MAX,
         };
 
         let nread = self.0.read(unsafe { any_as_u8_slice_mut(&mut event) })?;
@@ -219,10 +216,6 @@ pub enum VtEventKind {
 pub struct VtEvent {
     pub kind: VtEventKind,
     pub vt: usize,
-
-    pub width: u32,
-    pub height: u32,
-    pub stride: u32,
 }
 
 pub struct ProducerHandle(File);
