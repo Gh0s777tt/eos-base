@@ -383,7 +383,7 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
         file: &SchemeFile<Self>,
         buf: &mut [u8],
     ) -> SyscallResult<usize> {
-        if self.endpoint().is_specified() {
+        if self.endpoint().addr.is_some() || self.endpoint().port != 0 {
             return self.fpath(file, buf)
         } else {
             return Err(SyscallError::new(syscall::ENOTCONN));
