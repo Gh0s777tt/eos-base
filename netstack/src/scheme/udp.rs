@@ -383,7 +383,11 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
         file: &SchemeFile<Self>,
         buf: &mut [u8],
     ) -> SyscallResult<usize> {
-        self.fpath(file, buf)
+        if self.endpoint().is_specified() {
+            return self.fpath(file, buf)
+        } else {
+            return Err(SyscallError::new(syscall::ENOTCONN));
+        }
     }
 
     fn handle_shutdown(&mut self, file: &mut SchemeFile<Self>, how: usize) -> SyscallResult<usize> {
