@@ -383,10 +383,14 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
         file: &SchemeFile<Self>,
         buf: &mut [u8],
     ) -> SyscallResult<usize> {
-        if self.endpoint().addr.is_some() || self.endpoint().port != 0 {
-            return self.fpath(file, buf)
+        let peer = match file {
+            SchemeFile::Socket(SocketFile { data, .. }) => data,
+            _ => return Err(SyscallError::new(syscall::EBADF)),
+        };
+        if peer.addr.is_some() || peer.port != 0 {
+            self.fpath(file, buf)
         } else {
-            return Err(SyscallError::new(syscall::ENOTCONN));
+            Err(SyscallError::new(syscall::ENOTCONN))
         }
     }
 
