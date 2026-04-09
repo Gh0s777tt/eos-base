@@ -10,6 +10,7 @@ use crate::service::Service;
 pub struct UnitStore {
     pub config_dirs: Vec<PathBuf>,
     units: BTreeMap<UnitId, Unit>,
+    runtime_target: Option<UnitId>,
 }
 
 impl UnitStore {
@@ -17,7 +18,14 @@ impl UnitStore {
         UnitStore {
             config_dirs: vec![],
             units: BTreeMap::new(),
+            runtime_target: None,
         }
+    }
+
+    pub fn set_runtime_target(&mut self, unit_id: UnitId) {
+        assert!(self.runtime_target.is_none());
+        assert!(self.units.contains_key(&unit_id));
+        self.runtime_target = Some(unit_id);
     }
 
     fn load_single_unit(&mut self, unit_id: UnitId, errors: &mut Vec<String>) -> Option<UnitId> {
@@ -42,13 +50,25 @@ impl UnitStore {
             return None;
         };
 
-        let unit = match Unit::from_file(unit_id.clone(), &path, instance, errors) {
+        let mut unit = match Unit::from_file(unit_id.clone(), &path, instance, errors) {
             Ok(unit) => unit,
             Err(err) => {
                 errors.push(format!("{}: {err}", path.display()));
                 return None;
             }
         };
+
+        if unit.info.default_dependencies {
+            if let Some(runtime_target) = self.runtime_target.clone() {
+                unit.info.requires_weak.push(runtime_target);
+            } else {
+                errors.push(format!(
+                    "{}: dependency of the runtime target must have default dependencies disabled",
+                    path.display(),
+                ));
+            }
+        }
+
         self.units.insert(unit_id.clone(), unit);
 
         Some(unit_id)
@@ -212,5 +232,27 @@ impl Unit {
         };
 
         Ok(Unit { id, info, kind })
+    }
+
+    pub fn conditions_met(&self) -> bool {
+        if let Some(condition_architecture) = &self.info.condition_architecture {
+            if !condition_architecture
+                .iter()
+                .any(|arch| arch == std::env::consts::ARCH)
+            {
+                return false;
+            }
+        }
+
+        if let Some(condition_board) = &self.info.condition_board {
+            if !condition_board
+                .iter()
+                .any(|board| Some(&**board) == option_env!("BOARD"))
+            {
+                return false;
+            }
+        }
+
+        true
     }
 }

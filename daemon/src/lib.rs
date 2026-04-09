@@ -2,7 +2,8 @@
 #![feature(never_type)]
 
 use std::io::{self, PipeWriter, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 use libredox::Fd;
@@ -18,6 +19,20 @@ unsafe fn get_fd(var: &str) -> RawFd {
         );
     }
     fd
+}
+
+unsafe fn pass_fd(cmd: &mut Command, env: &str, fd: OwnedFd) {
+    cmd.env(env, format!("{}", fd.as_raw_fd()));
+    unsafe {
+        cmd.pre_exec(move || {
+            // Pass notify pipe to child
+            if libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, 0) == -1 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
 }
 
 /// A long running background process that handles requests.
@@ -43,29 +58,16 @@ impl Daemon {
     pub fn spawn(mut cmd: Command) {
         let (mut read_pipe, write_pipe) = io::pipe().unwrap();
 
-        // Pass notify pipe to child
-        if unsafe { libc::fcntl(write_pipe.as_raw_fd(), libc::F_SETFD, 0) } == -1 {
-            eprintln!(
-                "daemon: failed to unset CLOEXEC flag for notify pipe: {}",
-                io::Error::last_os_error()
-            );
-            return;
-        }
-        cmd.env("INIT_NOTIFY", format!("{}", write_pipe.as_raw_fd()));
+        unsafe { pass_fd(&mut cmd, "INIT_NOTIFY", write_pipe.into()) };
 
         if let Err(err) = cmd.spawn() {
             eprintln!("daemon: failed to execute {cmd:?}: {err}");
             return;
         }
-        drop(write_pipe);
 
         let mut data = [0];
         match read_pipe.read_exact(&mut data) {
-            Ok(()) => {
-                if data[0] != 0 {
-                    eprintln!("daemon: {cmd:?} failed with {}", data[0]);
-                }
-            }
+            Ok(()) => {}
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
                 eprintln!("daemon: {cmd:?} exited without notifying readiness");
             }
@@ -127,21 +129,12 @@ impl SchemeDaemon {
     pub fn spawn(mut cmd: Command, scheme_name: &str) {
         let (read_pipe, write_pipe) = io::pipe().unwrap();
 
-        // Pass notify pipe to child
-        if unsafe { libc::fcntl(write_pipe.as_raw_fd(), libc::F_SETFD, 0) } == -1 {
-            eprintln!(
-                "daemon: failed to unset CLOEXEC flag for notify pipe: {}",
-                io::Error::last_os_error()
-            );
-            return;
-        }
-        cmd.env("INIT_NOTIFY", format!("{}", write_pipe.as_raw_fd()));
+        unsafe { pass_fd(&mut cmd, "INIT_NOTIFY", write_pipe.into()) };
 
         if let Err(err) = cmd.spawn() {
             eprintln!("daemon: failed to execute {cmd:?}: {err}");
             return;
         }
-        drop(write_pipe);
 
         let mut new_fd = usize::MAX;
         let fd_bytes = unsafe {
