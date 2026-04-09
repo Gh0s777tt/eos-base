@@ -235,6 +235,17 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
                 // there's no accept() for UDP
                 return Err(SyscallError::new(syscall::EAFNOSUPPORT));
             }
+            "disconnect" => {
+                let remote_endpoint = IpListenEndpoint {
+                    addr: None,
+                    port: 0,
+                };
+                if let SchemeFile::Socket(ref udp_handle) = *file {
+                    SchemeFile::Socket(udp_handle.clone_with_data(remote_endpoint))
+                } else {
+                    SchemeFile::Socket(SocketFile::new_with_data(socket_handle, remote_endpoint))
+                }
+            }
             _ => {
                 let remote_endpoint = parse_endpoint(path);
                 if let SchemeFile::Socket(ref udp_handle) = *file {
@@ -372,7 +383,15 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
         file: &SchemeFile<Self>,
         buf: &mut [u8],
     ) -> SyscallResult<usize> {
-        self.fpath(file, buf)
+        let peer = match file {
+            SchemeFile::Socket(SocketFile { data, .. }) => data,
+            _ => return Err(SyscallError::new(syscall::EBADF)),
+        };
+        if peer.addr.is_some() || peer.port != 0 {
+            self.fpath(file, buf)
+        } else {
+            Err(SyscallError::new(syscall::ENOTCONN))
+        }
     }
 
     fn handle_shutdown(&mut self, file: &mut SchemeFile<Self>, how: usize) -> SyscallResult<usize> {
