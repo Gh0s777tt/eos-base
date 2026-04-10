@@ -6,13 +6,15 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
+libc.workspace = true
 libredox.workspace = true
+plain.workspace = true
+redox_syscall.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 
 config = { path = "../config" }
-daemon = { path = "../daemon" }
 
 [lints]
 workspace = true

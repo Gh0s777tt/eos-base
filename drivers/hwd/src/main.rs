@@ -37,6 +37,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
     //TODO: launch pcid based on backend information?
     // Must launch after acpid but before probe calls /scheme/acpi/symbols
+    #[allow(deprecated, reason = "we can't yet move this to init")]
     daemon::Daemon::spawn(process::Command::new("pcid"));
 
     daemon.ready();
