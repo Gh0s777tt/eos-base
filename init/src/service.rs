@@ -46,38 +46,28 @@ impl Service {
         }
         command.envs(base_envs).envs(&self.envs);
 
-        match &self.type_ {
-            ServiceType::Notify => {
-                let (mut read_pipe, write_pipe) = io::pipe().unwrap();
+        let (mut read_pipe, write_pipe) = io::pipe().unwrap();
+        unsafe { pass_fd(&mut command, "INIT_NOTIFY", write_pipe.into()) };
 
-                unsafe { pass_fd(&mut command, "INIT_NOTIFY", write_pipe.into()) };
-
-                if let Err(err) = command.spawn() {
-                    eprintln!("init: failed to execute {command:?}: {err}");
-                    return;
-                }
-
-                let mut data = [0];
-                match read_pipe.read_exact(&mut data) {
-                    Ok(()) => {}
-                    Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
-                        eprintln!("init: {command:?} exited without notifying readiness");
-                    }
-                    Err(err) => {
-                        eprintln!("init: failed to wait for {command:?}: {err}");
-                    }
-                }
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(err) => {
+                eprintln!("init: failed to execute {:?}: {}", command, err);
+                return;
             }
-            ServiceType::Scheme(scheme) => {
-                let (read_pipe, write_pipe) = io::pipe().unwrap();
+        };
 
-                unsafe { pass_fd(&mut command, "INIT_NOTIFY", write_pipe.into()) };
-
-                if let Err(err) = command.spawn() {
-                    eprintln!("init: failed to execute {command:?}: {err}");
-                    return;
+        match &self.type_ {
+            ServiceType::Notify => match read_pipe.read_exact(&mut [0]) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => {
+                    eprintln!("init: {command:?} exited without notifying readiness");
                 }
-
+                Err(err) => {
+                    eprintln!("init: failed to wait for {command:?}: {err}");
+                }
+            },
+            ServiceType::Scheme(scheme) => {
                 let mut new_fd = usize::MAX;
                 loop {
                     match syscall::call_ro(
@@ -110,13 +100,7 @@ impl Service {
                     .expect("TODO");
             }
             ServiceType::Oneshot => {
-                let mut child = match command.spawn() {
-                    Ok(child) => child,
-                    Err(err) => {
-                        eprintln!("init: failed to execute {:?}: {}", command, err);
-                        return;
-                    }
-                };
+                drop(read_pipe);
                 match child.wait() {
                     Ok(exit_status) => {
                         if !exit_status.success() {
@@ -128,10 +112,7 @@ impl Service {
                     }
                 }
             }
-            ServiceType::OneshotAsync => match command.spawn() {
-                Ok(_child) => {}
-                Err(err) => eprintln!("init: failed to execute '{:?}': {}", command, err),
-            },
+            ServiceType::OneshotAsync => {}
         }
     }
 }
