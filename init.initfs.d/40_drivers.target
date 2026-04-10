@@ -6,5 +6,5 @@ requires_weak = [
     "40_ps2d.service",
     "40_bcm2835-sdhcid.service",
     "40_hwd.service",
-    "40_pcid-spawner.service",
+    "40_pcid-spawner-initfs.service",
 ]

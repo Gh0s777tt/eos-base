@@ -1,0 +1,9 @@
+[unit]
+description = "Network stack"
+requires_weak = [
+    "00_pcid-spawner.service",
+]
+
+[service]
+cmd = "smolnetd"
+type = "notify"
