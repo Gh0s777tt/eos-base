@@ -327,8 +327,10 @@ fn dhcp(iface: &str, verbose: bool) -> Result<(), String> {
             if dns[0] == 127 {
                 let quad9 = [9, 9, 9, 9].to_vec();
                 if verbose {
-                    println!("DHCP: Received sarcastic DNS suggestion {}.{}.{}.{}, using {}.{}.{}.{} instead",
-                            dns[0], dns[1], dns[2], dns[3], quad9[0], quad9[1], quad9[2], quad9[3]);
+                    println!(
+                        "DHCP: Received sarcastic DNS suggestion {}.{}.{}.{}, using {}.{}.{}.{} instead",
+                        dns[0], dns[1], dns[2], dns[3], quad9[0], quad9[1], quad9[2], quad9[3]
+                    );
                 }
                 dns = quad9;
             }
