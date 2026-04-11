@@ -4,6 +4,7 @@ members = [
     "audiod",
     "config",
     "daemon",
+    "dhcpd",
     "init",
     "initfs",
     "initfs/tools",
