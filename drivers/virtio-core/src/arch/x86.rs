@@ -32,6 +32,6 @@ pub fn enable_msix(pcid_handle: &mut PciFunctionHandle) -> Result<File, Error> {
 
     pcid_handle.enable_feature(PciFeature::MsiX);
 
-    log::info!("virtio: using MSI-X (interrupt_handle={interrupt_handle:?})");
+    log::debug!("virtio: using MSI-X (interrupt_handle={interrupt_handle:?})");
     Ok(interrupt_handle)
 }
