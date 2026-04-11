@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::Path;
-use std::{env, io};
+use std::{env, fs, io};
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
 
@@ -64,6 +64,52 @@ fn switch_root(unit_store: &mut UnitStore, config: &mut InitConfig, prefix: &Pat
     );
 
     unit_store.config_dirs = vec![prefix.join("lib").join("init.d"), etcdir.join("init.d")];
+
+    let env_dirs = &[
+        prefix.join("lib").join("environment.d"),
+        etcdir.join("environment.d"),
+    ];
+    match config::config_for_dirs(env_dirs) {
+        Ok(files) => {
+            for file in files {
+                match fs::read_to_string(&file) {
+                    Ok(envs) => {
+                        for env in envs.lines() {
+                            if env.is_empty() || env.starts_with("#") {
+                                continue;
+                            }
+                            let Some((key, value)) = env.split_once('=') else {
+                                eprintln!(
+                                    "init: failed to parse env line from {}: {env:?}",
+                                    file.display(),
+                                );
+                                continue;
+                            };
+                            config
+                                .envs
+                                .insert(key.to_owned().into(), value.to_owned().into());
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "init: failed to read environment from {}: {err}",
+                            file.display(),
+                        );
+                    }
+                }
+            }
+        }
+        Err(err) => {
+            eprintln!(
+                "init: failed to read environments from {}: {err}",
+                env_dirs
+                    .iter()
+                    .map(|dir| dir.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
 }
 
 fn main() {
