@@ -120,7 +120,6 @@ fn run_command(cmd: Command, config: &mut InitConfig) {
     match cmd {
         Command::RequiresWeak(_) => {} // handled by unit parsing code
         Command::Nothing => {}
-        Command::Echo(text) => println!("{text}"),
         Command::Service(service) => {
             if config.skip_cmd.contains(&service.cmd) {
                 eprintln!(

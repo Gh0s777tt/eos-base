@@ -45,7 +45,6 @@ pub enum Command {
     Service(Service),
 
     // Misc
-    Echo(String),
     Nothing,
 }
 
@@ -57,7 +56,6 @@ impl Command {
 
         match cmd.as_str() {
             "requires_weak" => Ok(Command::RequiresWeak(args.map(UnitId).collect::<Vec<_>>())),
-            "echo" => Ok(Command::Echo(args.collect::<Vec<_>>().join(" "))),
             "nowait" => {
                 let process = Process::parse(args)?;
 
