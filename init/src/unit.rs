@@ -132,7 +132,7 @@ fn true_bool() -> bool {
 }
 
 pub enum UnitKind {
-    LegacyScript { script: Script },
+    LegacyScript { script: Vec<Command> },
     Service { service: Service },
     Target {},
 }
@@ -182,23 +182,16 @@ impl Unit {
 
         let Some(ext) = config_path.extension().map(|ext| ext.to_str().unwrap()) else {
             let script = Script::from_str(&config, errors)?;
-            let mut requires_weak = vec![];
-            for command in &script.0 {
-                match command {
-                    Command::RequiresWeak(deps) => requires_weak.extend(deps.into_iter().cloned()),
-                    _ => {}
-                }
-            }
             return Ok(Unit {
                 id,
                 info: UnitInfo {
                     description: None,
                     default_dependencies: true,
-                    requires_weak,
+                    requires_weak: script.1,
                     condition_architecture: None,
                     condition_board: None,
                 },
-                kind: UnitKind::LegacyScript { script },
+                kind: UnitKind::LegacyScript { script: script.0 },
             });
         };
 

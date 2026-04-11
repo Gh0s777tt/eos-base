@@ -84,7 +84,7 @@ impl Scheduler {
 fn run(unit: &mut Unit, config: &mut InitConfig) {
     match &unit.kind {
         UnitKind::LegacyScript { script } => {
-            for cmd in script.0.clone() {
+            for cmd in script.clone() {
                 if config.log_debug {
                     eprintln!("init: running: {cmd:?}");
                 }
@@ -118,8 +118,6 @@ fn run(unit: &mut Unit, config: &mut InitConfig) {
 
 fn run_command(cmd: Command, config: &mut InitConfig) {
     match cmd {
-        Command::RequiresWeak(_) => {} // handled by unit parsing code
-        Command::Nothing => {}
         Command::Service(service) => {
             if config.skip_cmd.contains(&service.cmd) {
                 eprintln!(
