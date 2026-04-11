@@ -92,6 +92,7 @@ fn main() -> Result<()> {
         let channel_fd = handle.into_inner_fd();
         command.env("PCID_CLIENT_CHANNEL", channel_fd.to_string());
 
+        #[allow(deprecated, reason = "we can't yet move this to init")]
         daemon::Daemon::spawn(command);
         syscall::close(channel_fd as usize).unwrap();
     }

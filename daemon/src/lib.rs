@@ -55,6 +55,8 @@ impl Daemon {
     }
 
     /// Executes `Command` as a child process.
+    // FIXME remove once the service spawning of hwd and pcid-spawner is moved to init
+    #[deprecated]
     pub fn spawn(mut cmd: Command) {
         let (mut read_pipe, write_pipe) = io::pipe().unwrap();
 
@@ -123,54 +125,5 @@ impl SchemeDaemon {
         let cap_id = scheme.scheme_root()?;
         let cap_fd = socket.create_this_scheme_fd(0, cap_id, 0, 0)?;
         self.ready_with_fd(Fd::new(cap_fd))
-    }
-
-    /// Executes `Command` as a child process registering it to the scheme namespace.
-    pub fn spawn(mut cmd: Command, scheme_name: &str) {
-        let (read_pipe, write_pipe) = io::pipe().unwrap();
-
-        unsafe { pass_fd(&mut cmd, "INIT_NOTIFY", write_pipe.into()) };
-
-        if let Err(err) = cmd.spawn() {
-            eprintln!("daemon: failed to execute {cmd:?}: {err}");
-            return;
-        }
-
-        let mut new_fd = usize::MAX;
-        let fd_bytes = unsafe {
-            core::slice::from_raw_parts_mut(
-                core::slice::from_mut(&mut new_fd).as_mut_ptr() as *mut u8,
-                core::mem::size_of::<usize>(),
-            )
-        };
-        loop {
-            match syscall::call_ro(
-                read_pipe.as_raw_fd() as usize,
-                fd_bytes,
-                syscall::CallFlags::FD | syscall::CallFlags::FD_UPPER,
-                &[],
-            ) {
-                Err(syscall::Error {
-                    errno: syscall::EINTR,
-                }) => continue,
-                Ok(0) => {
-                    eprintln!("daemon: {cmd:?} exited without notifying readiness");
-                    return;
-                }
-                Ok(1) => break,
-                Ok(n) => {
-                    eprintln!("daemon: incorrect amount of fds {n} returned");
-                    return;
-                }
-                Err(err) => {
-                    eprintln!("daemon: failed to wait for {cmd:?}: {err}");
-                    return;
-                }
-            }
-        }
-
-        let current_namespace_fd = libredox::call::getns().expect("TODO");
-        libredox::call::register_scheme_to_ns(current_namespace_fd, scheme_name, new_fd)
-            .expect("TODO");
     }
 }

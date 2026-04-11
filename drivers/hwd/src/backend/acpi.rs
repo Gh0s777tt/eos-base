@@ -13,6 +13,7 @@ impl Backend for AcpiBackend {
 
         // Spawn acpid
         //TODO: pass rxsdt data to acpid?
+        #[allow(deprecated, reason = "we can't yet move this to init")]
         daemon::Daemon::spawn(Command::new("acpid"));
 
         Ok(Self { rxsdt })

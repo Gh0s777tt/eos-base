@@ -1085,8 +1085,10 @@ name = "init"
 version = "0.1.0"
 dependencies = [
  "config",
- "daemon",
+ "libc",
  "libredox",
+ "plain",
+ "redox_syscall 0.7.3",
  "serde",
  "serde_json",
  "toml",

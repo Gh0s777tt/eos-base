@@ -137,20 +137,20 @@ fn main() {
         Path::new("/scheme/initfs/etc"),
     );
 
+    // Start logd first such that we can pass /scheme/log as stdio to all other services
+    scheduler
+        .schedule_start_and_report_errors(&mut unit_store, UnitId("00_logd.service".to_owned()));
+    scheduler.step(&mut unit_store, &mut init_config);
+    if let Err(err) = switch_stdio("/scheme/log") {
+        eprintln!("init: failed to switch stdio to '/scheme/log': {err}");
+    }
+
     let runtime_target = UnitId("00_runtime.target".to_owned());
     scheduler.schedule_start_and_report_errors(&mut unit_store, runtime_target.clone());
     unit_store.set_runtime_target(runtime_target);
 
     scheduler
         .schedule_start_and_report_errors(&mut unit_store, UnitId("90_initfs.target".to_owned()));
-
-    let mut command = std::process::Command::new("logd");
-    command.env_clear().envs(&init_config.envs);
-    daemon::SchemeDaemon::spawn(command, "log");
-    if let Err(err) = switch_stdio("/scheme/log") {
-        eprintln!("init: failed to switch stdio to '/scheme/log': {err}");
-    }
-
     scheduler.step(&mut unit_store, &mut init_config);
 
     switch_root(
