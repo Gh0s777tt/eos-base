@@ -9,11 +9,10 @@ use ioslice::IoSlice;
 use libredox::flag;
 use libredox::{error::Result, Fd};
 
-use redox_scheme::scheme::register_sync_scheme;
 use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::Socket;
 
-use daemon::Daemon;
+use daemon::SchemeDaemon;
 
 use self::scheme::AudioScheme;
 
@@ -35,7 +34,7 @@ fn thread(scheme: Arc<Mutex<AudioScheme>>, pid: usize, hw_file: Fd) -> Result<()
     }
 }
 
-fn daemon(daemon: Daemon) -> anyhow::Result<()> {
+fn daemon(daemon: SchemeDaemon) -> anyhow::Result<()> {
     // Handle signals from the hw thread
 
     let new_sigaction = unsafe {
@@ -55,14 +54,7 @@ fn daemon(daemon: Daemon) -> anyhow::Result<()> {
 
     let scheme = Arc::new(Mutex::new(AudioScheme::new()));
 
-    {
-        let mut scheme = scheme.lock().unwrap();
-        register_sync_scheme(&socket, "audio", &mut *scheme)
-            .expect("audiod: failed to register scheme to namespace");
-    }
-
-    // The scheme is now ready to accept requests, notify the original process
-    daemon.ready();
+    let _ = daemon.ready_sync_scheme(&socket, &mut *scheme.lock().unwrap());
 
     // Enter a constrained namespace
     let ns = libredox::call::mkns(&[
@@ -93,10 +85,10 @@ fn daemon(daemon: Daemon) -> anyhow::Result<()> {
 }
 
 fn main() {
-    Daemon::new(inner);
+    SchemeDaemon::new(inner);
 }
 
-fn inner(x: Daemon) -> ! {
+fn inner(x: SchemeDaemon) -> ! {
     match daemon(x) {
         Ok(()) => {
             process::exit(0);

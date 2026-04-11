@@ -12,11 +12,12 @@ pub fn subst_env<'a>(arg: &str) -> String {
     }
 }
 
-pub struct Script(pub Vec<Command>);
+pub struct Script(pub Vec<Command>, pub Vec<UnitId>);
 
 impl Script {
     pub fn from_str(config: &str, errors: &mut Vec<String>) -> io::Result<Script> {
         let mut cmds = vec![];
+        let mut requires_weak = vec![];
 
         for line_raw in config.lines() {
             let line = line_raw.trim();
@@ -26,85 +27,57 @@ impl Script {
 
             let args = line.split(' ').map(subst_env);
 
-            match Command::parse(args) {
-                Ok(cmd) => cmds.push(cmd),
+            match Command::parse(args, &mut requires_weak) {
+                Ok(None) => {}
+                Ok(Some(cmd)) => cmds.push(cmd),
                 Err(err) => errors.push(err),
             }
         }
 
-        Ok(Script(cmds))
+        Ok(Script(cmds, requires_weak))
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum Command {
-    // Dependencies
-    RequiresWeak(Vec<UnitId>),
-
-    // Service
     Service(Service),
-
-    // Misc
-    Echo(String),
-    Nothing,
 }
 
 impl Command {
-    fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
+    fn parse(
+        mut args: impl Iterator<Item = String>,
+        requires_weak: &mut Vec<UnitId>,
+    ) -> Result<Option<Command>, String> {
         let Some(cmd) = args.next() else {
-            return Ok(Command::Nothing);
+            return Ok(None);
         };
 
         match cmd.as_str() {
-            "requires_weak" => Ok(Command::RequiresWeak(args.map(UnitId).collect::<Vec<_>>())),
-            "echo" => Ok(Command::Echo(args.collect::<Vec<_>>().join(" "))),
-            "notify" => {
-                let process = Process::parse(args)?;
-
-                Ok(Command::Service(Service {
-                    cmd: process.cmd,
-                    args: process.args,
-                    envs: process.envs,
-                    inherit_envs: BTreeSet::new(),
-                    type_: ServiceType::Notify,
-                }))
-            }
-            "scheme" => {
-                let Some(scheme) = args.next() else {
-                    return Err("init: failed to run scheme: no argument".to_owned());
-                };
-
-                let process = Process::parse(args)?;
-
-                Ok(Command::Service(Service {
-                    cmd: process.cmd,
-                    args: process.args,
-                    envs: process.envs,
-                    inherit_envs: BTreeSet::new(),
-                    type_: ServiceType::Scheme(scheme),
-                }))
+            "requires_weak" => {
+                requires_weak.extend(args.map(UnitId));
+                Ok(None)
             }
             "nowait" => {
                 let process = Process::parse(args)?;
 
-                Ok(Command::Service(Service {
+                Ok(Some(Command::Service(Service {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
                     inherit_envs: BTreeSet::new(),
                     type_: ServiceType::OneshotAsync,
-                }))
+                })))
             }
             _ => {
                 let process = Process::parse(iter::once(cmd).chain(args))?;
 
-                Ok(Command::Service(Service {
+                Ok(Some(Command::Service(Service {
                     cmd: process.cmd,
                     args: process.args,
                     envs: process.envs,
                     inherit_envs: BTreeSet::new(),
                     type_: ServiceType::Oneshot,
-                }))
+                })))
             }
         }
     }

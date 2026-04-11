@@ -1,21 +1,19 @@
 use std::collections::BTreeMap;
-use std::env;
 use std::ffi::OsString;
-use std::io::Result;
 use std::path::Path;
+use std::{env, fs, io};
 
 use libredox::flag::{O_RDONLY, O_WRONLY};
 
 use crate::scheduler::Scheduler;
-use crate::script::Command;
-use crate::unit::{Unit, UnitId, UnitStore};
+use crate::unit::{UnitId, UnitStore};
 
 mod scheduler;
 mod script;
 mod service;
 mod unit;
 
-fn switch_stdio(stdio: &str) -> Result<()> {
+fn switch_stdio(stdio: &str) -> io::Result<()> {
     let stdin = libredox::Fd::open(stdio, O_RDONLY, 0)?;
     let stdout = libredox::Fd::open(stdio, O_WRONLY, 0)?;
     let stderr = libredox::Fd::open(stdio, O_WRONLY, 0)?;
@@ -66,61 +64,50 @@ fn switch_root(unit_store: &mut UnitStore, config: &mut InitConfig, prefix: &Pat
     );
 
     unit_store.config_dirs = vec![prefix.join("lib").join("init.d"), etcdir.join("init.d")];
-}
 
-fn run(unit: &mut Unit, config: &mut InitConfig) -> Result<()> {
-    match &unit.kind {
-        unit::UnitKind::LegacyScript { script } => {
-            for cmd in script.0.clone() {
-                if config.log_debug {
-                    eprintln!("init: running: {cmd:?}");
+    let env_dirs = &[
+        prefix.join("lib").join("environment.d"),
+        etcdir.join("environment.d"),
+    ];
+    match config::config_for_dirs(env_dirs) {
+        Ok(files) => {
+            for file in files {
+                match fs::read_to_string(&file) {
+                    Ok(envs) => {
+                        for env in envs.lines() {
+                            if env.is_empty() || env.starts_with("#") {
+                                continue;
+                            }
+                            let Some((key, value)) = env.split_once('=') else {
+                                eprintln!(
+                                    "init: failed to parse env line from {}: {env:?}",
+                                    file.display(),
+                                );
+                                continue;
+                            };
+                            config
+                                .envs
+                                .insert(key.to_owned().into(), value.to_owned().into());
+                        }
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "init: failed to read environment from {}: {err}",
+                            file.display(),
+                        );
+                    }
                 }
-                run_command(cmd, config);
             }
         }
-        unit::UnitKind::Service { service } => {
-            if config.skip_cmd.contains(&service.cmd) {
-                eprintln!("Skipping '{} {}'", service.cmd, service.args.join(" "));
-                return Ok(());
-            }
-            if config.log_debug {
-                eprintln!(
-                    "Starting {} ({})",
-                    unit.info.description.as_ref().unwrap_or(&unit.id.0),
-                    service.cmd,
-                );
-            }
-            service.spawn(&config.envs);
-        }
-        unit::UnitKind::Target {} => {
-            if config.log_debug {
-                eprintln!(
-                    "Reached target {}",
-                    unit.info.description.as_ref().unwrap_or(&unit.id.0),
-                );
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn run_command(cmd: Command, config: &mut InitConfig) {
-    match cmd {
-        Command::RequiresWeak(_) => {} // handled by unit parsing code
-        Command::Nothing => {}
-        Command::Echo(text) => println!("{text}"),
-        Command::Service(service) => {
-            if config.skip_cmd.contains(&service.cmd) {
-                eprintln!(
-                    "init: skipping '{} {}'",
-                    service.cmd,
-                    service.args.join(" ")
-                );
-                return;
-            }
-
-            service.spawn(&config.envs);
+        Err(err) => {
+            eprintln!(
+                "init: failed to read environments from {}: {err}",
+                env_dirs
+                    .iter()
+                    .map(|dir| dir.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
     }
 }

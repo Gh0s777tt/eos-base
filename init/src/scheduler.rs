@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 
 use crate::InitConfig;
-use crate::unit::{UnitId, UnitStore};
+use crate::script::Command;
+use crate::unit::{Unit, UnitId, UnitKind, UnitStore};
 
 pub struct Scheduler {
     pending: VecDeque<Job>,
@@ -73,11 +74,61 @@ impl Scheduler {
                         }
                     }
 
-                    if let Err(err) = crate::run(unit, init_config) {
-                        eprintln!("init: failed to run {}: {}", job.unit.0, err);
-                    }
+                    run(unit, init_config);
                 }
             }
+        }
+    }
+}
+
+fn run(unit: &mut Unit, config: &mut InitConfig) {
+    match &unit.kind {
+        UnitKind::LegacyScript { script } => {
+            for cmd in script.clone() {
+                if config.log_debug {
+                    eprintln!("init: running: {cmd:?}");
+                }
+                run_command(cmd, config);
+            }
+        }
+        UnitKind::Service { service } => {
+            if config.skip_cmd.contains(&service.cmd) {
+                eprintln!("Skipping '{} {}'", service.cmd, service.args.join(" "));
+                return;
+            }
+            if config.log_debug {
+                eprintln!(
+                    "Starting {} ({})",
+                    unit.info.description.as_ref().unwrap_or(&unit.id.0),
+                    service.cmd,
+                );
+            }
+            service.spawn(&config.envs);
+        }
+        UnitKind::Target {} => {
+            if config.log_debug {
+                eprintln!(
+                    "Reached target {}",
+                    unit.info.description.as_ref().unwrap_or(&unit.id.0),
+                );
+            }
+        }
+    }
+}
+
+fn run_command(cmd: Command, config: &mut InitConfig) {
+    match cmd {
+        Command::Service(service) => {
+            if config.skip_cmd.contains(&service.cmd) {
+                eprintln!(
+                    "init: skipping '{} {}'",
+                    service.cmd,
+                    service.args.join(" ")
+                );
+                return;
+            }
+
+            service.spawn(&config.envs);
         }
     }
 }
