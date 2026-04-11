@@ -58,32 +58,6 @@ impl Command {
         match cmd.as_str() {
             "requires_weak" => Ok(Command::RequiresWeak(args.map(UnitId).collect::<Vec<_>>())),
             "echo" => Ok(Command::Echo(args.collect::<Vec<_>>().join(" "))),
-            "notify" => {
-                let process = Process::parse(args)?;
-
-                Ok(Command::Service(Service {
-                    cmd: process.cmd,
-                    args: process.args,
-                    envs: process.envs,
-                    inherit_envs: BTreeSet::new(),
-                    type_: ServiceType::Notify,
-                }))
-            }
-            "scheme" => {
-                let Some(scheme) = args.next() else {
-                    return Err("init: failed to run scheme: no argument".to_owned());
-                };
-
-                let process = Process::parse(args)?;
-
-                Ok(Command::Service(Service {
-                    cmd: process.cmd,
-                    args: process.args,
-                    envs: process.envs,
-                    inherit_envs: BTreeSet::new(),
-                    type_: ServiceType::Scheme(scheme),
-                }))
-            }
             "nowait" => {
                 let process = Process::parse(args)?;
 

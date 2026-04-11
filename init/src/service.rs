@@ -104,7 +104,7 @@ impl Service {
                 match child.wait() {
                     Ok(exit_status) => {
                         if !exit_status.success() {
-                            eprintln!("{command:?} failed with {exit_status}");
+                            eprintln!("init: {command:?} failed with {exit_status}");
                         }
                     }
                     Err(err) => {
