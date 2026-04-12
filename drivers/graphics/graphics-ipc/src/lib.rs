@@ -82,6 +82,10 @@ impl CpuBackedBuffer {
         &self.buffer
     }
 
+    pub fn has_shadow_buf(&self) -> bool {
+        self.shadow.is_some()
+    }
+
     pub fn shadow_buf(&mut self) -> &mut [u8] {
         self.shadow.as_deref_mut().unwrap_or(&mut *self.map)
     }
