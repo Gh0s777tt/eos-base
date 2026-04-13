@@ -1,12 +1,10 @@
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use common::io::Pio;
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::CallerCtx;
 use redox_scheme::OpenResult;
+use scheme_utils::HandleMap;
 use syscall::error::{Error, Result, EACCES, EBADF, EINVAL, ENOENT};
 use syscall::schemev2::NewFdFlags;
 use syscall::EWOULDBLOCK;
@@ -156,8 +154,7 @@ pub struct Ac97 {
     bus: BusRegs,
     bdl: Dma<[BufferDescriptor; NUM_SUB_BUFFS]>,
     buf: Dma<[u8; NUM_SUB_BUFFS * SUB_BUFF_SIZE]>,
-    handles: Mutex<BTreeMap<usize, Handle>>,
-    next_id: AtomicUsize,
+    handles: Mutex<HandleMap<Handle>>,
 }
 
 impl Ac97 {
@@ -173,8 +170,7 @@ impl Ac97 {
                 //TODO: PhysBox::new_in_32bit_space(buf_size)?
             )?
             .assume_init(),
-            handles: Mutex::new(BTreeMap::new()),
-            next_id: AtomicUsize::new(0),
+            handles: Mutex::new(HandleMap::new()),
         };
 
         module.init()?;
@@ -264,9 +260,7 @@ impl Ac97 {
 
 impl SchemeSync for Ac97 {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        self.handles.lock().insert(id, Handle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.lock().insert(Handle::SchemeRoot))
     }
     fn openat(
         &mut self,
@@ -278,14 +272,13 @@ impl SchemeSync for Ac97 {
     ) -> Result<OpenResult> {
         {
             let handles = self.handles.lock();
-            let handle = handles.get(&dirfd).ok_or(Error::new(EBADF))?;
+            let handle = handles.get(dirfd)?;
             if !matches!(handle, Handle::SchemeRoot) {
                 return Err(Error::new(EACCES));
             }
         }
         if ctx.uid == 0 {
-            let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-            self.handles.lock().insert(id, Handle::Todo);
+            let id = self.handles.lock().insert(Handle::Todo);
             Ok(OpenResult::ThisScheme {
                 number: id,
                 flags: NewFdFlags::empty(),
@@ -305,7 +298,7 @@ impl SchemeSync for Ac97 {
     ) -> Result<usize> {
         {
             let mut handles = self.handles.lock();
-            let handle = handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+            let handle = handles.get_mut(id)?;
             if !matches!(handle, Handle::Todo) {
                 return Err(Error::new(EBADF));
             }
@@ -335,7 +328,7 @@ impl SchemeSync for Ac97 {
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
         {
             let mut handles = self.handles.lock();
-            let handle = handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+            let handle = handles.get_mut(id)?;
             if !matches!(handle, Handle::Todo) {
                 return Err(Error::new(EBADF));
             }
@@ -351,6 +344,6 @@ impl SchemeSync for Ac97 {
     }
 
     fn on_close(&mut self, id: usize) {
-        let _ = self.handles.lock().remove(&id);
+        self.handles.lock().remove(id);
     }
 }

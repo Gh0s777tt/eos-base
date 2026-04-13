@@ -7,7 +7,7 @@ use parking_lot::RwLockReadGuard;
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult, SendFdRequest, Socket};
 use ron::de::SpannedError;
-use std::collections::BTreeMap;
+use scheme_utils::HandleMap;
 use std::convert::{TryFrom, TryInto};
 use std::str::FromStr;
 use syscall::dirent::{DirEntry, DirentBuf, DirentKind};
@@ -25,8 +25,7 @@ use crate::acpi::{AcpiContext, AmlSymbols, SdtSignature};
 
 pub struct AcpiScheme<'acpi, 'sock> {
     ctx: &'acpi AcpiContext,
-    handles: BTreeMap<usize, Handle<'acpi>>,
-    next_fd: usize,
+    handles: HandleMap<Handle<'acpi>>,
     pci_fd: Option<Fd>,
     socket: &'sock Socket,
 }
@@ -77,8 +76,7 @@ impl<'acpi, 'sock> AcpiScheme<'acpi, 'sock> {
     pub fn new(ctx: &'acpi AcpiContext, socket: &'sock Socket) -> Self {
         Self {
             ctx,
-            handles: BTreeMap::new(),
-            next_fd: 0,
+            handles: HandleMap::new(),
             pci_fd: None,
             socket,
         }
@@ -161,18 +159,11 @@ fn parse_table(table: &[u8]) -> Option<SdtSignature> {
 
 impl SchemeSync for AcpiScheme<'_, '_> {
     fn scheme_root(&mut self) -> Result<usize> {
-        let fd = self.next_fd;
-        self.next_fd += 1;
-
-        self.handles.insert(
-            fd,
-            Handle {
-                stat: false,
-                kind: HandleKind::SchemeRoot,
-                allowed_to_eval: false,
-            },
-        );
-        Ok(fd)
+        Ok(self.handles.insert(Handle {
+            stat: false,
+            kind: HandleKind::SchemeRoot,
+            allowed_to_eval: false,
+        }))
     }
     fn openat(
         &mut self,
@@ -182,7 +173,7 @@ impl SchemeSync for AcpiScheme<'_, '_> {
         _fcntl_flags: u32,
         ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        let handle = self.handles.get(&dirfd).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(dirfd)?;
 
         let path = path.trim_start_matches('/');
 
@@ -265,17 +256,11 @@ impl SchemeSync for AcpiScheme<'_, '_> {
             return Err(Error::new(EINVAL));
         }
 
-        let fd = self.next_fd;
-        self.next_fd += 1;
-
-        self.handles.insert(
-            fd,
-            Handle {
-                stat: flag_stat,
-                kind,
-                allowed_to_eval,
-            },
-        );
+        let fd = self.handles.insert(Handle {
+            stat: flag_stat,
+            kind,
+            allowed_to_eval,
+        });
 
         Ok(OpenResult::ThisScheme {
             number: fd,
@@ -284,7 +269,7 @@ impl SchemeSync for AcpiScheme<'_, '_> {
     }
 
     fn fstat(&mut self, id: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {
-        let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(id)?;
 
         stat.st_size = handle
             .kind
@@ -311,7 +296,7 @@ impl SchemeSync for AcpiScheme<'_, '_> {
     ) -> Result<usize> {
         let offset: usize = offset.try_into().map_err(|_| Error::new(EINVAL))?;
 
-        let handle = self.handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get_mut(id)?;
 
         if handle.stat {
             return Err(Error::new(EBADF));
@@ -343,7 +328,7 @@ impl SchemeSync for AcpiScheme<'_, '_> {
         mut buf: DirentBuf<&'buf mut [u8]>,
         opaque_offset: u64,
     ) -> Result<DirentBuf<&'buf mut [u8]>> {
-        let handle = self.handles.get_mut(&id).ok_or(Error::new(EOPNOTSUPP))?;
+        let handle = self.handles.get_mut(id)?;
 
         match &handle.kind {
             HandleKind::TopLevel => {
@@ -430,7 +415,7 @@ impl SchemeSync for AcpiScheme<'_, '_> {
         _metadata: &[u64],
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let handle = self.handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get_mut(id)?;
         if !handle.allowed_to_eval {
             return Err(Error::new(EPERM));
         }
@@ -474,7 +459,7 @@ impl SchemeSync for AcpiScheme<'_, '_> {
         let id = sendfd_request.id();
         let num_fds = sendfd_request.num_fds();
 
-        let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(id)?;
         if !matches!(handle.kind, HandleKind::RegisterPci) {
             return Err(Error::new(EACCES));
         }
@@ -506,6 +491,6 @@ impl SchemeSync for AcpiScheme<'_, '_> {
     }
 
     fn on_close(&mut self, id: usize) {
-        self.handles.remove(&id);
+        self.handles.remove(id);
     }
 }

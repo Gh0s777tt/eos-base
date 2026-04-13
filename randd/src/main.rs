@@ -17,6 +17,7 @@ use redox_scheme::{
     scheme::{SchemeState, SchemeSync},
     CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket,
 };
+use scheme_utils::HandleMap;
 use syscall::data::Stat;
 use syscall::flag::{EventFlags, O_CREAT, O_EXCL, O_RDONLY, O_RDWR, O_WRONLY};
 use syscall::schemev2::NewFdFlags;
@@ -25,8 +26,6 @@ use syscall::{Error, Result, EACCES, EBADF, EEXIST, ENOENT, EPERM, MODE_CHR};
 // Create an RNG Seed to create initial seed from the rdrand intel instruction
 use rand_core::SeedableRng;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
-use std::num::Wrapping;
 
 // This Daemon implements a Cryptographically Secure Random Number Generator
 // that does not block on read - i.e. it is equivalent to linux /dev/urandom
@@ -148,11 +147,7 @@ struct RandScheme {
     // https://docs.rs/rand/0.5.0/rand/prng/chacha/struct.ChaChaRng.html
     // Allows 2^64 streams of random numbers, which we will equate with file numbers
     prng_stat: Stat,
-    handles: BTreeMap<usize, Handle>,
-    // calls the system RNG (us) for entropy to protect against HashDOS attacks.
-    // Trying to create a HashMap causes a system crash.
-    // <file number, information about the open file>
-    next_id: Wrapping<usize>,
+    handles: HandleMap<Handle>,
 }
 
 impl RandScheme {
@@ -166,15 +161,14 @@ impl RandScheme {
                 st_uid: 0,
                 ..Default::default()
             },
-            handles: BTreeMap::new(),
-            next_id: Wrapping(0),
+            handles: HandleMap::new(),
         }
     }
 
     /// Gets the open file info for a file descriptor if it is open - error otherwise.
     fn get_fd(&self, fd: usize) -> Result<&OpenFileInfo> {
         // Check we've got a valid file descriptor
-        let handle = self.handles.get(&fd).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(fd)?;
         handle.as_file().ok_or(Error::new(EBADF))
     }
     /// Checks to see if the op (MODE_READ, MODE_WRITE) can be performed on the open file
@@ -212,7 +206,6 @@ impl RandScheme {
             return Err(Error::new(EEXIST));
         }
 
-        let id = self.next_id;
         let open_file_info = OpenFileInfo {
             o_flags: flags,
             file_stat: self.prng_stat,
@@ -231,20 +224,10 @@ impl RandScheme {
             return Err(Error::new(EPERM));
         }
 
-        self.handles.insert(id.0, Handle::File(open_file_info));
-
-        // If we've looped round there's a small chance that the file descriptor still exists, so loop till we get one that doesn't
-        self.next_id += Wrapping(1);
-        loop {
-            if !self.handles.contains_key(&self.next_id.0) {
-                break;
-            } else {
-                self.next_id += Wrapping(1);
-            }
-        }
+        let id = self.handles.insert(Handle::File(open_file_info));
 
         Ok(OpenResult::ThisScheme {
-            number: id.0,
+            number: id,
             flags: NewFdFlags::empty(),
         })
     }
@@ -354,20 +337,7 @@ fn test_scheme_perms() {
 
 impl SchemeSync for RandScheme {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.handles.insert(id.0, Handle::SchemeRoot);
-
-        // Get the next file descriptor
-        self.next_id += Wrapping(1);
-        // If we've looped round there's a small chance that the file descriptor still exists, so loop till we get one that doesn't
-        loop {
-            if !self.handles.contains_key(&self.next_id.0) {
-                break;
-            } else {
-                self.next_id += Wrapping(1);
-            }
-        }
-        Ok(id.0)
+        Ok(self.handles.insert(Handle::SchemeRoot))
     }
 
     fn openat(
@@ -378,10 +348,7 @@ impl SchemeSync for RandScheme {
         _fcntl_flags: u32,
         ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(
-            self.handles.get(&dirfd).ok_or(Error::new(EBADF))?,
-            Handle::SchemeRoot
-        ) {
+        if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
 
@@ -489,7 +456,7 @@ impl SchemeSync for RandScheme {
 
     fn on_close(&mut self, file: usize) {
         // just remove the file descriptor from the open descriptors
-        let _ = self.handles.remove(&file);
+        self.handles.remove(file);
     }
 }
 

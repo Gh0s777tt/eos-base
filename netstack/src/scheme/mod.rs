@@ -457,7 +457,7 @@ where
         let scheme = &mut self.scheme;
         let state = &mut self.state;
 
-        for (&fd, handle) in &mut scheme.handles {
+        for (&fd, handle) in scheme.handles.iter_mut() {
             let Handle::File(file) = handle else {
                 continue;
             };

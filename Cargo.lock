@@ -14,6 +14,7 @@ dependencies = [
  "redox-scheme",
  "redox_event",
  "redox_syscall 0.7.3",
+ "scheme-utils",
  "spin",
 ]
 
@@ -50,6 +51,7 @@ dependencies = [
  "redox_syscall 0.7.3",
  "ron",
  "rustc-hash",
+ "scheme-utils",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -180,6 +182,7 @@ dependencies = [
  "libredox",
  "redox-scheme",
  "redox_syscall 0.7.3",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -562,6 +565,7 @@ dependencies = [
  "partitionlib",
  "redox-scheme",
  "redox_syscall 0.7.3",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -578,6 +582,7 @@ dependencies = [
  "redox-ioctl",
  "redox-scheme",
  "redox_syscall 0.7.3",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -588,6 +593,7 @@ dependencies = [
  "libredox",
  "redox-scheme",
  "redox_syscall 0.7.3",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -743,6 +749,7 @@ dependencies = [
  "redox-scheme",
  "redox_event",
  "redox_syscall 0.7.3",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -1047,6 +1054,7 @@ dependencies = [
  "redox-scheme",
  "redox_event",
  "redox_syscall 0.7.3",
+ "scheme-utils",
  "spin",
 ]
 
@@ -1110,6 +1118,7 @@ dependencies = [
  "orbclient",
  "redox-scheme",
  "redox_syscall 0.7.3",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -1134,6 +1143,7 @@ dependencies = [
  "redox-scheme",
  "redox_event",
  "redox_syscall 0.7.3",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -1250,6 +1260,7 @@ dependencies = [
  "libredox",
  "redox-scheme",
  "redox_syscall 0.7.3",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -1473,6 +1484,7 @@ dependencies = [
  "plain",
  "redox-scheme",
  "redox_syscall 0.7.3",
+ "scheme-utils",
  "serde",
 ]
 
@@ -1618,6 +1630,7 @@ dependencies = [
  "libredox",
  "redox-scheme",
  "redox_syscall 0.7.3",
+ "scheme-utils",
  "slab",
 ]
 
@@ -1706,6 +1719,7 @@ dependencies = [
  "raw-cpuid",
  "redox-scheme",
  "redox_syscall 0.7.3",
+ "scheme-utils",
  "sha2",
 ]
 
@@ -1815,6 +1829,7 @@ dependencies = [
  "redox-scheme",
  "redox_event",
  "redox_syscall 0.7.3",
+ "scheme-utils",
  "smoltcp",
 ]
 
@@ -1982,7 +1997,16 @@ dependencies = [
  "redox-scheme",
  "redox_event",
  "redox_syscall 0.7.3",
+ "scheme-utils",
  "spin",
+]
+
+[[package]]
+name = "scheme-utils"
+version = "0.0.0"
+dependencies = [
+ "libredox",
+ "redox_syscall 0.7.3",
 ]
 
 [[package]]

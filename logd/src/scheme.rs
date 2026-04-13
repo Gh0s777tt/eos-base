@@ -7,6 +7,7 @@ use std::sync::mpsc::{self, Sender};
 
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult, SendFdRequest, Socket};
+use scheme_utils::HandleMap;
 use syscall::error::*;
 use syscall::schemev2::NewFdFlags;
 
@@ -20,11 +21,10 @@ pub enum LogHandle {
 }
 
 pub struct LogScheme<'sock> {
-    next_id: usize,
     socket: &'sock Socket,
     kernel_debug: File,
     output_tx: Sender<OutputCmd>,
-    handles: BTreeMap<usize, LogHandle>,
+    handles: HandleMap<LogHandle>,
 }
 
 enum OutputCmd {
@@ -88,11 +88,10 @@ impl<'sock> LogScheme<'sock> {
         });
 
         LogScheme {
-            next_id: 0,
             socket,
             kernel_debug,
             output_tx,
-            handles: BTreeMap::new(),
+            handles: HandleMap::new(),
         }
     }
 
@@ -133,10 +132,7 @@ impl<'sock> LogScheme<'sock> {
 
 impl<'sock> SchemeSync for LogScheme<'sock> {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.handles.insert(id, LogHandle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.insert(LogHandle::SchemeRoot))
     }
     fn openat(
         &mut self,
@@ -146,27 +142,18 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(
-            self.handles.get(&dirfd).ok_or(Error::new(EBADF))?,
-            LogHandle::SchemeRoot
-        ) {
+        if !matches!(self.handles.get(dirfd)?, LogHandle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
 
-        let id = self.next_id;
-        self.next_id += 1;
-
-        if path == "add_sink" {
-            self.handles.insert(id, LogHandle::AddSink);
+        let id = if path == "add_sink" {
+            self.handles.insert(LogHandle::AddSink)
         } else {
-            self.handles.insert(
-                id,
-                LogHandle::Log {
-                    context: path.to_string().into_boxed_str(),
-                    bufs: BTreeMap::new(),
-                },
-            );
-        }
+            self.handles.insert(LogHandle::Log {
+                context: path.to_string().into_boxed_str(),
+                bufs: BTreeMap::new(),
+            })
+        };
 
         Ok(OpenResult::ThisScheme {
             number: id,
@@ -182,7 +169,7 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
         _flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let _handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let _handle = self.handles.get(id)?;
 
         // TODO
 
@@ -197,7 +184,7 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
         _flags: u32,
         ctx: &CallerCtx,
     ) -> Result<usize> {
-        let (context, bufs) = match self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
+        let (context, bufs) = match self.handles.get_mut(id)? {
             LogHandle::Log { context, bufs } => (context, bufs),
             LogHandle::SchemeRoot | LogHandle::AddSink => return Err(Error::new(EBADF)),
         };
@@ -218,10 +205,7 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
     fn on_sendfd(&mut self, sendfd_request: &SendFdRequest) -> Result<usize> {
         let id = sendfd_request.id();
 
-        if !matches!(
-            self.handles.get(&id).ok_or(Error::new(EBADF))?,
-            LogHandle::AddSink
-        ) {
+        if !matches!(self.handles.get(id)?, LogHandle::AddSink) {
             return Err(Error::new(EBADF));
         }
 
@@ -239,13 +223,13 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
     }
 
     fn fcntl(&mut self, id: usize, _cmd: usize, _arg: usize, _ctx: &CallerCtx) -> Result<usize> {
-        let _handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let _handle = self.handles.get(id)?;
 
         Ok(0)
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(id)?;
 
         let scheme_path = b"/scheme/log/";
 
@@ -271,7 +255,7 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
     }
 
     fn fsync(&mut self, id: usize, _ctx: &CallerCtx) -> Result<()> {
-        let _handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let _handle = self.handles.get(id)?;
 
         //TODO: flush remaining data?
 
@@ -279,6 +263,6 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
     }
 
     fn on_close(&mut self, id: usize) {
-        self.handles.remove(&id);
+        self.handles.remove(id);
     }
 }

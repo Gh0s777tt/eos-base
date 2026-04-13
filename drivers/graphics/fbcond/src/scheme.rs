@@ -4,6 +4,7 @@ use std::os::fd::AsRawFd;
 use event::{EventQueue, UserData};
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult};
+use scheme_utils::HandleMap;
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error, EventFlags, Result, EACCES, EAGAIN, EBADF, ENOENT, O_NONBLOCK};
 
@@ -41,8 +42,7 @@ pub enum Handle {
 
 pub struct FbconScheme {
     pub vts: BTreeMap<VtIndex, TextScreen>,
-    next_id: usize,
-    pub handles: BTreeMap<usize, Handle>,
+    pub handles: HandleMap<Handle>,
 }
 
 impl FbconScheme {
@@ -63,26 +63,21 @@ impl FbconScheme {
 
         FbconScheme {
             vts,
-            next_id: 0,
-            handles: BTreeMap::new(),
+            handles: HandleMap::new(),
         }
     }
 
     fn get_vt_handle_mut(&mut self, id: usize) -> Result<&mut FdHandle> {
-        match self.handles.get_mut(&id) {
-            Some(Handle::Vt(handle)) => Ok(handle),
-            Some(Handle::SchemeRoot) => Err(Error::new(EBADF)),
-            None => Err(Error::new(EBADF)),
+        match self.handles.get_mut(id)? {
+            Handle::Vt(handle) => Ok(handle),
+            Handle::SchemeRoot => Err(Error::new(EBADF)),
         }
     }
 }
 
 impl SchemeSync for FbconScheme {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.handles.insert(id, Handle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.insert(Handle::SchemeRoot))
     }
 
     fn openat(
@@ -93,27 +88,18 @@ impl SchemeSync for FbconScheme {
         fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(
-            self.handles.get(&dirfd).ok_or(Error::new(EBADF))?,
-            Handle::SchemeRoot
-        ) {
+        if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
 
         let vt_i = VtIndex(path_str.parse::<usize>().map_err(|_| Error::new(ENOENT))?);
         if self.vts.contains_key(&vt_i) {
-            let id = self.next_id;
-            self.next_id += 1;
-
-            self.handles.insert(
-                id,
-                Handle::Vt(FdHandle {
-                    vt_i,
-                    flags: flags | fcntl_flags as usize,
-                    events: EventFlags::empty(),
-                    notified_read: false,
-                }),
-            );
+            let id = self.handles.insert(Handle::Vt(FdHandle {
+                vt_i,
+                flags: flags | fcntl_flags as usize,
+                events: EventFlags::empty(),
+                notified_read: false,
+            }));
 
             Ok(OpenResult::ThisScheme {
                 number: id,
@@ -159,9 +145,7 @@ impl SchemeSync for FbconScheme {
     }
 
     fn fcntl(&mut self, id: usize, _cmd: usize, _arg: usize, _ctx: &CallerCtx) -> Result<usize> {
-        if !self.handles.get(&id).is_some() {
-            return Err(Error::new(EBADF));
-        };
+        self.handles.get(id)?;
         Ok(0)
     }
 
@@ -173,10 +157,9 @@ impl SchemeSync for FbconScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let handle = match self.handles.get(&id) {
-            Some(Handle::Vt(handle)) => Ok(handle),
-            Some(Handle::SchemeRoot) => Err(Error::new(EBADF)),
-            None => Err(Error::new(EBADF)),
+        let handle = match self.handles.get(id)? {
+            Handle::Vt(handle) => Ok(handle),
+            Handle::SchemeRoot => Err(Error::new(EBADF)),
         }?;
 
         if let Some(screen) = self.vts.get_mut(&handle.vt_i) {
@@ -212,6 +195,6 @@ impl SchemeSync for FbconScheme {
     }
 
     fn on_close(&mut self, id: usize) {
-        let _ = self.handles.remove(&id);
+        self.handles.remove(id);
     }
 }

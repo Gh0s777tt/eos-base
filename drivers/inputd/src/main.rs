@@ -13,7 +13,7 @@
 
 use core::mem::size_of;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::mem::transmute;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -24,6 +24,7 @@ use redox_scheme::scheme::{SchemeState, SchemeSync};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket};
 
 use orbclient::{Event, EventOption};
+use scheme_utils::HandleMap;
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error as SysError, EventFlags, EACCES, EBADF, EEXIST, EINVAL};
 
@@ -57,9 +58,8 @@ enum Handle {
 }
 
 struct InputScheme {
-    handles: BTreeMap<usize, Handle>,
+    handles: HandleMap<Handle>,
 
-    next_id: AtomicUsize,
     next_vt_id: AtomicUsize,
 
     display: Option<String>,
@@ -76,9 +76,8 @@ struct InputScheme {
 impl InputScheme {
     fn new() -> Self {
         Self {
-            handles: BTreeMap::new(),
+            handles: HandleMap::new(),
 
-            next_id: AtomicUsize::new(0),
             next_vt_id: AtomicUsize::new(2), // VT 1 is reserved for the bootlog
 
             display: None,
@@ -150,9 +149,7 @@ impl InputScheme {
 
 impl SchemeSync for InputScheme {
     fn scheme_root(&mut self) -> syscall::Result<usize> {
-        let fd = self.next_id.fetch_add(1, Ordering::SeqCst);
-        self.handles.insert(fd, Handle::SchemeRoot);
-        Ok(fd)
+        Ok(self.handles.insert(Handle::SchemeRoot))
     }
 
     fn openat(
@@ -163,10 +160,7 @@ impl SchemeSync for InputScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> syscall::Result<OpenResult> {
-        if !matches!(
-            self.handles.get(&dirfd).ok_or(SysError::new(EINVAL))?,
-            Handle::SchemeRoot
-        ) {
+        if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
             return Err(SysError::new(EACCES));
         }
 
@@ -266,8 +260,7 @@ impl SchemeSync for InputScheme {
 
         log::debug!("{path} channel has been opened");
 
-        let fd = self.next_id.fetch_add(1, Ordering::SeqCst);
-        self.handles.insert(fd, handle_ty);
+        let fd = self.handles.insert(handle_ty);
         Ok(OpenResult::ThisScheme {
             number: fd,
             flags: NewFdFlags::empty(),
@@ -275,7 +268,7 @@ impl SchemeSync for InputScheme {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
-        let handle = self.handles.get(&id).ok_or(SysError::new(EINVAL))?;
+        let handle = self.handles.get(id)?;
 
         if let Handle::Consumer { vt, .. } = handle {
             let display = self.display.as_ref().ok_or(SysError::new(EINVAL))?;
@@ -298,7 +291,7 @@ impl SchemeSync for InputScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> syscall::Result<usize> {
-        let handle = self.handles.get_mut(&id).ok_or(SysError::new(EINVAL))?;
+        let handle = self.handles.get_mut(id)?;
 
         match handle {
             Handle::Consumer {
@@ -360,7 +353,7 @@ impl SchemeSync for InputScheme {
     ) -> syscall::Result<usize> {
         self.has_new_events = true;
 
-        let handle = self.handles.get_mut(&id).ok_or(SysError::new(EINVAL))?;
+        let handle = self.handles.get_mut(id)?;
 
         match handle {
             Handle::Control => {
@@ -445,7 +438,7 @@ impl SchemeSync for InputScheme {
             }
         }
 
-        let handle = self.handles.get_mut(&id).ok_or(SysError::new(EINVAL))?;
+        let handle = self.handles.get_mut(id)?;
         assert!(matches!(handle, Handle::Producer));
 
         let buf = unsafe {
@@ -485,9 +478,7 @@ impl SchemeSync for InputScheme {
         flags: syscall::EventFlags,
         _ctx: &CallerCtx,
     ) -> syscall::Result<syscall::EventFlags> {
-        let handle = self.handles.get_mut(&id).ok_or(SysError::new(EINVAL))?;
-
-        match handle {
+        match self.handles.get_mut(id)? {
             Handle::Consumer {
                 ref mut events,
                 ref mut notified,
@@ -515,9 +506,7 @@ impl SchemeSync for InputScheme {
     }
 
     fn on_close(&mut self, id: usize) {
-        let handle = self.handles.remove(&id).unwrap();
-
-        match handle {
+        match self.handles.remove(id).unwrap() {
             Handle::Consumer { vt, .. } => {
                 self.vts.remove(&vt);
                 if self.active_vt == Some(vt) {

@@ -11,6 +11,7 @@ redox_syscall = { workspace = true, features = ["std"] }
 libc.workspace = true
 libredox = { workspace =  true, features = ["mkns"] }
 redox-scheme.workspace = true
+scheme-utils = { path = "../scheme-utils" }
 anyhow.workspace = true
 ioslice = "0.6.0"
 

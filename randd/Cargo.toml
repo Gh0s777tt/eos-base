@@ -12,6 +12,7 @@ redox_syscall.workspace = true
 libredox.workspace = true
 sha2 = "0.8"
 redox-scheme.workspace = true
+scheme-utils = { path = "../scheme-utils" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 raw-cpuid = "11.0.1"

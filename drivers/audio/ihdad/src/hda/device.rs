@@ -1,10 +1,8 @@
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::str;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::Poll;
 use std::thread;
 use std::time::Duration;
@@ -15,6 +13,7 @@ use common::timeout::Timeout;
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::CallerCtx;
 use redox_scheme::OpenResult;
+use scheme_utils::HandleMap;
 use syscall::error::{Error, Result, EACCES, EBADF, EIO, ENODEV, EWOULDBLOCK};
 
 use spin::Mutex;
@@ -150,8 +149,7 @@ pub struct IntelHDA {
     buffs: Vec<Vec<StreamBuffer>>,
 
     int_counter: usize,
-    handles: Mutex<BTreeMap<usize, Handle>>,
-    next_id: AtomicUsize,
+    handles: Mutex<HandleMap<Handle>>,
 }
 
 impl IntelHDA {
@@ -203,8 +201,7 @@ impl IntelHDA {
             buffs: Vec::<Vec<StreamBuffer>>::new(),
 
             int_counter: 0,
-            handles: Mutex::new(BTreeMap::new()),
-            next_id: AtomicUsize::new(0),
+            handles: Mutex::new(HandleMap::new()),
         };
 
         module.init()?;
@@ -986,9 +983,7 @@ impl Drop for IntelHDA {
 
 impl SchemeSync for IntelHDA {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        self.handles.lock().insert(id, Handle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.lock().insert(Handle::SchemeRoot))
     }
     fn openat(
         &mut self,
@@ -1000,7 +995,7 @@ impl SchemeSync for IntelHDA {
     ) -> Result<OpenResult> {
         {
             let handles = self.handles.lock();
-            let handle = handles.get(&dirfd).ok_or(Error::new(EBADF))?;
+            let handle = handles.get(dirfd)?;
             if !matches!(handle, Handle::SchemeRoot) {
                 return Err(Error::new(EACCES));
             }
@@ -1026,8 +1021,7 @@ impl SchemeSync for IntelHDA {
             "codec" => Handle::StrBuf(self.dump_codec(0).into_bytes()),
             _ => Handle::Todo,
         };
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.handles.lock().insert(id, handle);
+        let id = self.handles.lock().insert(handle);
 
         // TODO: always positioned?
         Ok(OpenResult::ThisScheme {
@@ -1045,7 +1039,7 @@ impl SchemeSync for IntelHDA {
         _ctx: &CallerCtx,
     ) -> Result<usize> {
         let handles = self.handles.lock();
-        let Some(Handle::StrBuf(strbuf)) = handles.get(&id) else {
+        let Handle::StrBuf(strbuf) = handles.get(id)? else {
             return Err(Error::new(EBADF));
         };
 
@@ -1068,7 +1062,7 @@ impl SchemeSync for IntelHDA {
     ) -> Result<usize> {
         let index = {
             let mut handles = self.handles.lock();
-            match handles.get_mut(&id).ok_or(Error::new(EBADF))? {
+            match handles.get_mut(id)? {
                 Handle::Todo => 0,
                 _ => return Err(Error::new(EBADF)),
             }
@@ -1084,7 +1078,7 @@ impl SchemeSync for IntelHDA {
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
         let mut handles = self.handles.lock();
-        let _handle = handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let _handle = handles.get_mut(id)?;
 
         let mut i = 0;
         let scheme_path = b"/scheme/audiohw";
@@ -1096,6 +1090,6 @@ impl SchemeSync for IntelHDA {
     }
 
     fn on_close(&mut self, id: usize) {
-        let _ = self.handles.lock().remove(&id);
+        self.handles.lock().remove(id);
     }
 }

@@ -1,5 +1,6 @@
 use redox_scheme::{CallerCtx, OpenResult};
-use std::collections::{BTreeMap, VecDeque};
+use scheme_utils::HandleMap;
+use std::collections::VecDeque;
 use std::str;
 use syscall::error::{Error, Result, EACCES, EBADF, EINVAL, ENOENT, EWOULDBLOCK};
 
@@ -20,16 +21,14 @@ enum Handle {
 }
 
 pub struct AudioScheme {
-    next_id: usize,
-    handles: BTreeMap<usize, Handle>,
+    handles: HandleMap<Handle>,
     volume: i32,
 }
 
 impl AudioScheme {
     pub fn new() -> Self {
         AudioScheme {
-            next_id: 0,
-            handles: BTreeMap::new(),
+            handles: HandleMap::new(),
             volume: 50,
         }
     }
@@ -66,10 +65,7 @@ impl AudioScheme {
 
 impl SchemeSync for AudioScheme {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.handles.insert(id, Handle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.insert(Handle::SchemeRoot))
     }
     fn openat(
         &mut self,
@@ -79,10 +75,7 @@ impl SchemeSync for AudioScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(
-            self.handles.get(&dirfd).ok_or(Error::new(EBADF))?,
-            Handle::SchemeRoot
-        ) {
+        if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
 
@@ -97,9 +90,7 @@ impl SchemeSync for AudioScheme {
             _ => return Err(Error::new(ENOENT)),
         };
 
-        let id = self.next_id;
-        self.next_id += 1;
-        self.handles.insert(id, handle);
+        let id = self.handles.insert(handle);
 
         Ok(OpenResult::ThisScheme { number: id, flags })
     }
@@ -113,7 +104,7 @@ impl SchemeSync for AudioScheme {
         _ctx: &CallerCtx,
     ) -> Result<usize> {
         //TODO: check flags for readable
-        match self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
+        match self.handles.get_mut(id)? {
             Handle::Audio { buffer: _ } => {
                 //TODO: audio input?
                 Err(Error::new(EBADF))
@@ -143,7 +134,7 @@ impl SchemeSync for AudioScheme {
         _ctx: &CallerCtx,
     ) -> Result<usize> {
         //TODO: check flags for writable
-        match self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
+        match self.handles.get_mut(id)? {
             Handle::Audio { ref mut buffer } => {
                 if buffer.len() >= HANDLE_BUFFER_SIZE {
                     Err(Error::new(EWOULDBLOCK))

@@ -1,6 +1,6 @@
 #![feature(macro_metavar_expr)]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, Write};
@@ -18,8 +18,9 @@ use inputd::{DisplayHandle, VtEventKind};
 use libredox::Fd;
 use redox_scheme::scheme::{register_scheme_inner, SchemeState, SchemeSync};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
+use scheme_utils::HandleMap;
 use syscall::schemev2::NewFdFlags;
-use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EBADF, EINVAL, ENOENT, EOPNOTSUPP};
+use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EINVAL, ENOENT, EOPNOTSUPP};
 
 use crate::kms::connector::{KmsConnectorDriver, KmsConnectorState};
 use crate::kms::objects::{self, KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects};
@@ -155,8 +156,7 @@ impl<T: GraphicsAdapter> GraphicsScheme<T> {
             disable_graphical_debug,
             socket,
             objects,
-            next_id: 0,
-            handles: BTreeMap::new(),
+            handles: HandleMap::new(),
             active_vt: 0,
             vts: HashMap::new(),
         };
@@ -264,8 +264,7 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
     disable_graphical_debug: Option<File>,
     socket: Socket,
     objects: KmsObjects<T>,
-    next_id: usize,
-    handles: BTreeMap<usize, Handle<T>>,
+    handles: HandleMap<Handle<T>>,
 
     active_vt: usize,
     vts: HashMap<usize, VtState<T>>,
@@ -381,10 +380,7 @@ const MAP_FAKE_OFFSET_MULTIPLIER: usize = 0x10_000_000;
 
 impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.handles.insert(id, Handle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.insert(Handle::SchemeRoot))
     }
     fn openat(
         &mut self,
@@ -394,10 +390,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(
-            self.handles.get(&dirfd).ok_or(Error::new(EBADF))?,
-            Handle::SchemeRoot
-        ) {
+        if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
         if path.is_empty() {
@@ -423,16 +416,15 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         } else {
             return Err(Error::new(EINVAL));
         };
-        self.next_id += 1;
-        self.handles.insert(self.next_id, handle);
+        let id = self.handles.insert(handle);
         Ok(OpenResult::ThisScheme {
-            number: self.next_id,
+            number: id,
             flags: NewFdFlags::empty(),
         })
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
-        let path = match self.handles.get(&id).ok_or(Error::new(EBADF))? {
+        let path = match self.handles.get(id)? {
             Handle::V2 {
                 vt,
                 next_id: _,
@@ -461,7 +453,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             id_index(i) | (1 << 13)
         }
 
-        match self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
+        match self.handles.get_mut(id)? {
             Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
             Handle::V2 {
                 vt,
@@ -969,7 +961,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         _ctx: &CallerCtx,
     ) -> syscall::Result<usize> {
         // log::trace!("KSMSG MMAP {} {:?} {} {}", id, _flags, _offset, _size);
-        let (framebuffer, offset) = match self.handles.get(&id).ok_or(Error::new(EINVAL))? {
+        let (framebuffer, offset) = match self.handles.get(id)? {
             Handle::V2 {
                 vt: _,
                 next_id: _,
@@ -990,6 +982,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
 impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     fn on_close(&mut self, id: usize) {
-        self.handles.remove(&id);
+        self.handles.remove(id);
     }
 }

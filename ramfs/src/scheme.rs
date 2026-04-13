@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::io::{Cursor, Seek};
 use std::iter;
 use std::os::unix::io::AsRawFd;
 use std::{mem, str};
 
+use scheme_utils::HandleMap;
 use syscall::dirent::{DirEntry, DirentBuf, DirentKind};
 use syscall::error::{
     EACCES, EBADF, EBADFD, EEXIST, EINVAL, EIO, EISDIR, ENOMEM, ENOSYS, ENOTDIR, ENOTEMPTY,
@@ -33,8 +33,7 @@ enum Handle {
 pub struct Scheme {
     scheme_name: String,
     filesystem: Filesystem,
-    handles: HashMap<usize, Handle>,
-    next_id: usize,
+    handles: HandleMap<Handle>,
     proc_creds_capability: libredox::Fd,
 }
 impl Scheme {
@@ -43,8 +42,7 @@ impl Scheme {
         Ok(Self {
             scheme_name,
             filesystem: Filesystem::new()?,
-            handles: HashMap::new(),
-            next_id: 0,
+            handles: HandleMap::new(),
             proc_creds_capability: {
                 libredox::Fd::open(
                     "/scheme/proc/proc-creds-capability",
@@ -168,10 +166,7 @@ impl Scheme {
 
 impl SchemeSync for Scheme {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.handles.insert(id, Handle::SchemeRoot);
-        self.next_id += 1;
-        Ok(id)
+        Ok(self.handles.insert(Handle::SchemeRoot))
     }
     fn openat(
         &mut self,
@@ -181,10 +176,7 @@ impl SchemeSync for Scheme {
         fcntl_flags: u32,
         ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(
-            self.handles.get(&dirfd).ok_or(Error::new(EBADF))?,
-            Handle::SchemeRoot
-        ) {
+        if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
 
@@ -274,9 +266,7 @@ impl SchemeSync for Scheme {
             self.open_existing(path, flags | fcntl_flags as usize, ctx.uid, ctx.gid)?
                 .0
         };
-        let new_id = self.next_id;
-        self.handles.insert(new_id, Handle::Inode(inode));
-        self.next_id += 1;
+        let new_id = self.handles.insert(Handle::Inode(inode));
         Ok(OpenResult::ThisScheme {
             number: new_id,
             flags: NewFdFlags::POSITIONED,
@@ -284,10 +274,7 @@ impl SchemeSync for Scheme {
     }
     fn unlinkat(&mut self, dirfd: usize, path: &str, flags: usize, ctx: &CallerCtx) -> Result<()> {
         {
-            if !matches!(
-                self.handles.get(&dirfd).ok_or(Error::new(EBADF))?,
-                Handle::SchemeRoot
-            ) {
+            if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
                 return Err(Error::new(EACCES));
             }
         }
@@ -309,7 +296,7 @@ impl SchemeSync for Scheme {
         let Ok(offset) = usize::try_from(offset) else {
             return Ok(0);
         };
-        let inode = match self.handles.get(&fd).ok_or(Error::new(EBADFD))? {
+        let inode = match self.handles.get(fd)? {
             Handle::Inode(inode) => inode,
             Handle::SchemeRoot => return Err(Error::new(EISDIR)),
         };
@@ -345,7 +332,7 @@ impl SchemeSync for Scheme {
         let Ok(offset) = usize::try_from(opaque_offset) else {
             return Ok(buf);
         };
-        let inode = match self.handles.get(&fd).ok_or(Error::new(EBADFD))? {
+        let inode = match self.handles.get(fd)? {
             Handle::Inode(inode) => inode,
             Handle::SchemeRoot => return Err(Error::new(EISDIR)),
         };
@@ -380,7 +367,7 @@ impl SchemeSync for Scheme {
         let Ok(offset) = usize::try_from(offset) else {
             return Ok(0);
         };
-        let inode = match self.handles.get(&fd).ok_or(Error::new(EBADFD))? {
+        let inode = match self.handles.get(fd)? {
             Handle::Inode(inode) => inode,
             Handle::SchemeRoot => return Err(Error::new(EISDIR)),
         };
@@ -410,7 +397,7 @@ impl SchemeSync for Scheme {
         }
     }
     fn fchmod(&mut self, fd: usize, mode: u16, _ctx: &CallerCtx) -> Result<()> {
-        let inode = match self.handles.get(&fd).ok_or(Error::new(EBADFD))? {
+        let inode = match self.handles.get(fd)? {
             Handle::Inode(inode) => inode,
             Handle::SchemeRoot => return Err(Error::new(EISDIR)),
         };
@@ -474,7 +461,7 @@ impl SchemeSync for Scheme {
         Err(Error::new(ENOSYS))
     }
     fn fpath(&mut self, fd: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let mut current_inode = match *self.handles.get(&fd).ok_or(Error::new(EBADFD))? {
+        let mut current_inode = match *self.handles.get(fd)? {
             Handle::Inode(inode) => inode,
             Handle::SchemeRoot => return Err(Error::new(EISDIR)),
         };
@@ -523,7 +510,7 @@ impl SchemeSync for Scheme {
         Err(Error::new(ENOSYS))
     }
     fn fstat(&mut self, fd: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {
-        let inode = match *self.handles.get(&fd).ok_or(Error::new(EBADFD))? {
+        let inode = match *self.handles.get(fd)? {
             Handle::Inode(inode) => inode,
             Handle::SchemeRoot => return Err(Error::new(EISDIR)),
         };
@@ -601,7 +588,7 @@ impl SchemeSync for Scheme {
         Ok(())
     }
     fn ftruncate(&mut self, fd: usize, size: u64, _ctx: &CallerCtx) -> Result<()> {
-        let inode = match self.handles.get(&fd).ok_or(Error::new(EBADFD))? {
+        let inode = match self.handles.get(fd)? {
             Handle::Inode(inode) => inode,
             Handle::SchemeRoot => return Err(Error::new(EISDIR)),
         };
@@ -630,7 +617,7 @@ impl SchemeSync for Scheme {
         Ok(())
     }
     fn futimens(&mut self, fd: usize, times: &[TimeSpec], _ctx: &CallerCtx) -> Result<()> {
-        let inode = match self.handles.get(&fd).ok_or(Error::new(EBADFD))? {
+        let inode = match self.handles.get(fd)? {
             Handle::Inode(inode) => inode,
             Handle::SchemeRoot => return Err(Error::new(EISDIR)),
         };
@@ -693,7 +680,7 @@ impl SchemeSync for Scheme {
 }
 impl Scheme {
     pub fn on_close(&mut self, fd: usize) {
-        let Some(Handle::Inode(inode)) = self.handles.remove(&fd) else {
+        let Some(Handle::Inode(inode)) = self.handles.remove(fd) else {
             return;
         };
         let Some(inode_info) = self.filesystem.files.get_mut(&inode) else {
