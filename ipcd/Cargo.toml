@@ -9,6 +9,7 @@ libredox = { workspace = true, features = ["call"]}
 daemon = { path = "../daemon" }
 redox_syscall.workspace = true
 redox-scheme.workspace = true
+scheme-utils = { path = "../scheme-utils" }
 redox_event.workspace = true
 anyhow.workspace = true
 libc.workspace = true

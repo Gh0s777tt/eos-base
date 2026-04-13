@@ -16,6 +16,7 @@ redox-log.workspace = true
 libredox = { workspace = true, features = ["mkns"] }
 anyhow.workspace = true
 redox-scheme.workspace = true
+scheme-utils = { path = "../scheme-utils" }
 
 [dependencies.log]
 workspace = true

@@ -12,6 +12,7 @@ description = "RAM filesystem, which is useful for early logging"
 daemon = { path = "../daemon" }
 redox_syscall.workspace = true
 redox-scheme.workspace = true
+scheme-utils = { path = "../scheme-utils" }
 libredox = { workspace = true, features = ["call"] }
 indexmap = "2.5.0"
 slab.workspace = true

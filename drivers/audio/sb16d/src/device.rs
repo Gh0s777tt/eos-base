@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{thread, time};
 
 use common::io::{Io, Pio, ReadOnly, WriteOnly};
@@ -9,6 +7,7 @@ use common::io::{Io, Pio, ReadOnly, WriteOnly};
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::CallerCtx;
 use redox_scheme::OpenResult;
+use scheme_utils::HandleMap;
 use syscall::error::{Error, Result, EACCES, EBADF, ENODEV};
 use syscall::schemev2::NewFdFlags;
 
@@ -24,8 +23,7 @@ enum Handle {
 
 #[allow(dead_code)]
 pub struct Sb16 {
-    handles: Mutex<BTreeMap<usize, Handle>>,
-    next_id: AtomicUsize,
+    handles: Mutex<HandleMap<Handle>>,
     pub(crate) irqs: Vec<u8>,
     dmas: Vec<u8>,
     // Regs
@@ -41,8 +39,7 @@ pub struct Sb16 {
 impl Sb16 {
     pub unsafe fn new(addr: u16) -> Result<Self> {
         let mut module = Sb16 {
-            handles: Mutex::new(BTreeMap::new()),
-            next_id: AtomicUsize::new(0),
+            handles: Mutex::new(HandleMap::new()),
             irqs: Vec::new(),
             dmas: Vec::new(),
             // Regs
@@ -187,9 +184,7 @@ impl Sb16 {
 
 impl SchemeSync for Sb16 {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        self.handles.lock().insert(id, Handle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.lock().insert(Handle::SchemeRoot))
     }
     fn openat(
         &mut self,
@@ -201,14 +196,13 @@ impl SchemeSync for Sb16 {
     ) -> Result<OpenResult> {
         {
             let handles = self.handles.lock();
-            let handle = handles.get(&dirfd).ok_or(Error::new(EBADF))?;
+            let handle = handles.get(dirfd)?;
             if !matches!(handle, Handle::SchemeRoot) {
                 return Err(Error::new(EACCES));
             }
         }
         if ctx.uid == 0 {
-            let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-            self.handles.lock().insert(id, Handle::Todo);
+            let id = self.handles.lock().insert(Handle::Todo);
             Ok(OpenResult::ThisScheme {
                 number: id,
                 flags: NewFdFlags::empty(),
@@ -232,7 +226,7 @@ impl SchemeSync for Sb16 {
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
         let mut handles = self.handles.lock();
-        let _handle = handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let _handle = handles.get_mut(id)?;
 
         let mut i = 0;
         let scheme_path = b"/scheme/audiohw";
@@ -244,6 +238,6 @@ impl SchemeSync for Sb16 {
     }
 
     fn on_close(&mut self, id: usize) {
-        let _ = self.handles.lock().remove(&id);
+        self.handles.lock().remove(id);
     }
 }

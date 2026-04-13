@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, VecDeque};
 use pci_types::{ConfigRegionAccess, PciAddress};
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult};
+use scheme_utils::HandleMap;
 use syscall::dirent::{DirEntry, DirentBuf, DirentKind};
 use syscall::error::{Error, Result, EACCES, EBADF, EINVAL, EIO, EISDIR, ENOENT, ENOTDIR};
 use syscall::flag::{MODE_CHR, MODE_DIR, O_DIRECTORY, O_STAT};
@@ -12,8 +13,7 @@ use syscall::ENOLCK;
 use crate::cfg_access::Pcie;
 
 pub struct PciScheme {
-    handles: BTreeMap<usize, HandleWrapper>,
-    next_id: usize,
+    handles: HandleMap<HandleWrapper>,
     pub pcie: Pcie,
     pub tree: BTreeMap<PciAddress, crate::Func>,
 }
@@ -53,34 +53,19 @@ const DEVICE_CONTENTS: &[&str] = &["channel"];
 
 impl PciScheme {
     pub fn access(&mut self) -> usize {
-        let id = self.next_id;
-        self.next_id += 1;
-
-        self.handles.insert(
-            id,
-            HandleWrapper {
-                inner: Handle::Access,
-                stat: false,
-            },
-        );
-
-        id
+        self.handles.insert(HandleWrapper {
+            inner: Handle::Access,
+            stat: false,
+        })
     }
 }
 
 impl SchemeSync for PciScheme {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.next_id += 1;
-
-        self.handles.insert(
-            id,
-            HandleWrapper {
-                inner: Handle::SchemeRoot,
-                stat: false,
-            },
-        );
-        Ok(id)
+        Ok(self.handles.insert(HandleWrapper {
+            inner: Handle::SchemeRoot,
+            stat: false,
+        }))
     }
     fn openat(
         &mut self,
@@ -90,7 +75,7 @@ impl SchemeSync for PciScheme {
         _fcntl_flags: u32,
         ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        let handle = self.handles.get(&dirfd).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(dirfd)?;
         if !handle.inner.is_scheme_root() {
             return Err(Error::new(EACCES));
         }
@@ -132,23 +117,17 @@ impl SchemeSync for PciScheme {
             return Err(Error::new(EACCES));
         }
 
-        let id = self.next_id;
-        self.next_id += 1;
-
-        self.handles.insert(
-            id,
-            HandleWrapper {
-                inner: handle,
-                stat,
-            },
-        );
+        let id = self.handles.insert(HandleWrapper {
+            inner: handle,
+            stat,
+        });
         Ok(OpenResult::ThisScheme {
             number: id,
             flags: NewFdFlags::POSITIONED,
         })
     }
     fn fstat(&mut self, id: usize, stat: &mut syscall::Stat, _ctx: &CallerCtx) -> Result<()> {
-        let handle = self.handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get_mut(id)?;
 
         let (len, mode) = match handle.inner {
             Handle::TopLevel { ref entries } => (entries.len(), MODE_DIR | 0o755),
@@ -168,7 +147,7 @@ impl SchemeSync for PciScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let handle = self.handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get_mut(id)?;
 
         if handle.stat {
             return Err(Error::new(EBADF));
@@ -195,7 +174,7 @@ impl SchemeSync for PciScheme {
             return Ok(buf);
         };
 
-        let handle = self.handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get_mut(id)?;
 
         if handle.stat {
             return Err(Error::new(EBADF));
@@ -237,7 +216,7 @@ impl SchemeSync for PciScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let handle = self.handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get_mut(id)?;
 
         if handle.stat {
             return Err(Error::new(EBADF));
@@ -259,7 +238,7 @@ impl SchemeSync for PciScheme {
         metadata: &[u64],
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let handle = self.handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get_mut(id)?;
 
         if handle.stat {
             return Err(Error::new(EBADF));
@@ -329,7 +308,7 @@ impl SchemeSync for PciScheme {
 
 impl PciScheme {
     pub fn on_close(&mut self, id: usize) {
-        match self.handles.remove(&id) {
+        match self.handles.remove(id) {
             Some(HandleWrapper {
                 inner: Handle::Channel { addr, .. },
                 ..
@@ -347,8 +326,7 @@ impl PciScheme {
 impl PciScheme {
     pub fn new(pcie: Pcie) -> Self {
         Self {
-            handles: BTreeMap::new(),
-            next_id: 0,
+            handles: HandleMap::new(),
             pcie,
             tree: BTreeMap::new(),
         }

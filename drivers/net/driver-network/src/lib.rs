@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::{cmp, io};
 
 use libredox::flag::O_NONBLOCK;
@@ -7,6 +6,7 @@ use redox_scheme::{
     scheme::{IntoTag, Op, SchemeResponse, SchemeState, SchemeSync},
     CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket,
 };
+use scheme_utils::HandleMap;
 use syscall::schemev2::NewFdFlags;
 use syscall::{
     Error, EventFlags, Result, Stat, EACCES, EAGAIN, EBADF, EINTR, EINVAL, EWOULDBLOCK, MODE_FILE,
@@ -208,8 +208,7 @@ impl<T: NetworkAdapter> NetworkScheme<T> {
 struct NetworkSchemeInner<T: NetworkAdapter> {
     adapter: T,
     scheme_name: String,
-    next_id: usize,
-    handles: BTreeMap<usize, Handle>,
+    handles: HandleMap<Handle>,
 }
 
 enum Handle {
@@ -223,18 +222,14 @@ impl<T: NetworkAdapter> NetworkSchemeInner<T> {
         Self {
             adapter,
             scheme_name,
-            next_id: 0,
-            handles: BTreeMap::new(),
+            handles: HandleMap::new(),
         }
     }
 }
 
 impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.handles.insert(id, Handle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.insert(Handle::SchemeRoot))
     }
 
     fn openat(
@@ -245,10 +240,7 @@ impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
         _fcntl_flags: u32,
         ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(
-            self.handles.get(&fd).ok_or(Error::new(EINVAL))?,
-            Handle::SchemeRoot
-        ) {
+        if !matches!(self.handles.get(fd)?, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
         if ctx.uid != 0 {
@@ -261,12 +253,8 @@ impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
             _ => return Err(Error::new(EINVAL)),
         };
 
-        self.next_id += 1;
-        self.handles.insert(self.next_id, handle);
-        Ok(OpenResult::ThisScheme {
-            number: self.next_id,
-            flags,
-        })
+        let id = self.handles.insert(handle);
+        Ok(OpenResult::ThisScheme { number: id, flags })
     }
 
     fn read(
@@ -277,7 +265,7 @@ impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
         fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let handle = self.handles.get_mut(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get_mut(id)?;
 
         match *handle {
             Handle::Data => {}
@@ -310,7 +298,7 @@ impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(id)?;
 
         match handle {
             Handle::Data => {}
@@ -322,12 +310,12 @@ impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
     }
 
     fn fevent(&mut self, id: usize, _flags: EventFlags, _ctx: &CallerCtx) -> Result<EventFlags> {
-        let _handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let _handle = self.handles.get(id)?;
         Ok(EventFlags::empty())
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(id)?;
 
         const PREFIX: &[u8] = b"/scheme/";
         let len = cmp::min(PREFIX.len(), buf.len());
@@ -362,7 +350,7 @@ impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
     }
 
     fn fstat(&mut self, id: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {
-        let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(id)?;
 
         match handle {
             Handle::Data { .. } => {
@@ -379,11 +367,11 @@ impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
     }
 
     fn fsync(&mut self, id: usize, _ctx: &CallerCtx) -> Result<()> {
-        let _handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let _handle = self.handles.get(id)?;
         Ok(())
     }
 
     fn on_close(&mut self, id: usize) {
-        self.handles.remove(&id);
+        self.handles.remove(id);
     }
 }

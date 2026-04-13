@@ -13,6 +13,7 @@ use libredox::Fd;
 use partitionlib::{LogicalBlockSize, PartitionTable};
 use redox_scheme::scheme::{register_scheme_inner, SchemeAsync, SchemeState};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket};
+use scheme_utils::HandleMap;
 use syscall::dirent::DirentBuf;
 use syscall::schemev2::NewFdFlags;
 use syscall::{
@@ -276,8 +277,7 @@ impl<T: Disk> DiskScheme<T> {
                 .into_iter()
                 .map(|(k, disk)| (k, DiskWrapper::new(disk, executor)))
                 .collect(),
-            next_id: 0,
-            handles: BTreeMap::new(),
+            handles: HandleMap::new(),
         };
 
         let cap_id = inner.scheme_root().expect("failed to get this scheme root");
@@ -361,8 +361,7 @@ struct DiskSchemeInner<T> {
     scheme_name: String,
     socket: Socket,
     disks: BTreeMap<u32, DiskWrapper<T>>,
-    handles: BTreeMap<usize, Handle>,
-    next_id: usize,
+    handles: HandleMap<Handle>,
 }
 
 pub trait ExecutorTrait {
@@ -432,10 +431,7 @@ impl<T: Disk> DiskSchemeInner<T> {
 
 impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.handles.insert(id, Handle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.insert(Handle::SchemeRoot))
     }
     async fn openat(
         &mut self,
@@ -445,10 +441,7 @@ impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
         _fcntl_flags: u32,
         ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(
-            self.handles.get(&dirfd).ok_or(Error::new(EBADF))?,
-            Handle::SchemeRoot
-        ) {
+        if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
 
@@ -515,9 +508,7 @@ impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
                 return Err(Error::new(ENOENT));
             }
         };
-        let id = self.next_id;
-        self.next_id += 1;
-        self.handles.insert(id, handle);
+        let id = self.handles.insert(handle);
         Ok(OpenResult::ThisScheme {
             number: id,
             flags: NewFdFlags::POSITIONED,
@@ -534,7 +525,7 @@ impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
     }
 
     async fn fstat(&mut self, id: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {
-        match *self.handles.get(&id).ok_or(Error::new(EBADF))? {
+        match *self.handles.get(id)? {
             Handle::List(ref data) => {
                 stat.st_mode = MODE_DIR;
                 stat.st_size = data.len() as u64;
@@ -568,7 +559,7 @@ impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
     }
 
     async fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(id)?;
 
         let mut i = 0;
 
@@ -622,7 +613,7 @@ impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        match *self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
+        match *self.handles.get_mut(id)? {
             Handle::List(ref handle) => {
                 let src = usize::try_from(offset)
                     .ok()
@@ -654,7 +645,7 @@ impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        match *self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
+        match *self.handles.get_mut(id)? {
             Handle::List(_) => Err(Error::new(EBADF)),
             Handle::Disk(number) => {
                 let disk = self.disks.get_mut(&number).ok_or(Error::new(EBADF))?;
@@ -671,7 +662,7 @@ impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
     }
 
     async fn fsize(&mut self, id: usize, _ctx: &CallerCtx) -> Result<u64> {
-        Ok(match *self.handles.get_mut(&id).ok_or(Error::new(EBADF))? {
+        Ok(match *self.handles.get_mut(id)? {
             Handle::List(ref handle) => handle.len() as u64,
             Handle::Disk(number) => {
                 let disk = self.disks.get_mut(&number).ok_or(Error::new(EBADF))?;
@@ -696,6 +687,6 @@ impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
 
 impl<D: Disk> DiskSchemeInner<D> {
     pub fn on_close(&mut self, id: usize) {
-        let _ = self.handles.remove(&id);
+        let _ = self.handles.remove(id);
     }
 }

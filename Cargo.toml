@@ -14,6 +14,7 @@ members = [
     "ptyd",
     "ramfs",
     "randd",
+    "scheme-utils",
     "zerod",
 
     "drivers/common",

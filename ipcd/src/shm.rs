@@ -1,4 +1,5 @@
 use redox_scheme::{scheme::SchemeSync, CallerCtx, OpenResult};
+use scheme_utils::HandleMap;
 use std::{
     cmp,
     collections::{hash_map::Entry, HashMap},
@@ -14,10 +15,10 @@ enum Handle {
     SchemeRoot,
 }
 impl Handle {
-    fn as_shm(&self) -> Option<&Rc<str>> {
+    fn as_shm(&self) -> Result<&Rc<str>, Error> {
         match self {
-            Self::Shm(path) => Some(path),
-            Self::SchemeRoot => None,
+            Self::Shm(path) => Ok(path),
+            Self::SchemeRoot => Err(Error::new(EBADF)),
         }
     }
 }
@@ -32,26 +33,20 @@ pub struct ShmHandle {
 }
 pub struct ShmScheme {
     maps: HashMap<Rc<str>, ShmHandle>,
-    handles: HashMap<usize, Handle>,
-    next_id: usize,
+    handles: HandleMap<Handle>,
 }
 impl ShmScheme {
     pub fn new() -> Self {
         Self {
             maps: HashMap::new(),
-            handles: HashMap::new(),
-            next_id: 0,
+            handles: HandleMap::new(),
         }
     }
 }
 
 impl SchemeSync for ShmScheme {
     fn scheme_root(&mut self) -> Result<usize> {
-        let id = self.next_id;
-        self.next_id += 1;
-
-        self.handles.insert(id, Handle::SchemeRoot);
-        Ok(id)
+        Ok(self.handles.insert(Handle::SchemeRoot))
     }
     //FIXME: Handle O_RDONLY/O_WRONLY/O_RDWR
     fn openat(
@@ -62,7 +57,7 @@ impl SchemeSync for ShmScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        let handle = self.handles.get(&dirfd).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(dirfd)?;
         if !matches!(handle, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
@@ -87,10 +82,8 @@ impl SchemeSync for ShmScheme {
             }
         };
         entry.refs += 1;
-        self.handles.insert(self.next_id, Handle::Shm(path));
+        let id = self.handles.insert(Handle::Shm(path));
 
-        let id = self.next_id;
-        self.next_id += 1;
         Ok(OpenResult::ThisScheme {
             number: id,
             flags: NewFdFlags::POSITIONED,
@@ -106,18 +99,14 @@ impl SchemeSync for ShmScheme {
         }
 
         // Write path
-        let path = self
-            .handles
-            .get(&id)
-            .and_then(Handle::as_shm)
-            .ok_or(Error::new(EBADF))?;
+        let path = self.handles.get(id).and_then(Handle::as_shm)?;
         let len = cmp::min(path.len(), buf.len() - PREFIX.len());
         buf[PREFIX.len()..][..len].copy_from_slice(&path.as_bytes()[..len]);
 
         Ok(PREFIX.len() + len)
     }
     fn on_close(&mut self, id: usize) {
-        let Handle::Shm(path) = self.handles.remove(&id).unwrap() else {
+        let Handle::Shm(path) = self.handles.remove(id).unwrap() else {
             return;
         };
         let mut entry = match self.maps.entry(path) {
@@ -131,7 +120,7 @@ impl SchemeSync for ShmScheme {
         }
     }
     fn unlinkat(&mut self, dirfd: usize, path: &str, flags: usize, _ctx: &CallerCtx) -> Result<()> {
-        let handle = self.handles.get(&dirfd).ok_or(Error::new(EBADF))?;
+        let handle = self.handles.get(dirfd)?;
         if !matches!(handle, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
@@ -152,11 +141,7 @@ impl SchemeSync for ShmScheme {
         Ok(())
     }
     fn fstat(&mut self, id: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {
-        let path = self
-            .handles
-            .get(&id)
-            .and_then(Handle::as_shm)
-            .ok_or(Error::new(EBADF))?;
+        let path = self.handles.get(id).and_then(Handle::as_shm)?;
         let size = self
             .maps
             .get(path)
@@ -174,11 +159,7 @@ impl SchemeSync for ShmScheme {
         Ok(())
     }
     fn fsize(&mut self, id: usize, _ctx: &CallerCtx) -> Result<u64> {
-        let path = self
-            .handles
-            .get(&id)
-            .and_then(Handle::as_shm)
-            .ok_or(Error::new(EBADF))?;
+        let path = self.handles.get(id).and_then(Handle::as_shm)?;
         let size = self
             .maps
             .get(path)
@@ -189,11 +170,7 @@ impl SchemeSync for ShmScheme {
         Ok(size as u64)
     }
     fn ftruncate(&mut self, id: usize, len: u64, _ctx: &CallerCtx) -> Result<()> {
-        let path = self
-            .handles
-            .get(&id)
-            .and_then(Handle::as_shm)
-            .ok_or(Error::new(EBADF))?;
+        let path = self.handles.get(id).and_then(Handle::as_shm)?;
         self.maps
             .get_mut(path)
             .expect("handle pointing to nothing")
@@ -208,11 +185,7 @@ impl SchemeSync for ShmScheme {
         _flags: MapFlags,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let path = self
-            .handles
-            .get(&id)
-            .and_then(Handle::as_shm)
-            .ok_or(Error::new(EBADF))?;
+        let path = self.handles.get(id).and_then(Handle::as_shm)?;
         self.maps
             .get_mut(path)
             .expect("handle pointing to nothing")
@@ -227,11 +200,7 @@ impl SchemeSync for ShmScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let path = self
-            .handles
-            .get(&id)
-            .and_then(Handle::as_shm)
-            .ok_or(Error::new(EBADF))?;
+        let path = self.handles.get(id).and_then(Handle::as_shm)?;
         self.maps
             .get_mut(path)
             .expect("handle pointing to nothing")
@@ -246,11 +215,7 @@ impl SchemeSync for ShmScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        let path = self
-            .handles
-            .get(&id)
-            .and_then(Handle::as_shm)
-            .ok_or(Error::new(EBADF))?;
+        let path = self.handles.get(id).and_then(Handle::as_shm)?;
         self.maps
             .get_mut(path)
             .expect("handle pointing to nothing")
