@@ -1,5 +1,3 @@
-//#![deny(warnings)]
-
 use libredox::{flag, Fd};
 use redox_scheme::scheme::register_sync_scheme;
 use redox_scheme::wrappers::ReadinessBased;

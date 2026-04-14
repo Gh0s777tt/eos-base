@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{thread, time};
 
 use common::io::{Io, Pio, ReadOnly, WriteOnly};
