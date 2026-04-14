@@ -217,21 +217,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bgad"
-version = "0.1.0"
-dependencies = [
- "common",
- "daemon",
- "inputd",
- "libredox",
- "log",
- "orbclient",
- "pcid",
- "redox-scheme",
- "redox_syscall 0.7.3",
-]
-
-[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -66,7 +66,6 @@
 
 ### Graphics
 
-- [graphics/bgad](graphics/bgad/) - Bochs video driver
 - [graphics/ihdgd](graphics/ihdgd/) - Intel graphics driver
 - [graphics/vesad](graphics/vesad/) - VESA video driver
 - [graphics/virtio-gpud](graphics/virtio-gpud/) - VirtIO-GPU device driver
