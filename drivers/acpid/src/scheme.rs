@@ -19,7 +19,7 @@ use syscall::error::{Error, Result};
 use syscall::error::{EACCES, EBADF, EBADFD, EINVAL, EIO, EISDIR, ENOENT, ENOTDIR};
 use syscall::flag::{MODE_DIR, MODE_FILE};
 use syscall::flag::{O_ACCMODE, O_DIRECTORY, O_RDONLY, O_STAT, O_SYMLINK};
-use syscall::{EOPNOTSUPP, EOVERFLOW, EPERM};
+use syscall::{EOVERFLOW, EPERM};
 
 use crate::acpi::{AcpiContext, AmlSymbols, SdtSignature};
 
@@ -395,17 +395,6 @@ impl SchemeSync for AcpiScheme<'_, '_> {
         }
 
         Ok(buf)
-    }
-
-    fn write(
-        &mut self,
-        _id: usize,
-        _buf: &[u8],
-        _offset: u64,
-        _fcntl: u32,
-        _ctx: &CallerCtx,
-    ) -> Result<usize> {
-        Err(Error::new(EBADF))
     }
 
     fn call(
