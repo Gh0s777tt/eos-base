@@ -1,8 +1,3 @@
-extern crate bitflags;
-extern crate event;
-extern crate spin;
-extern crate syscall;
-
 use redox_scheme::scheme::register_sync_scheme;
 use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::Socket;

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use common::io::Pio;
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::CallerCtx;

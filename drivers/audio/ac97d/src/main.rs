@@ -1,9 +1,3 @@
-//#![deny(warnings)]
-
-extern crate event;
-extern crate spin;
-extern crate syscall;
-
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::usize;

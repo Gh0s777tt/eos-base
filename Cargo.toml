@@ -33,7 +33,6 @@ members = [
     "drivers/audio/ihdad",
     "drivers/audio/sb16d",
 
-    "drivers/graphics/bgad",
     "drivers/graphics/console-draw",
     "drivers/graphics/fbbootlogd",
     "drivers/graphics/driver-graphics",
