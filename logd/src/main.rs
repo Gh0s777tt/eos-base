@@ -22,11 +22,15 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
         .next_request(SignalBehavior::Restart)
         .expect("logd: failed to read events from log scheme")
     {
-        let request = match request.kind() {
-            RequestKind::Call(call) => call,
+        match request.kind() {
+            RequestKind::Call(call) => {
+                let response = call.handle_sync(&mut scheme, &mut state);
+                socket
+                    .write_response(response, SignalBehavior::Restart)
+                    .expect("logd: failed to write responses to log scheme");
+            }
             RequestKind::OnClose { id } => {
                 scheme.on_close(id);
-                continue;
             }
             RequestKind::SendFd(sendfd_request) => {
                 let result = scheme.on_sendfd(&sendfd_request);
@@ -34,15 +38,9 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
                 socket
                     .write_response(resp, SignalBehavior::Restart)
                     .expect("logd: failed to write responses to log scheme");
-                continue;
             }
-            _ => continue,
+            _ => {}
         };
-
-        let response = request.handle_sync(&mut scheme, &mut state);
-        socket
-            .write_response(response, SignalBehavior::Restart)
-            .expect("logd: failed to write responses to log scheme");
     }
     process::exit(0);
 }

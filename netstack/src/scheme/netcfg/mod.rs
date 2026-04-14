@@ -4,7 +4,7 @@ mod notifier;
 
 use redox_scheme::{
     scheme::{register_scheme_inner, SchemeState, SchemeSync},
-    CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket,
+    CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket,
 };
 use scheme_utils::HandleMap;
 use smoltcp::wire::{EthernetAddress, IpAddress, IpCidr, Ipv4Address};
@@ -386,33 +386,22 @@ impl NetCfgScheme {
                 }
             };
 
-            let req = match request.kind() {
-                RequestKind::Call(c) => c,
+            match request.kind() {
+                RequestKind::Call(c) => {
+                    let resp = c.handle_sync(&mut self.inner, &mut self.state);
+                    let _ = self
+                        .inner
+                        .scheme_file
+                        .write_response(resp, SignalBehavior::Restart)
+                        .map_err(|e| {
+                            Error::from_syscall_error(e.into(), "failed to write response")
+                        })?;
+                }
                 RequestKind::OnClose { id } => {
                     self.inner.on_close(id);
-                    continue;
                 }
-                _ => {
-                    continue;
-                }
-            };
-            let caller = req.caller();
-            let op = match req.op() {
-                Ok(op) => op,
-                Err(req) => {
-                    self.inner.scheme_file.write_response(
-                        Response::err(syscall::EOPNOTSUPP, req),
-                        SignalBehavior::Restart,
-                    );
-                    continue;
-                }
-            };
-            let resp = op.handle_sync(caller, &mut self.inner, &mut self.state);
-            let _ = self
-                .inner
-                .scheme_file
-                .write_response(resp, SignalBehavior::Restart)
-                .map_err(|e| Error::from_syscall_error(e.into(), "failed to write response"))?;
+                _ => {}
+            }
         };
         self.inner.notify_scheduled_fds();
         Ok(result)
