@@ -74,8 +74,8 @@ fn daemon(daemon: SchemeDaemon) -> anyhow::Result<()> {
         if !readiness.read_requests()? {
             break;
         }
-        readiness.process_requests(|| scheme.lock().unwrap());
-        readiness.poll_all_requests(|| scheme.lock().unwrap())?;
+        readiness.process_requests(&mut *scheme.lock().unwrap());
+        readiness.poll_all_requests(&mut *scheme.lock().unwrap())?;
         if !readiness.write_responses()? {
             break;
         };

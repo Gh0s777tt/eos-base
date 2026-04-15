@@ -2,7 +2,6 @@ use event::{EventFlags, EventQueue};
 use redox_scheme::scheme::register_sync_scheme;
 use redox_scheme::Socket;
 use scheme_utils::ReadinessBased;
-use std::sync::Mutex;
 
 mod chan;
 mod shm;
@@ -41,54 +40,37 @@ fn inner(daemon: daemon::Daemon) -> anyhow::Result<()> {
     // Prepare chan scheme
     let chan_socket =
         Socket::nonblock().map_err(|e| anyhow::anyhow!("failed to create chan scheme: {e}"))?;
-    let chan = Mutex::new(ChanScheme::new(&chan_socket));
+    let mut chan = ChanScheme::new(&chan_socket);
     let mut chan_handler = ReadinessBased::new(&chan_socket, 16);
 
     // Prepare shm scheme
     let shm_socket =
         Socket::nonblock().map_err(|e| anyhow::anyhow!("failed to create shm socket: {e}"))?;
-    let shm = Mutex::new(ShmScheme::new());
+    let mut shm = ShmScheme::new();
     let mut shm_handler = ReadinessBased::new(&shm_socket, 16);
 
     // Prepare uds stream scheme
     let uds_stream_socket = Socket::nonblock()
         .map_err(|e| anyhow::anyhow!("failed to create uds stream scheme: {e}"))?;
-    let uds_stream = Mutex::new(
-        UdsStreamScheme::new(&uds_stream_socket)
-            .map_err(|e| anyhow::anyhow!("failed to create uds stream scheme: {e}"))?,
-    );
+    let mut uds_stream = UdsStreamScheme::new(&uds_stream_socket)
+        .map_err(|e| anyhow::anyhow!("failed to create uds stream scheme: {e}"))?;
     let mut uds_stream_handler = ReadinessBased::new(&uds_stream_socket, 16);
 
     // Prepare uds dgram scheme
     let uds_dgram_socket = Socket::nonblock()
         .map_err(|e| anyhow::anyhow!("failed to create uds dgram scheme: {e}"))?;
-    let uds_dgram = Mutex::new(
-        UdsDgramScheme::new(&uds_dgram_socket)
-            .map_err(|e| anyhow::anyhow!("failed to create uds dgram scheme: {e}"))?,
-    );
+    let mut uds_dgram = UdsDgramScheme::new(&uds_dgram_socket)
+        .map_err(|e| anyhow::anyhow!("failed to create uds dgram scheme: {e}"))?;
     let mut uds_dgram_handler = ReadinessBased::new(&uds_dgram_socket, 16);
 
-    {
-        let mut chan_guard = chan.lock().unwrap();
-        register_sync_scheme(&chan_socket, "chan", &mut *chan_guard)
-            .map_err(|e| anyhow::anyhow!("failed to register chan scheme: {e}"))?;
-    }
-    {
-        let mut shm_guard = shm.lock().unwrap();
-        register_sync_scheme(&shm_socket, "shm", &mut *shm_guard)
-            .map_err(|e| anyhow::anyhow!("failed to register shm scheme: {e}"))?;
-    }
-    {
-        let mut uds_stream_guard = uds_stream.lock().unwrap();
-        register_sync_scheme(&uds_stream_socket, "uds_stream", &mut *uds_stream_guard)
-            .map_err(|e| anyhow::anyhow!("failed to register uds stream scheme: {e}"))?;
-    }
-    {
-        let mut uds_dgram_guard = uds_dgram.lock().unwrap();
-        // Register schemes to namespace
-        register_sync_scheme(&uds_dgram_socket, "uds_dgram", &mut *uds_dgram_guard)
-            .map_err(|e| anyhow::anyhow!("failed to register uds dgram scheme: {e}"))?;
-    }
+    register_sync_scheme(&chan_socket, "chan", &mut chan)
+        .map_err(|e| anyhow::anyhow!("failed to register chan scheme: {e}"))?;
+    register_sync_scheme(&shm_socket, "shm", &mut shm)
+        .map_err(|e| anyhow::anyhow!("failed to register shm scheme: {e}"))?;
+    register_sync_scheme(&uds_stream_socket, "uds_stream", &mut uds_stream)
+        .map_err(|e| anyhow::anyhow!("failed to register uds stream scheme: {e}"))?;
+    register_sync_scheme(&uds_dgram_socket, "uds_dgram", &mut uds_dgram)
+        .map_err(|e| anyhow::anyhow!("failed to register uds dgram scheme: {e}"))?;
 
     daemon.ready();
 
@@ -153,11 +135,11 @@ fn inner(daemon: daemon::Daemon) -> anyhow::Result<()> {
                 }
 
                 // 2. Process requests
-                chan_handler.process_requests(|| chan.lock().unwrap());
+                chan_handler.process_requests(&mut chan);
 
                 // 3.Poll all blocking requests
                 chan_handler
-                    .poll_all_requests(|| chan.lock().unwrap())
+                    .poll_all_requests(&mut chan)
                     .map_err(|e| anyhow::anyhow!("error occured in poll_all_requests: {e}"))?;
 
                 // 3. Write responses
@@ -186,7 +168,7 @@ fn inner(daemon: daemon::Daemon) -> anyhow::Result<()> {
                 }
 
                 // 2. Process requests
-                shm_handler.process_requests(|| shm.lock().unwrap());
+                shm_handler.process_requests(&mut shm);
 
                 // shm is not a blocking scheme
 
@@ -216,11 +198,11 @@ fn inner(daemon: daemon::Daemon) -> anyhow::Result<()> {
                 }
 
                 // 2. Process requests
-                uds_stream_handler.process_requests(|| uds_stream.lock().unwrap());
+                uds_stream_handler.process_requests(&mut uds_stream);
 
                 // 3.Poll all blocking requests
                 uds_stream_handler
-                    .poll_all_requests(|| uds_stream.lock().unwrap())
+                    .poll_all_requests(&mut uds_stream)
                     .map_err(|e| anyhow::anyhow!("error occured in poll_all_requests: {e}"))?;
 
                 // 3. Write responses
@@ -249,11 +231,11 @@ fn inner(daemon: daemon::Daemon) -> anyhow::Result<()> {
                 }
 
                 // 2. Process requests
-                uds_dgram_handler.process_requests(|| uds_dgram.lock().unwrap());
+                uds_dgram_handler.process_requests(&mut uds_dgram);
 
                 // 3.Poll all blocking requests
                 uds_dgram_handler
-                    .poll_all_requests(|| uds_dgram.lock().unwrap())
+                    .poll_all_requests(&mut uds_dgram)
                     .map_err(|e| anyhow::anyhow!("error occured in poll_all_requests: {e}"))?;
 
                 // 3. Write responses

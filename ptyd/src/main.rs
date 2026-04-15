@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use event::{user_data, EventFlags, EventQueue};
 use libredox::{flag, Fd};
 
@@ -39,8 +37,8 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let socket = redox_scheme::Socket::nonblock().expect("pty: failed to create pty scheme");
     let mut handler = ReadinessBased::new(&socket, 16);
 
-    let scheme = RefCell::new(PtyScheme::new());
-    register_sync_scheme(&socket, "pty", &mut *scheme.borrow_mut())
+    let mut scheme = PtyScheme::new();
+    register_sync_scheme(&socket, "pty", &mut scheme)
         .expect("ptyd: failed to register scheme to namespace");
     daemon.ready();
 
@@ -58,15 +56,15 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
     let mut timeout_count = 0u64;
 
-    scan_requests(&mut handler, &scheme).expect("pty: could not scan requests");
-    issue_events(&socket, &mut scheme.borrow_mut());
+    scan_requests(&mut handler, &mut scheme).expect("pty: could not scan requests");
+    issue_events(&socket, &mut scheme);
 
     for event_res in event_queue {
         let event = event_res.expect("pty: failed to read from event queue");
 
         match event.user_data {
             EventSource::Socket => {
-                if scan_requests(&mut handler, &scheme).is_err() {
+                if scan_requests(&mut handler, &mut scheme).is_err() {
                     break;
                 }
             }
@@ -75,19 +73,19 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
                 timeout_count = timeout_count.wrapping_add(1);
 
-                for (_id, handle) in scheme.borrow_mut().handles.iter_mut() {
+                for (_id, handle) in scheme.handles.iter_mut() {
                     if let Handle::Resource(res) = handle {
                         res.timeout(timeout_count);
                     }
                 }
 
                 handler
-                    .poll_all_requests(|| scheme.borrow_mut())
+                    .poll_all_requests(&mut scheme)
                     .expect("ihdad: failed to poll requests");
             }
         }
 
-        issue_events(&socket, &mut scheme.borrow_mut());
+        issue_events(&socket, &mut scheme);
     }
 
     std::process::exit(0);
@@ -95,7 +93,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
 fn scan_requests(
     handler: &mut ReadinessBased<'_>,
-    scheme: &RefCell<PtyScheme>,
+    scheme: &mut PtyScheme,
 ) -> libredox::error::Result<()> {
     // 1. Read requests
     match handler
@@ -109,11 +107,11 @@ fn scan_requests(
     }
 
     // 2. Process requests
-    handler.process_requests(|| scheme.borrow_mut());
+    handler.process_requests(scheme);
 
     // 3. Poll all blocking requests
     handler
-        .poll_all_requests(|| scheme.borrow_mut())
+        .poll_all_requests(scheme)
         .expect("pty: error occured in poll_all_requests");
 
     // 4. Write responses

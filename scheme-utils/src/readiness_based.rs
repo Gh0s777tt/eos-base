@@ -1,4 +1,3 @@
-use core::ops::{Deref, DerefMut};
 use std::collections::{HashMap, VecDeque};
 use std::ops::ControlFlow;
 
@@ -48,13 +47,7 @@ impl<'sock> ReadinessBased<'sock> {
             Err(err) => return Err(err),
         }
     }
-    pub fn process_requests<Guard, S: SchemeSync>(
-        &mut self,
-        // TODO: Maybe change this to &mut SchemeSync, requires converting e.g. audiod
-        mut acquire_scheme: impl FnMut() -> Guard,
-    ) where
-        Guard: Deref<Target = S> + DerefMut,
-    {
+    pub fn process_requests(&mut self, scheme: &mut impl SchemeSync) {
         for request in self.requests_read.drain(..) {
             let req = match request.kind() {
                 RequestKind::Call(c) => c,
@@ -67,17 +60,17 @@ impl<'sock> ReadinessBased<'sock> {
                 }
                 RequestKind::OnClose { id } => {
                     // TODO: state.on_close()
-                    acquire_scheme().on_close(id);
+                    scheme.on_close(id);
                     continue;
                 }
                 RequestKind::SendFd(sendfd_request) => {
-                    let result = acquire_scheme().on_sendfd(&sendfd_request);
+                    let result = scheme.on_sendfd(&sendfd_request);
                     let response = Response::new(result, sendfd_request);
                     self.responses_to_write.push_back(response);
                     continue;
                 }
                 RequestKind::RecvFd(recvfd_request) => {
-                    let result = acquire_scheme().on_recvfd(&recvfd_request);
+                    let result = scheme.on_recvfd(&recvfd_request);
                     let caller = recvfd_request.caller();
 
                     if let Err(Error {
@@ -102,24 +95,22 @@ impl<'sock> ReadinessBased<'sock> {
                     continue;
                 }
             };
-            let resp =
-                match op.handle_sync_dont_consume(&caller, &mut *acquire_scheme(), &mut self.state)
-                {
-                    SchemeResponse::Opened(Err(Error {
-                        errno: errno::EWOULDBLOCK,
-                    }))
-                    | SchemeResponse::Regular(Err(Error {
-                        errno: errno::EWOULDBLOCK,
-                    })) if !op.is_explicitly_nonblock() => {
-                        self.states.insert(caller.id, (caller, op));
-                        continue;
-                    }
-                    SchemeResponse::Regular(r) => Response::new(r, op),
-                    SchemeResponse::RegularAndNotifyOnDetach(status) => {
-                        Response::new_notify_on_detach(status, op)
-                    }
-                    SchemeResponse::Opened(o) => Response::open_dup_like(o, op),
-                };
+            let resp = match op.handle_sync_dont_consume(&caller, scheme, &mut self.state) {
+                SchemeResponse::Opened(Err(Error {
+                    errno: errno::EWOULDBLOCK,
+                }))
+                | SchemeResponse::Regular(Err(Error {
+                    errno: errno::EWOULDBLOCK,
+                })) if !op.is_explicitly_nonblock() => {
+                    self.states.insert(caller.id, (caller, op));
+                    continue;
+                }
+                SchemeResponse::Regular(r) => Response::new(r, op),
+                SchemeResponse::RegularAndNotifyOnDetach(status) => {
+                    Response::new_notify_on_detach(status, op)
+                }
+                SchemeResponse::Opened(o) => Response::open_dup_like(o, op),
+            };
             self.responses_to_write.push_back(resp);
         }
     }
@@ -164,18 +155,9 @@ impl<'sock> ReadinessBased<'sock> {
         };
         Ok(ControlFlow::Break(resp))
     }
-    pub fn poll_ready_requests<S, G>(&mut self, mut acquire_scheme: impl FnMut() -> G) -> Result<()>
-    where
-        S: SchemeSync,
-        G: Deref<Target = S> + DerefMut,
-    {
+    pub fn poll_ready_requests(&mut self, scheme: &mut impl SchemeSync) -> Result<()> {
         for id in self.ready_queue.drain(..) {
-            match Self::poll_request_inner(
-                id,
-                &mut *acquire_scheme(),
-                &mut self.state,
-                &mut self.states,
-            )? {
+            match Self::poll_request_inner(id, scheme, &mut self.state, &mut self.states)? {
                 ControlFlow::Break(resp) => {
                     self.responses_to_write.push_back(resp);
                 }
@@ -186,15 +168,11 @@ impl<'sock> ReadinessBased<'sock> {
         }
         Ok(())
     }
-    pub fn poll_all_requests<S, G>(&mut self, acquire_scheme: impl FnMut() -> G) -> Result<()>
-    where
-        S: SchemeSync,
-        G: Deref<Target = S> + DerefMut,
-    {
+    pub fn poll_all_requests(&mut self, scheme: &mut impl SchemeSync) -> Result<()> {
         // TODO: implement waker-like API
         self.ready_queue.clear();
         self.ready_queue.extend(self.states.keys().copied());
-        self.poll_ready_requests(acquire_scheme)
+        self.poll_ready_requests(scheme)
     }
     pub fn write_responses(&mut self) -> Result<bool> {
         match self
