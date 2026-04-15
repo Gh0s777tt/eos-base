@@ -31,7 +31,7 @@ impl<'sock> ReadinessBased<'sock> {
             state: SchemeState::new(),
         }
     }
-    pub fn read_requests(&mut self) -> Result<bool> {
+    pub fn read_and_process_requests(&mut self, scheme: &mut impl SchemeSync) -> Result<bool> {
         assert!(self.requests_read.is_empty());
 
         match self
@@ -39,15 +39,14 @@ impl<'sock> ReadinessBased<'sock> {
             .read_requests(&mut self.requests_read, SignalBehavior::Interrupt)
         {
             // TODO: write ECANCELED or similar for everything in self.states?
-            Ok(()) if self.requests_read.is_empty() => Ok(false), // EOF
+            Ok(()) if self.requests_read.is_empty() => return Ok(false), // EOF
             Ok(())
             | Err(Error {
                 errno: errno::EINTR | errno::EWOULDBLOCK | errno::EAGAIN,
-            }) => Ok(true),
+            }) => {}
             Err(err) => return Err(err),
         }
-    }
-    pub fn process_requests(&mut self, scheme: &mut impl SchemeSync) {
+
         for request in self.requests_read.drain(..) {
             let req = match request.kind() {
                 RequestKind::Call(c) => c,
@@ -113,6 +112,8 @@ impl<'sock> ReadinessBased<'sock> {
             };
             self.responses_to_write.push_back(resp);
         }
+
+        Ok(true)
     }
     // TODO: Doesn't scale. Instead, provide an API for some form of queue.
     // TODO: panic if id isn't present?

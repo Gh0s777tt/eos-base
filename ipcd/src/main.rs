@@ -123,130 +123,78 @@ fn inner(daemon: daemon::Daemon) -> anyhow::Result<()> {
             EventSource::ChanSocket => {
                 // Channel scheme
                 if !chan_eof {
-                    // 1. Read requests
-                    match chan_handler.read_requests() {
-                        Ok(true) => {} // Read requests success
-                        Ok(false) => {
-                            // EOF
-                            chan_eof = true;
-                        }
-                        Err(err) => return Err(anyhow::anyhow!("{err}")),
+                    // 1. Read and process requests
+                    if !chan_handler.read_and_process_requests(&mut chan)? {
+                        chan_eof = true;
                     }
                 }
 
-                // 2. Process requests
-                chan_handler.process_requests(&mut chan);
-
-                // 3.Poll all blocking requests
+                // 2. Poll all blocking requests
                 chan_handler
                     .poll_all_requests(&mut chan)
                     .map_err(|e| anyhow::anyhow!("error occured in poll_all_requests: {e}"))?;
 
                 // 3. Write responses
                 // write_responses returns a Result<bool>, but currently only returns true.
-                match chan_handler.write_responses() {
-                    Ok(true) => {} // Read requests success
-                    Ok(false) => {
-                        // EOF
-                        chan_eof = true;
-                    }
-                    Err(err) => return Err(anyhow::anyhow!("{err}")),
+                if !chan_handler.write_responses()? {
+                    chan_eof = true;
                 }
             }
             EventSource::ShmSocket => {
                 // Shared memory scheme
                 if !shm_eof {
-                    // 1. Read requests
-                    match shm_handler.read_requests() {
-                        Ok(true) => {} // Read requests success
-                        Ok(false) => {
-                            // EOF
-                            shm_eof = true;
-                        }
-                        Err(err) => return Err(anyhow::anyhow!("{err}")),
+                    // 1. Read and process requests
+                    if !shm_handler.read_and_process_requests(&mut shm)? {
+                        shm_eof = true;
                     }
                 }
 
-                // 2. Process requests
-                shm_handler.process_requests(&mut shm);
-
                 // shm is not a blocking scheme
 
-                // 3. Write responses
+                // 2. Write responses
                 // write_responses returns a Result<bool>, but currently only returns true.
-                match shm_handler.write_responses() {
-                    Ok(true) => {} // Read requests success
-                    Ok(false) => {
-                        // EOF
-                        shm_eof = true;
-                    }
-                    Err(err) => return Err(anyhow::anyhow!("{err}")),
+                if !shm_handler.write_responses()? {
+                    shm_eof = true;
                 }
             }
             EventSource::UdsStreamSocket => {
                 // Unix Domain Socket Stream scheme
                 if !uds_stream_eof {
-                    // 1. Read requests
-                    match uds_stream_handler.read_requests() {
-                        Ok(true) => {} // Read requests success
-                        Ok(false) => {
-                            // EOF
-                            uds_stream_eof = true;
-                        }
-                        Err(err) => return Err(anyhow::anyhow!("{err}")),
+                    // 1. Read and process requests
+                    if !uds_stream_handler.read_and_process_requests(&mut uds_stream)? {
+                        uds_stream_eof = true;
                     }
                 }
 
-                // 2. Process requests
-                uds_stream_handler.process_requests(&mut uds_stream);
-
-                // 3.Poll all blocking requests
+                // 2. Poll all blocking requests
                 uds_stream_handler
                     .poll_all_requests(&mut uds_stream)
                     .map_err(|e| anyhow::anyhow!("error occured in poll_all_requests: {e}"))?;
 
                 // 3. Write responses
                 // write_responses returns a Result<bool>, but currently only returns true.
-                match uds_stream_handler.write_responses() {
-                    Ok(true) => {} // Read requests success
-                    Ok(false) => {
-                        // EOF
-                        uds_stream_eof = true;
-                    }
-                    Err(err) => return Err(anyhow::anyhow!("{err}")),
+                if !uds_stream_handler.write_responses()? {
+                    uds_stream_eof = true;
                 }
             }
             EventSource::UdsDgramSocket => {
                 // Unix Domain Socket Dgram scheme
                 if !uds_dgram_eof {
-                    // 1. Read requests
-                    match uds_dgram_handler.read_requests() {
-                        Ok(true) => {} // Read requests success
-                        Ok(false) => {
-                            // EOF
-                            uds_dgram_eof = true;
-                        }
-                        Err(err) => return Err(anyhow::anyhow!("{err}")),
+                    // 1. Read and process requests
+                    if !uds_dgram_handler.read_and_process_requests(&mut uds_dgram)? {
+                        uds_dgram_eof = true;
                     }
                 }
 
-                // 2. Process requests
-                uds_dgram_handler.process_requests(&mut uds_dgram);
-
-                // 3.Poll all blocking requests
+                // 2. Poll all blocking requests
                 uds_dgram_handler
                     .poll_all_requests(&mut uds_dgram)
                     .map_err(|e| anyhow::anyhow!("error occured in poll_all_requests: {e}"))?;
 
                 // 3. Write responses
                 // write_responses returns a Result<bool>, but currently only returns true.
-                match uds_dgram_handler.write_responses() {
-                    Ok(true) => {} // Read requests success
-                    Ok(false) => {
-                        // EOF
-                        uds_dgram_eof = true;
-                    }
-                    Err(err) => return Err(anyhow::anyhow!("{err}")),
+                if !uds_dgram_handler.write_responses()? {
+                    uds_dgram_eof = true;
                 }
             }
         }

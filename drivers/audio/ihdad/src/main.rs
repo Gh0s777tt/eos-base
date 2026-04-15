@@ -117,12 +117,11 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
                 }
                 Source::Scheme => {
                     if !readiness_based
-                        .read_requests()
+                        .read_and_process_requests(&mut device)
                         .expect("ihdad: failed to read from socket")
                     {
                         break;
                     }
-                    readiness_based.process_requests(&mut device);
                     if !readiness_based
                         .write_responses()
                         .expect("ihdad: failed to write to socket")

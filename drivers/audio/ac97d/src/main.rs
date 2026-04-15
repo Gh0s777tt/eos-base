@@ -112,12 +112,11 @@ fn daemon(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
             }
             Source::Scheme => {
                 if !readiness_based
-                    .read_requests()
+                    .read_and_process_requests(&mut device)
                     .expect("ac97d: failed to read from socket")
                 {
                     break;
                 }
-                readiness_based.process_requests(&mut device);
                 if !readiness_based
                     .write_responses()
                     .expect("ac97d: failed to write to socket")

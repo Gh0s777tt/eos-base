@@ -71,10 +71,9 @@ fn daemon(daemon: SchemeDaemon) -> anyhow::Result<()> {
     let mut readiness = ReadinessBased::new(&socket, 16);
 
     loop {
-        if !readiness.read_requests()? {
+        if !readiness.read_and_process_requests(&mut *scheme.lock().unwrap())? {
             break;
         }
-        readiness.process_requests(&mut *scheme.lock().unwrap());
         readiness.poll_all_requests(&mut *scheme.lock().unwrap())?;
         if !readiness.write_responses()? {
             break;
