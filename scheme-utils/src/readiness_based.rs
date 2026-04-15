@@ -184,10 +184,12 @@ impl<'sock> ReadinessBased<'sock> {
             Ok(()) if !self.responses_to_write.is_empty() => {
                 panic!("failed to write all scheme responses");
             }
-            Ok(())
-            | Err(Error {
+            Ok(()) => Ok(()),
+            Err(Error {
                 errno: errno::EINTR | errno::EWOULDBLOCK | errno::EAGAIN,
-            }) => Ok(()),
+            }) => {
+                panic!("scheme response writing should always block");
+            }
             Err(err) => return Err(LError::from(err).into()),
         }
     }
