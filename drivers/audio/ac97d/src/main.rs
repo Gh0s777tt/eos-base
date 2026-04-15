@@ -96,12 +96,9 @@ fn daemon(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
                 readiness_based
                     .poll_all_requests(&mut device)
                     .expect("ac97d: failed to poll requests");
-                if !readiness_based
+                readiness_based
                     .write_responses()
-                    .expect("ac97d: failed to write to socket")
-                {
-                    break;
-                }
+                    .expect("ac97d: failed to write to socket");
 
                 /*
                 let next_read = device_irq.next_read();
@@ -111,18 +108,12 @@ fn daemon(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
                 */
             }
             Source::Scheme => {
-                if !readiness_based
+                readiness_based
                     .read_and_process_requests(&mut device)
-                    .expect("ac97d: failed to read from socket")
-                {
-                    break;
-                }
-                if !readiness_based
+                    .expect("ac97d: failed to read from socket");
+                readiness_based
                     .write_responses()
-                    .expect("ac97d: failed to write to socket")
-                {
-                    break;
-                }
+                    .expect("ac97d: failed to write to socket");
 
                 /*
                 let next_read = device.borrow().next_read();

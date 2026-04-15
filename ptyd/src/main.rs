@@ -95,26 +95,15 @@ fn scan_requests(
     handler: &mut ReadinessBased<'_>,
     scheme: &mut PtyScheme,
 ) -> libredox::error::Result<()> {
-    // 1. Read and process requests
-    if !handler
+    handler
         .read_and_process_requests(scheme)
-        .expect("pty: failed to read from socket")
-    {
-        panic!("pty: channel EOF")
-    }
-
-    // 2. Poll all blocking requests
+        .expect("pty: failed to read from socket");
     handler
         .poll_all_requests(scheme)
         .expect("pty: error occured in poll_all_requests");
-
-    // 3. Write responses
-    if !handler
+    handler
         .write_responses()
-        .expect("pty: failed to write to socket")
-    {
-        panic!("pty: channel EOF")
-    }
+        .expect("pty: failed to write to socket");
     Ok(())
 }
 

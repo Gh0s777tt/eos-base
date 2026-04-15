@@ -75,7 +75,7 @@ fn inner(daemon: daemon::Daemon) -> anyhow::Result<()> {
     daemon.ready();
 
     // Create event listener for both files
-    let mut event_queue = EventQueue::<EventSource>::new()
+    let event_queue = EventQueue::<EventSource>::new()
         .map_err(|e| anyhow::anyhow!("failed to create event queue: {e}"))?;
     event_queue
         .subscribe(
@@ -108,96 +108,42 @@ fn inner(daemon: daemon::Daemon) -> anyhow::Result<()> {
 
     libredox::call::setrens(0, 0)?;
 
-    // EOF flags
-    let mut chan_eof = false;
-    let mut shm_eof = false;
-    let mut uds_stream_eof = false;
-    let mut uds_dgram_eof = false;
-    while !(chan_eof && shm_eof && uds_stream_eof && uds_dgram_eof) {
-        let Some(event_res) = event_queue.next() else {
-            break;
-        };
-        let event = event_res.map_err(|e| anyhow::anyhow!("error occured in event queue: {e}"))?;
+    loop {
+        let event = event_queue
+            .next_event()
+            .map_err(|e| anyhow::anyhow!("error occured in event queue: {e}"))?;
 
         match event.user_data {
             EventSource::ChanSocket => {
                 // Channel scheme
-                if !chan_eof {
-                    // 1. Read and process requests
-                    if !chan_handler.read_and_process_requests(&mut chan)? {
-                        chan_eof = true;
-                    }
-                }
-
-                // 2. Poll all blocking requests
+                chan_handler.read_and_process_requests(&mut chan)?;
                 chan_handler
                     .poll_all_requests(&mut chan)
                     .map_err(|e| anyhow::anyhow!("error occured in poll_all_requests: {e}"))?;
-
-                // 3. Write responses
-                // write_responses returns a Result<bool>, but currently only returns true.
-                if !chan_handler.write_responses()? {
-                    chan_eof = true;
-                }
+                chan_handler.write_responses()?;
             }
             EventSource::ShmSocket => {
                 // Shared memory scheme
-                if !shm_eof {
-                    // 1. Read and process requests
-                    if !shm_handler.read_and_process_requests(&mut shm)? {
-                        shm_eof = true;
-                    }
-                }
-
+                shm_handler.read_and_process_requests(&mut shm)?;
                 // shm is not a blocking scheme
-
-                // 2. Write responses
-                // write_responses returns a Result<bool>, but currently only returns true.
-                if !shm_handler.write_responses()? {
-                    shm_eof = true;
-                }
+                shm_handler.write_responses()?;
             }
             EventSource::UdsStreamSocket => {
                 // Unix Domain Socket Stream scheme
-                if !uds_stream_eof {
-                    // 1. Read and process requests
-                    if !uds_stream_handler.read_and_process_requests(&mut uds_stream)? {
-                        uds_stream_eof = true;
-                    }
-                }
-
-                // 2. Poll all blocking requests
+                uds_stream_handler.read_and_process_requests(&mut uds_stream)?;
                 uds_stream_handler
                     .poll_all_requests(&mut uds_stream)
                     .map_err(|e| anyhow::anyhow!("error occured in poll_all_requests: {e}"))?;
-
-                // 3. Write responses
-                // write_responses returns a Result<bool>, but currently only returns true.
-                if !uds_stream_handler.write_responses()? {
-                    uds_stream_eof = true;
-                }
+                uds_stream_handler.write_responses()?;
             }
             EventSource::UdsDgramSocket => {
                 // Unix Domain Socket Dgram scheme
-                if !uds_dgram_eof {
-                    // 1. Read and process requests
-                    if !uds_dgram_handler.read_and_process_requests(&mut uds_dgram)? {
-                        uds_dgram_eof = true;
-                    }
-                }
-
-                // 2. Poll all blocking requests
+                uds_dgram_handler.read_and_process_requests(&mut uds_dgram)?;
                 uds_dgram_handler
                     .poll_all_requests(&mut uds_dgram)
                     .map_err(|e| anyhow::anyhow!("error occured in poll_all_requests: {e}"))?;
-
-                // 3. Write responses
-                // write_responses returns a Result<bool>, but currently only returns true.
-                if !uds_dgram_handler.write_responses()? {
-                    uds_dgram_eof = true;
-                }
+                uds_dgram_handler.write_responses()?;
             }
         }
     }
-    Ok(())
 }

@@ -87,12 +87,9 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                 readiness_based
                     .poll_all_requests(&mut device)
                     .expect("sb16d: failed to poll requests");
-                if !readiness_based
+                readiness_based
                     .write_responses()
-                    .expect("sb16d: failed to write to socket")
-                {
-                    break;
-                }
+                    .expect("sb16d: failed to write to socket");
 
                 /*
                 let next_read = device_irq.next_read();
@@ -102,18 +99,12 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                 */
             }
             Source::Scheme => {
-                if !readiness_based
+                readiness_based
                     .read_and_process_requests(&mut device)
-                    .expect("sb16d: failed to read from socket")
-                {
-                    break;
-                }
-                if !readiness_based
+                    .expect("sb16d: failed to read from socket");
+                readiness_based
                     .write_responses()
-                    .expect("sb16d: failed to write to socket")
-                {
-                    break;
-                }
+                    .expect("sb16d: failed to write to socket");
             }
         }
     }

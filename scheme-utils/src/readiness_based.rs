@@ -31,15 +31,16 @@ impl<'sock> ReadinessBased<'sock> {
             state: SchemeState::new(),
         }
     }
-    pub fn read_and_process_requests(&mut self, scheme: &mut impl SchemeSync) -> Result<bool> {
+    pub fn read_and_process_requests(&mut self, scheme: &mut impl SchemeSync) -> Result<()> {
         assert!(self.requests_read.is_empty());
 
         match self
             .socket
             .read_requests(&mut self.requests_read, SignalBehavior::Interrupt)
         {
-            // TODO: write ECANCELED or similar for everything in self.states?
-            Ok(()) if self.requests_read.is_empty() => return Ok(false), // EOF
+            Ok(()) if self.requests_read.is_empty() => {
+                unreachable!("blocking scheme read failed to read anything");
+            }
             Ok(())
             | Err(Error {
                 errno: errno::EINTR | errno::EWOULDBLOCK | errno::EAGAIN,
@@ -113,7 +114,7 @@ impl<'sock> ReadinessBased<'sock> {
             self.responses_to_write.push_back(resp);
         }
 
-        Ok(true)
+        Ok(())
     }
     // TODO: Doesn't scale. Instead, provide an API for some form of queue.
     // TODO: panic if id isn't present?
@@ -175,17 +176,18 @@ impl<'sock> ReadinessBased<'sock> {
         self.ready_queue.extend(self.states.keys().copied());
         self.poll_ready_requests(scheme)
     }
-    pub fn write_responses(&mut self) -> Result<bool> {
+    pub fn write_responses(&mut self) -> Result<()> {
         match self
             .socket
             .write_responses(&mut self.responses_to_write, SignalBehavior::Restart)
         {
-            // TODO: write ECANCELED or similar for everything in self.states?
-            //Ok(()) if !self.responses_to_write.is_empty() => Ok(false), // EOF, FIXME
+            Ok(()) if !self.responses_to_write.is_empty() => {
+                panic!("failed to write all scheme responses");
+            }
             Ok(())
             | Err(Error {
                 errno: errno::EINTR | errno::EWOULDBLOCK | errno::EAGAIN,
-            }) => Ok(true),
+            }) => Ok(()),
             Err(err) => return Err(LError::from(err).into()),
         }
     }
