@@ -650,7 +650,7 @@ impl Transport for StandardTransport<'_> {
             &mut *(self.notify.add(offset as usize) as *mut AtomicU16)
         };
 
-        log::info!("virtio-core: enabled queue #{queue_index} (size={queue_size})");
+        log::debug!("virtio-core: enabled queue #{queue_index} (size={queue_size})");
 
         let queue = Queue::new(
             descriptor,

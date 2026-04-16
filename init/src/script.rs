@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::{env, io, iter};
 
-use crate::service::{Service, ServiceType};
+use crate::InitConfig;
 use crate::unit::UnitId;
 
 pub fn subst_env<'a>(arg: &str) -> String {
@@ -39,8 +39,15 @@ impl Script {
 }
 
 #[derive(Clone, Debug)]
-pub enum Command {
-    Service(Service),
+pub struct Command {
+    process: Process,
+    kind: CommandKind,
+}
+
+#[derive(Clone, Debug)]
+enum CommandKind {
+    Oneshot,
+    OneshotAsync,
 }
 
 impl Command {
@@ -59,35 +66,67 @@ impl Command {
             }
             "nowait" => {
                 let process = Process::parse(args)?;
-
-                Ok(Some(Command::Service(Service {
-                    cmd: process.cmd,
-                    args: process.args,
-                    envs: process.envs,
-                    inherit_envs: BTreeSet::new(),
-                    type_: ServiceType::OneshotAsync,
-                })))
+                Ok(Some(Command {
+                    process,
+                    kind: CommandKind::OneshotAsync,
+                }))
             }
             _ => {
                 let process = Process::parse(iter::once(cmd).chain(args))?;
-
-                Ok(Some(Command::Service(Service {
-                    cmd: process.cmd,
-                    args: process.args,
-                    envs: process.envs,
-                    inherit_envs: BTreeSet::new(),
-                    type_: ServiceType::Oneshot,
-                })))
+                Ok(Some(Command {
+                    process,
+                    kind: CommandKind::Oneshot,
+                }))
             }
+        }
+    }
+
+    pub fn run(&self, config: &mut InitConfig) {
+        let Command { process, kind } = self;
+
+        if config.skip_cmd.contains(&process.cmd) {
+            eprintln!(
+                "init: skipping '{} {}'",
+                process.cmd,
+                process.args.join(" ")
+            );
+            return;
+        }
+
+        let mut command = std::process::Command::new(&process.cmd);
+        command.args(process.args.iter().map(|arg| subst_env(arg)));
+        command.env_clear();
+        command.envs(&config.envs).envs(&process.envs);
+
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(err) => {
+                eprintln!("init: failed to execute {:?}: {}", command, err);
+                return;
+            }
+        };
+
+        match kind {
+            CommandKind::Oneshot => match child.wait() {
+                Ok(exit_status) => {
+                    if !exit_status.success() {
+                        eprintln!("init: {command:?} failed with {exit_status}");
+                    }
+                }
+                Err(err) => {
+                    eprintln!("init: failed to wait for {:?}: {}", command, err)
+                }
+            },
+            CommandKind::OneshotAsync => {}
         }
     }
 }
 
-#[derive(Debug)]
-pub struct Process {
-    pub cmd: String,
-    pub args: Vec<String>,
-    pub envs: BTreeMap<String, String>,
+#[derive(Clone, Debug)]
+struct Process {
+    cmd: String,
+    args: Vec<String>,
+    envs: BTreeMap<String, String>,
 }
 
 impl Process {

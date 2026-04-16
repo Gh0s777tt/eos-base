@@ -13,7 +13,7 @@ scheme-utils = { path = "../scheme-utils" }
 redox_event.workspace = true
 anyhow.workspace = true
 libc.workspace = true
-rand = { version = "0.8", features = ["small_rng"] }
+rand = "0.10"
 
 [lints]
 workspace = true

@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 
 use crate::InitConfig;
-use crate::script::Command;
 use crate::unit::{Unit, UnitId, UnitKind, UnitStore};
 
 pub struct Scheduler {
@@ -88,7 +87,7 @@ fn run(unit: &mut Unit, config: &mut InitConfig) {
                 if config.log_debug {
                     eprintln!("init: running: {cmd:?}");
                 }
-                run_command(cmd, config);
+                cmd.run(config);
             }
         }
         UnitKind::Service { service } => {
@@ -112,23 +111,6 @@ fn run(unit: &mut Unit, config: &mut InitConfig) {
                     unit.info.description.as_ref().unwrap_or(&unit.id.0),
                 );
             }
-        }
-    }
-}
-
-fn run_command(cmd: Command, config: &mut InitConfig) {
-    match cmd {
-        Command::Service(service) => {
-            if config.skip_cmd.contains(&service.cmd) {
-                eprintln!(
-                    "init: skipping '{} {}'",
-                    service.cmd,
-                    service.args.join(" ")
-                );
-                return;
-            }
-
-            service.spawn(&config.envs);
         }
     }
 }
