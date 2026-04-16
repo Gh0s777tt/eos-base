@@ -410,7 +410,7 @@ impl<'sock> UdsStreamScheme<'sock> {
                     0,
                 )?
             },
-            rng: SmallRng::from_entropy(),
+            rng: rand::make_rng(),
         })
     }
 

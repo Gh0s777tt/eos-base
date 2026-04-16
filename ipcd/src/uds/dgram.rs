@@ -8,7 +8,7 @@ use super::{
 use libc::{AF_UNIX, SO_DOMAIN, SO_PASSCRED};
 use libredox::protocol::SocketCall;
 use rand::rngs::SmallRng;
-use rand::{RngCore, SeedableRng};
+use rand::Rng;
 use redox_scheme::{
     scheme::SchemeSync, CallerCtx, OpenResult, RecvFdRequest, Response, SendFdRequest,
     SignalBehavior, Socket as SchemeSocket,
@@ -151,7 +151,7 @@ impl<'sock> UdsDgramScheme<'sock> {
                     0,
                 )?
             },
-            rng: SmallRng::from_entropy(),
+            rng: rand::make_rng(),
         })
     }
 
