@@ -381,6 +381,7 @@ struct Process {
     pgid: ProcessId,
     sid: ProcessId,
     name: ArrayString<NAME_CAPAC>,
+    prio: u32,
 
     ruid: u32,
     euid: u32,
@@ -636,6 +637,7 @@ impl<'a> ProcScheme<'a> {
                     egid: 0,
                     sgid: 0,
                     name: ArrayString::<32>::from_str("[init]").unwrap(),
+                    prio: 20,
 
                     status: ProcessStatus::PossiblyRunnable,
                     disabled_setpgid: false,
@@ -678,6 +680,7 @@ impl<'a> ProcScheme<'a> {
             egid,
             sgid,
             name,
+            prio,
             ..
         } = *proc_guard.borrow();
 
@@ -710,6 +713,7 @@ impl<'a> ProcScheme<'a> {
             egid,
             sgid,
             name,
+            prio,
 
             status: ProcessStatus::PossiblyRunnable,
             disabled_setpgid: false,
@@ -723,7 +727,7 @@ impl<'a> ProcScheme<'a> {
         }));
         if let Err(err) = new_process
             .borrow_mut()
-            .sync_kernel_attrs(child_pid, &self.auth)
+            .sync_kernel_attrs(&self.auth)
         {
             log::warn!("Failed to set kernel attrs when forking: {err}");
         }
@@ -753,7 +757,7 @@ impl<'a> ProcScheme<'a> {
             pid: pid.0 as u32,
             euid: proc.euid,
             egid: proc.egid,
-            ens: 0,
+            prio: proc.prio,
             debug_name: arraystring_to_bytes(proc.name),
         })?;
 
@@ -1063,6 +1067,26 @@ impl<'a> ProcScheme<'a> {
                     // setrens is no longer implemented as procmgr call
                     // FIXME remove this ProcCall variant
                     ProcCall::Setrens => Response::ready_err(EINVAL, op),
+                    ProcCall::SetProcPriority => {
+                        let target_pid = NonZeroUsize::new(metadata[1] as usize).map_or(fd_pid, |n| ProcessId(n.get()));
+
+                        let new_prio = metadata[2] as u32;
+
+                        Ready(Response::new(
+                            self.on_setprocprio(fd_pid, target_pid, new_prio).map(|()| 0),
+                            op
+                        ))
+                    },
+                    ProcCall::GetProcPriority => {
+                        let target_pid = NonZeroUsize::new(metadata[1] as usize)
+                            .map_or(fd_pid, |n| ProcessId(n.get()));
+
+                        Ready(Response::new(
+                            self.on_getprocprio(fd_pid, target_pid).map(|prio| prio as usize),
+                            op,
+                        ))
+                    },
+
                 }
             }
             Handle::Ps(_) => Response::ready_err(EOPNOTSUPP, op),
@@ -1589,7 +1613,7 @@ impl<'a> ProcScheme<'a> {
         if let Some(new_sgid) = new_sgid {
             proc.sgid = new_sgid;
         }
-        if let Err(err) = proc.sync_kernel_attrs(pid, &self.auth) {
+        if let Err(err) = proc.sync_kernel_attrs(&self.auth) {
             log::warn!("Failed to sync proc attrs in setresugid: {err}");
         }
         Ok(())
@@ -2371,7 +2395,7 @@ impl<'a> ProcScheme<'a> {
             .borrow_mut();
 
         proc.name = ArrayString::from_str(&new_name[..new_name.len().min(NAME_CAPAC)]).unwrap();
-        if let Err(err) = proc.sync_kernel_attrs(pid, &self.auth) {
+        if let Err(err) = proc.sync_kernel_attrs(&self.auth) {
             log::warn!("Failed to set kernel attrs when renaming proc: {err}");
         }
         Ok(())
@@ -2531,7 +2555,44 @@ impl<'a> ProcScheme<'a> {
 
         Ok(string.into_bytes())
     }
+
+    fn on_setprocprio(
+        &mut self,
+        caller_pid: ProcessId,
+        target_pid: ProcessId,
+        new_prio: u32,
+    ) -> Result<()> {
+        if new_prio >= 40 {
+            return Err(Error::new(EINVAL));
+        }
+
+        let caller_euid = self.processes.get(&caller_pid).ok_or(Error::new(ESRCH))?.borrow().euid;
+
+        let target_rc = self.processes.get(&target_pid).ok_or(Error::new(ESRCH))?;
+        let mut target = target_rc.borrow_mut();
+
+        if caller_euid != 0 && caller_euid != target.euid {
+            return Err(Error::new(EPERM));
+        }
+
+        target.prio = new_prio;
+
+        if let Err(err) = target.sync_kernel_attrs(&self.auth) {
+            log::warn!("Failed to sync proc attrs in setprocprio: {err}");
+        }
+        Ok(())
+    }
+
+    fn on_getprocprio(
+        &self,
+        caller_pid: ProcessId,
+        target_pid: ProcessId,
+    ) -> Result<u32> {
+        let target_rc = self.processes.get(&target_pid).ok_or(Error::new(ESRCH))?;
+        Ok(target_rc.borrow().prio)
+    }
 }
+
 #[derive(Clone, Copy, Debug)]
 enum KillMode {
     Idempotent,
@@ -2548,22 +2609,30 @@ fn arraystring_to_bytes<const C: usize>(s: ArrayString<C>) -> [u8; C] {
     buf[..min].copy_from_slice(&s.as_bytes()[..min]);
     buf
 }
+
 impl Process {
-    fn sync_kernel_attrs(&mut self, my_pid: ProcessId, auth: &FdGuard) -> Result<()> {
+    fn sync_kernel_attrs(&mut self, auth: &FdGuard) -> Result<()> {
         // TODO: continue with other threads if one fails?
         for thread_rc in &self.threads {
-            let thread = thread_rc.borrow();
-            let attr_fd = thread
-                .fd
-                .dup(alloc::format!("auth-{}-attrs", auth.as_raw_fd()).as_bytes())?;
-            attr_fd.write(&ProcSchemeAttrs {
-                pid: my_pid.0 as u32,
-                euid: self.euid,
-                egid: self.egid,
-                ens: 0,
-                debug_name: arraystring_to_bytes(self.name),
-            })?;
+            let mut thread = thread_rc.borrow_mut();
+            thread.sync_kernel_attrs(self, auth)?;
         }
+        Ok(())
+    }
+}
+
+impl Thread {
+    fn sync_kernel_attrs(&mut self, process: &Process, auth: &FdGuard) -> Result<()> {
+        let attr_fd = self
+            .fd
+            .dup(alloc::format!("auth-{}-attrs", auth.as_raw_fd()).as_bytes())?;
+        attr_fd.write(&ProcSchemeAttrs {
+            pid: process.pid.0 as u32,
+            euid: process.euid,
+            egid: process.egid,
+            prio: process.prio,
+            debug_name: arraystring_to_bytes(process.name),
+        })?;
         Ok(())
     }
 }
