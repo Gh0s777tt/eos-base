@@ -1,5 +1,7 @@
 use event::{EventFlags, EventQueue};
-use redox_scheme::{scheme::register_sync_scheme, wrappers::ReadinessBased, Socket};
+use redox_scheme::scheme::register_sync_scheme;
+use redox_scheme::Socket;
+use scheme_utils::ReadinessBased;
 use std::sync::Mutex;
 
 mod chan;

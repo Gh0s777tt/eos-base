@@ -3,6 +3,10 @@ use std::num::Wrapping;
 
 use syscall::{EBADF, Error, Result};
 
+mod readiness_based;
+
+pub use readiness_based::ReadinessBased;
+
 pub struct HandleMap<T> {
     handles: BTreeMap<usize, T>,
     next_id: Wrapping<usize>,

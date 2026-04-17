@@ -1604,6 +1604,7 @@ dependencies = [
  "redox_event",
  "redox_syscall 0.7.4",
  "redox_termios",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -2029,6 +2030,7 @@ name = "scheme-utils"
 version = "0.0.0"
 dependencies = [
  "libredox",
+ "redox-scheme",
  "redox_syscall 0.7.4",
 ]
 

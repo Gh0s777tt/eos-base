@@ -1,6 +1,6 @@
 use redox_scheme::scheme::register_sync_scheme;
-use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::Socket;
+use scheme_utils::ReadinessBased;
 use std::cell::RefCell;
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;

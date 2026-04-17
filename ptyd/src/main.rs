@@ -3,8 +3,8 @@ use std::cell::RefCell;
 use event::{user_data, EventFlags, EventQueue};
 use libredox::{flag, Fd};
 
-use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::{scheme::register_sync_scheme, Response, SignalBehavior, Socket};
+use scheme_utils::ReadinessBased;
 use syscall::data::TimeSpec;
 
 mod controlterm;

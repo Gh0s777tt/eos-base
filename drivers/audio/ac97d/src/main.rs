@@ -5,8 +5,8 @@ use std::usize;
 use event::{user_data, EventQueue};
 use pcid_interface::PciFunctionHandle;
 use redox_scheme::scheme::register_sync_scheme;
-use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::Socket;
+use scheme_utils::ReadinessBased;
 use std::cell::RefCell;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]

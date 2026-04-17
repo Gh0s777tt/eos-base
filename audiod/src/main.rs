@@ -9,8 +9,8 @@ use ioslice::IoSlice;
 use libredox::flag;
 use libredox::{error::Result, Fd};
 
-use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::Socket;
+use scheme_utils::ReadinessBased;
 
 use daemon::SchemeDaemon;
 
