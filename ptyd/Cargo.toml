@@ -8,6 +8,7 @@ edition = "2021"
 libredox.workspace = true
 daemon = { path = "../daemon" }
 redox-scheme.workspace = true
+scheme-utils = { path = "../scheme-utils" }
 redox_event.workspace = true
 redox_syscall.workspace = true
 redox_termios.workspace = true

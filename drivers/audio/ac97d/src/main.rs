@@ -5,9 +5,8 @@ use std::usize;
 use event::{user_data, EventQueue};
 use pcid_interface::PciFunctionHandle;
 use redox_scheme::scheme::register_sync_scheme;
-use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::Socket;
-use std::cell::RefCell;
+use scheme_utils::ReadinessBased;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub mod device;
@@ -46,9 +45,8 @@ fn daemon(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
     let mut irq_file = irq.irq_handle("ac97d");
 
     let socket = Socket::nonblock().expect("ac97d: failed to create socket");
-    let device = RefCell::new(unsafe {
-        device::Ac97::new(bar0, bar1).expect("ac97d: failed to allocate device")
-    });
+    let mut device =
+        unsafe { device::Ac97::new(bar0, bar1).expect("ac97d: failed to allocate device") };
     let mut readiness_based = ReadinessBased::new(&socket, 16);
 
     user_data! {
@@ -74,7 +72,7 @@ fn daemon(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
         )
         .unwrap();
 
-    register_sync_scheme(&socket, "audiohw", &mut *device.borrow_mut())
+    register_sync_scheme(&socket, "audiohw", &mut device)
         .expect("ac97d: failed to register audiohw scheme to namespace");
     daemon.ready();
 
@@ -90,20 +88,17 @@ fn daemon(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
                 let mut irq = [0; 8];
                 irq_file.read(&mut irq).unwrap();
 
-                if !device.borrow_mut().irq() {
+                if !device.irq() {
                     continue;
                 }
                 irq_file.write(&mut irq).unwrap();
 
                 readiness_based
-                    .poll_all_requests(|| device.borrow_mut())
+                    .poll_all_requests(&mut device)
                     .expect("ac97d: failed to poll requests");
-                if !readiness_based
+                readiness_based
                     .write_responses()
-                    .expect("ac97d: failed to write to socket")
-                {
-                    break;
-                }
+                    .expect("ac97d: failed to write to socket");
 
                 /*
                 let next_read = device_irq.next_read();
@@ -113,19 +108,12 @@ fn daemon(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
                 */
             }
             Source::Scheme => {
-                if !readiness_based
-                    .read_requests()
-                    .expect("ac97d: failed to read from socket")
-                {
-                    break;
-                }
-                readiness_based.process_requests(|| device.borrow_mut());
-                if !readiness_based
+                readiness_based
+                    .read_and_process_requests(&mut device)
+                    .expect("ac97d: failed to read from socket");
+                readiness_based
                     .write_responses()
-                    .expect("ac97d: failed to write to socket")
-                {
-                    break;
-                }
+                    .expect("ac97d: failed to write to socket");
 
                 /*
                 let next_read = device.borrow().next_read();

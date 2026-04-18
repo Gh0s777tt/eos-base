@@ -1,8 +1,7 @@
 use libredox::{flag, Fd};
 use redox_scheme::scheme::register_sync_scheme;
-use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::Socket;
-use std::cell::RefCell;
+use scheme_utils::ReadinessBased;
 use std::{env, usize};
 
 use event::{user_data, EventQueue};
@@ -34,12 +33,11 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     common::acquire_port_io_rights().expect("sb16d: failed to acquire port IO rights");
 
     let socket = Socket::nonblock().expect("sb16d: failed to create socket");
-    let device =
-        RefCell::new(unsafe { device::Sb16::new(addr).expect("sb16d: failed to allocate device") });
+    let mut device = unsafe { device::Sb16::new(addr).expect("sb16d: failed to allocate device") };
     let mut readiness_based = ReadinessBased::new(&socket, 16);
 
     //TODO: error on multiple IRQs?
-    let irq_file = match device.borrow().irqs.first() {
+    let irq_file = match device.irqs.first() {
         Some(irq) => Fd::open(&format!("/scheme/irq/{}", irq), flag::O_RDWR, 0)
             .expect("sb16d: failed to open IRQ file"),
         None => panic!("sb16d: no IRQs found"),
@@ -63,7 +61,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         )
         .unwrap();
 
-    register_sync_scheme(&socket, "sb16d", &mut *device.borrow_mut())
+    register_sync_scheme(&socket, "sb16d", &mut device)
         .expect("sb16d: failed to register audiohw scheme to namespace");
 
     daemon.ready();
@@ -81,20 +79,17 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                 let mut irq = [0; 8];
                 irq_file.read(&mut irq).unwrap();
 
-                if !device.borrow_mut().irq() {
+                if !device.irq() {
                     continue;
                 }
                 irq_file.write(&mut irq).unwrap();
 
                 readiness_based
-                    .poll_all_requests(|| device.borrow_mut())
+                    .poll_all_requests(&mut device)
                     .expect("sb16d: failed to poll requests");
-                if !readiness_based
+                readiness_based
                     .write_responses()
-                    .expect("sb16d: failed to write to socket")
-                {
-                    break;
-                }
+                    .expect("sb16d: failed to write to socket");
 
                 /*
                 let next_read = device_irq.next_read();
@@ -104,19 +99,12 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                 */
             }
             Source::Scheme => {
-                if !readiness_based
-                    .read_requests()
-                    .expect("sb16d: failed to read from socket")
-                {
-                    break;
-                }
-                readiness_based.process_requests(|| device.borrow_mut());
-                if !readiness_based
+                readiness_based
+                    .read_and_process_requests(&mut device)
+                    .expect("sb16d: failed to read from socket");
+                readiness_based
                     .write_responses()
-                    .expect("sb16d: failed to write to socket")
-                {
-                    break;
-                }
+                    .expect("sb16d: failed to write to socket");
             }
         }
     }

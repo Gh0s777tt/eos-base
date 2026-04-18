@@ -9,8 +9,8 @@ use ioslice::IoSlice;
 use libredox::flag;
 use libredox::{error::Result, Fd};
 
-use redox_scheme::wrappers::ReadinessBased;
 use redox_scheme::Socket;
+use scheme_utils::ReadinessBased;
 
 use daemon::SchemeDaemon;
 
@@ -71,17 +71,10 @@ fn daemon(daemon: SchemeDaemon) -> anyhow::Result<()> {
     let mut readiness = ReadinessBased::new(&socket, 16);
 
     loop {
-        if !readiness.read_requests()? {
-            break;
-        }
-        readiness.process_requests(|| scheme.lock().unwrap());
-        readiness.poll_all_requests(|| scheme.lock().unwrap())?;
-        if !readiness.write_responses()? {
-            break;
-        };
+        readiness.read_and_process_requests(&mut *scheme.lock().unwrap())?;
+        readiness.poll_all_requests(&mut *scheme.lock().unwrap())?;
+        readiness.write_responses()?;
     }
-
-    Ok(())
 }
 
 fn main() {
