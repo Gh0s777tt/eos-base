@@ -78,7 +78,7 @@ impl ConsumerHandle {
         let display_path = display_path.to_str().unwrap();
 
         let display_file =
-            libredox::call::open(&display_path, (O_CLOEXEC | O_NONBLOCK | O_RDWR) as _, 0)
+            libredox::call::open(display_path, (O_CLOEXEC | O_NONBLOCK | O_RDWR) as _, 0)
                 .map(|socket| unsafe { File::from_raw_fd(socket as RawFd) })
                 .unwrap_or_else(|err| {
                     panic!("failed to open display {}: {}", display_path, err);

@@ -527,6 +527,12 @@ fn deamon(deamon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow:
 
     device.transport.run_device();
 
+    // Needs to be before GpuScheme::new to avoid a deadlock due to initnsmgr blocking on
+    // /scheme/event as it is already blocked on opening /scheme/display.virtio-gpu.
+    // FIXME change the initnsmgr to not block on openat for the target scheme.
+    let event_queue: EventQueue<Source> =
+        EventQueue::new().expect("virtio-gpud: failed to create event queue");
+
     let mut scheme = scheme::GpuScheme::new(
         config,
         control_queue.clone(),
@@ -544,8 +550,6 @@ fn deamon(deamon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow:
         }
     }
 
-    let event_queue: EventQueue<Source> =
-        EventQueue::new().expect("virtio-gpud: failed to create event queue");
     event_queue
         .subscribe(
             scheme.inputd_event_handle().as_raw_fd() as usize,
