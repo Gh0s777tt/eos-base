@@ -34,6 +34,12 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
 
     let irq_file = pci_allocate_interrupt_vector(&mut pcid_handle, "ihdgd");
 
+    // Needs to be before GraphicsScheme::new to avoid a deadlock due to initnsmgr blocking on
+    // /scheme/event as it is already blocked on opening /scheme/display.ihdg.*.
+    // FIXME change the initnsmgr to not block on openat for the target scheme.
+    let event_queue: EventQueue<Source> =
+        EventQueue::new().expect("ihdgd: failed to create event queue");
+
     let mut scheme = GraphicsScheme::new(device, format!("display.ihdg.{}", name), false);
 
     user_data! {
@@ -44,8 +50,6 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
         }
     }
 
-    let event_queue: EventQueue<Source> =
-        EventQueue::new().expect("ihdgd: failed to create event queue");
     event_queue
         .subscribe(
             scheme.inputd_event_handle().as_raw_fd() as usize,
