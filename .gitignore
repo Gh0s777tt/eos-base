@@ -1,4 +1,5 @@
 target/
+sysroot/
 
 # Local settings folder for Visual Studio Code
 .vscode/

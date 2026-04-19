@@ -32,6 +32,12 @@ To learn how to do development with these system components inside the Redox bui
 
 ### How To Build
 
-To build this system component you need to download the Redox build system, you can learn how to do it on the [Building Redox](https://doc.redox-os.org/book/podman-build.html) page.
+It is recommended to build this system component via the Redox build system, you can learn how to do it on the [Building Redox](https://doc.redox-os.org/book/podman-build.html) page.
 
-This is necessary because they only work with cross-compilation to a Redox virtual machine or real hardware, but you can do some testing from Linux.
+To build and test outside the build system, [install redoxer](https://doc.redox-os.org/book/ci.html) then use `check.sh` script to build or test:
+- `./check.sh` - Check build for x86_64
+- `./check.sh --arch=ARCH` - Check build for specific ARCH (`aarch64`, `i586`, `riscv64gc`)
+- `./check.sh --all` - Check build for all ARCH
+- `./check.sh --test` - Check the base system boots up on x86_64
+
+You can also use `make install` to inspect the content on `./sysroot`, or `make test-gui` to test booting with orbital interactively.

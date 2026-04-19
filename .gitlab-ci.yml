@@ -7,16 +7,13 @@ workflow:
 stages:
   - build
   - cross-build
-  # TODO?
-  # - test
+  - test
 
 fmt:
     stage: build
     script:
         - rustup component add rustfmt
         - CHECK_ONLY=1 ./fmt.sh
-
-# TODO: unit tests
 
 x86_64:
     stage: build
@@ -38,3 +35,8 @@ riscv64gc:
     stage: cross-build
     script:
         - ./check.sh --arch=riscv64gc
+
+boot:
+    stage: test
+    script:
+        - timeout -s KILL 9m ./check.sh --test
