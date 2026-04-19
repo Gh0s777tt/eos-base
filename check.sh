@@ -41,7 +41,7 @@ SUPPORTED_TARGETS=(
 
 CURRENT_TARGET="${TARGET:-x86_64-unknown-redox}"
 CHECK_ALL=false
-CMD_ACTION="check"
+CMD_ACTION="all"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --all-target)
@@ -74,9 +74,9 @@ run_redoxer() {
     redoxer toolchain || { echo -e "${RED}Fail: redoxer toolchain for: $target.${NC}" && exit 1; }
 
     echo "----------------------------------------"
-    echo "Running redoxer $CMD_ACTION for: $TARGET"
+    echo "Running make $CMD_ACTION for: $TARGET"
     
-    if redoxer "$CMD_ACTION"; then
+    if make "$CMD_ACTION"; then
         return 0
     else
         echo -e "${RED}Fail: $CMD_ACTION $TARGET failed.${NC}"

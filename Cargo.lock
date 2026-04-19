@@ -1312,6 +1312,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
 
 [[package]]
+name = "netstack"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "daemon",
+ "libredox",
+ "log",
+ "redox-log",
+ "redox-scheme",
+ "redox_event",
+ "redox_syscall 0.7.4",
+ "scheme-utils",
+ "smoltcp",
+]
+
+[[package]]
 name = "nom"
 version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1839,22 +1855,6 @@ checksum = "4ea3e412d205440c7b0218af26247226f979ed1201674cda7a33cc70609084b5"
 dependencies = [
  "bitflags 2.11.0",
  "libredox",
-]
-
-[[package]]
-name = "redox_netstack"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "daemon",
- "libredox",
- "log",
- "redox-log",
- "redox-scheme",
- "redox_event",
- "redox_syscall 0.7.4",
- "scheme-utils",
- "smoltcp",
 ]
 
 [[package]]
