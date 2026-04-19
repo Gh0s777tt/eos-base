@@ -677,9 +677,8 @@ impl SchemeSync for Scheme {
             _ => Err(Error::new(EOPNOTSUPP)),
         }
     }
-}
-impl Scheme {
-    pub fn on_close(&mut self, fd: usize) {
+
+    fn on_close(&mut self, fd: usize) {
         let Some(Handle::Inode(inode)) = self.handles.remove(fd) else {
             return;
         };

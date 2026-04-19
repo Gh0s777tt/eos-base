@@ -3,7 +3,8 @@ use std::{env, process};
 mod filesystem;
 mod scheme;
 
-use redox_scheme::{scheme::SchemeState, RequestKind, SignalBehavior};
+use redox_scheme::scheme::{SchemeState, SchemeSync};
+use redox_scheme::{RequestKind, SignalBehavior};
 
 use self::scheme::Scheme;
 

@@ -11,7 +11,7 @@ use pci_types::{
     PciHeader as TyPciHeader, PciPciBridgeHeader,
 };
 use redox_scheme::{
-    scheme::{register_sync_scheme, SchemeState},
+    scheme::{register_sync_scheme, SchemeState, SchemeSync},
     RequestKind, SignalBehavior,
 };
 

@@ -38,7 +38,7 @@ use pcid_interface::irq_helpers::{
 use pcid_interface::{PciFeature, PciFeatureInfo, PciFunctionHandle};
 
 use redox_scheme::{
-    scheme::{register_sync_scheme, SchemeState},
+    scheme::{register_sync_scheme, SchemeState, SchemeSync},
     RequestKind, SignalBehavior, Socket,
 };
 
@@ -180,7 +180,7 @@ fn daemon_with_context_size<const N: usize>(
                     .expect("xhcid: failed to write scheme");
             }
             RequestKind::OnClose { id } => {
-                hci.on_close(id);
+                (&*hci).on_close(id);
             }
             _ => {}
         }

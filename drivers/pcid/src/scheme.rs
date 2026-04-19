@@ -304,10 +304,8 @@ impl SchemeSync for PciScheme {
             _ => Err(Error::new(EBADF)),
         }
     }
-}
 
-impl PciScheme {
-    pub fn on_close(&mut self, id: usize) {
+    fn on_close(&mut self, id: usize) {
         match self.handles.remove(id) {
             Some(HandleWrapper {
                 inner: Handle::Channel { addr, .. },
