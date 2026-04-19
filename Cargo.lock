@@ -735,6 +735,7 @@ dependencies = [
  "redox-scheme",
  "redox_event",
  "redox_syscall 0.7.4",
+ "scheme-utils",
 ]
 
 [[package]]
@@ -2911,6 +2912,7 @@ dependencies = [
  "redox_event",
  "redox_syscall 0.7.4",
  "regex",
+ "scheme-utils",
  "serde",
  "serde_json",
  "smallvec 1.15.1",
@@ -2946,6 +2948,7 @@ dependencies = [
  "libredox",
  "redox-scheme",
  "redox_syscall 0.7.4",
+ "scheme-utils",
 ]
 
 [[package]]

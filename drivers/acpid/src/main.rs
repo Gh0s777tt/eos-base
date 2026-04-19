@@ -1,16 +1,14 @@
 use std::convert::TryFrom;
 use std::fs::File;
 use std::mem;
+use std::ops::ControlFlow;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
 use ::acpi::aml::op_region::{RegionHandler, RegionSpace};
 use event::{EventFlags, RawEventQueue};
-use redox_scheme::{
-    scheme::{register_sync_scheme, SchemeState, SchemeSync},
-    RequestKind, Response, SignalBehavior, Socket,
-};
-use syscall::{EAGAIN, EWOULDBLOCK};
+use redox_scheme::{scheme::register_sync_scheme, Socket};
+use scheme_utils::Blocking;
 
 mod acpi;
 mod aml_physmem;
@@ -85,8 +83,8 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let mut event_queue = RawEventQueue::new().expect("acpid: failed to create event queue");
     let socket = Socket::nonblock().expect("acpid: failed to create disk scheme");
 
-    let mut state = SchemeState::new();
     let mut scheme = self::scheme::AcpiScheme::new(&acpi_context, &socket);
+    let mut handler = Blocking::new(&socket, 16);
 
     event_queue
         .subscribe(shutdown_pipe.as_raw_fd() as usize, 0, EventFlags::READ)
@@ -114,40 +112,12 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
         if event.fd == socket.inner().raw() {
             loop {
-                let req = match socket.next_request(SignalBehavior::Interrupt) {
-                    Ok(None) => {
-                        mounted = false;
-                        break;
-                    }
-                    Ok(Some(req)) => req,
-                    Err(err) => {
-                        if err.errno == EWOULDBLOCK || err.errno == EAGAIN {
-                            break;
-                        } else {
-                            panic!("acpid: failed to read next request: {}", err);
-                        }
-                    }
-                };
-                match req.kind() {
-                    RequestKind::Call(call) => {
-                        let response = call.handle_sync(&mut scheme, &mut state);
-                        socket
-                            .write_response(response, SignalBehavior::Restart)
-                            .expect("acpid: failed to write response");
-                    }
-                    RequestKind::OnClose { id } => {
-                        scheme.on_close(id);
-                    }
-                    RequestKind::SendFd(sendfd_request) => {
-                        let result = scheme.on_sendfd(&sendfd_request);
-                        socket
-                            .write_response(
-                                Response::new(result, sendfd_request),
-                                SignalBehavior::Restart,
-                            )
-                            .expect("acpid: failed to write response");
-                    }
-                    _ => (),
+                match handler
+                    .process_requests_nonblocking(&mut scheme)
+                    .expect("acpid: failed to process requests")
+                {
+                    ControlFlow::Continue(()) => {}
+                    ControlFlow::Break(()) => break,
                 }
             }
         } else if event.fd == shutdown_pipe.as_raw_fd() as usize {

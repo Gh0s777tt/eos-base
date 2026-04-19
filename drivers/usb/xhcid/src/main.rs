@@ -37,10 +37,8 @@ use pcid_interface::irq_helpers::{
 };
 use pcid_interface::{PciFeature, PciFeatureInfo, PciFunctionHandle};
 
-use redox_scheme::{
-    scheme::{register_sync_scheme, SchemeState, SchemeSync},
-    RequestKind, SignalBehavior, Socket,
-};
+use redox_scheme::{scheme::register_sync_scheme, Socket};
+use scheme_utils::Blocking;
 
 use crate::xhci::{InterruptMethod, Xhci};
 
@@ -147,8 +145,8 @@ fn daemon_with_context_size<const N: usize>(
 
     let scheme_name = format!("usb.{}", name);
     let socket = Socket::create().expect("xhcid: failed to create usb scheme");
+    let handler = Blocking::new(&socket, 16);
 
-    let mut state = SchemeState::new();
     let hci = Arc::new(
         Xhci::<N>::new(scheme_name.clone(), address, interrupt_method, pcid_handle)
             .expect("xhcid: failed to allocate device"),
@@ -163,28 +161,9 @@ fn daemon_with_context_size<const N: usize>(
 
     hci.poll();
 
-    loop {
-        let Some(request) = socket
-            .next_request(SignalBehavior::Restart)
-            .expect("xhcid: failed to read scheme")
-        else {
-            // Scheme likely got unmounted
-            std::process::exit(0);
-        };
-
-        match request.kind() {
-            RequestKind::Call(call_request) => {
-                let resp = call_request.handle_sync(&mut &*hci, &mut state);
-                socket
-                    .write_response(resp, SignalBehavior::Restart)
-                    .expect("xhcid: failed to write scheme");
-            }
-            RequestKind::OnClose { id } => {
-                (&*hci).on_close(id);
-            }
-            _ => {}
-        }
-    }
+    handler
+        .process_requests_blocking(&*hci)
+        .expect("xhcid: failed to process requests");
 }
 
 fn main() {

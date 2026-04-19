@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 redox_syscall.workspace = true
 redox-scheme.workspace = true
+scheme-utils = { path = "../scheme-utils" }
 daemon = { path = "../daemon" }
 libredox.workspace = true
 

@@ -1,5 +1,3 @@
-use std::process;
-
 use std::arch::asm;
 
 use rand_chacha::ChaCha20Rng;
@@ -13,11 +11,8 @@ pub const MODE_READ: u16 = 0o4;
 #[cfg(target_arch = "x86_64")]
 use raw_cpuid::CpuId;
 
-use redox_scheme::{
-    scheme::{SchemeState, SchemeSync},
-    CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket,
-};
-use scheme_utils::HandleMap;
+use redox_scheme::{scheme::SchemeSync, CallerCtx, OpenResult, Socket};
+use scheme_utils::{Blocking, HandleMap};
 use syscall::data::Stat;
 use syscall::flag::{EventFlags, O_CREAT, O_EXCL, O_RDONLY, O_RDWR, O_WRONLY};
 use syscall::schemev2::NewFdFlags;
@@ -463,30 +458,16 @@ impl SchemeSync for RandScheme {
 fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     let socket = Socket::create().expect("randd: failed to create rand scheme");
 
-    let mut state = SchemeState::new();
     let mut scheme = RandScheme::new();
+    let handler = Blocking::new(&socket, 16);
 
     let _ = daemon.ready_sync_scheme(&socket, &mut scheme);
 
     libredox::call::setrens(0, 0).expect("randd: failed to enter null namespace");
 
-    while let Some(request) = socket
-        .next_request(SignalBehavior::Restart)
-        .expect("error reading packet")
-    {
-        match request.kind() {
-            RequestKind::Call(call) => {
-                let response = call.handle_sync(&mut scheme, &mut state);
-                socket
-                    .write_response(response, SignalBehavior::Restart)
-                    .expect("error writing packet");
-            }
-            RequestKind::OnClose { id } => scheme.on_close(id),
-            _ => {}
-        }
-    }
-
-    process::exit(0);
+    handler
+        .process_requests_blocking(scheme)
+        .expect("randd: failed to process events from zero scheme");
 }
 
 fn main() {

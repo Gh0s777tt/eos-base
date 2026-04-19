@@ -1,6 +1,7 @@
-use redox_scheme::{scheme::SchemeState, RequestKind, SignalBehavior, Socket};
+use redox_scheme::Socket;
 
 use scheme::ZeroScheme;
+use scheme_utils::Blocking;
 
 mod scheme;
 
@@ -21,29 +22,14 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     };
 
     let socket = Socket::create().expect("zerod: failed to create zero scheme");
-    let mut state = SchemeState::new();
     let mut zero_scheme = ZeroScheme(ty);
+    let zero_handler = Blocking::new(&socket, 16);
 
     let _ = daemon.ready_sync_scheme(&socket, &mut zero_scheme);
 
     libredox::call::setrens(0, 0).expect("zerod: failed to enter null namespace");
 
-    loop {
-        let Some(request) = socket
-            .next_request(SignalBehavior::Restart)
-            .expect("zerod: failed to read events from zero scheme")
-        else {
-            std::process::exit(0);
-        };
-        match request.kind() {
-            RequestKind::Call(request) => {
-                let response = request.handle_sync(&mut zero_scheme, &mut state);
-
-                socket
-                    .write_response(response, SignalBehavior::Restart)
-                    .expect("zerod: failed to write responses to zero scheme");
-            }
-            _ => (),
-        }
-    }
+    zero_handler
+        .process_requests_blocking(zero_scheme)
+        .expect("zerod: failed to process events from zero scheme");
 }
