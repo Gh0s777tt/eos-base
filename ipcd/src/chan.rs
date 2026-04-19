@@ -1,4 +1,5 @@
 use redox_scheme::{scheme::SchemeSync, CallerCtx, OpenResult, Response, SignalBehavior, Socket};
+use scheme_utils::FpathWriter;
 use std::{
     cmp,
     collections::{HashMap, VecDeque},
@@ -330,24 +331,15 @@ impl<'sock> SchemeSync for ChanScheme<'sock> {
         }
     }
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        // Write scheme name
-        const PREFIX: &[u8] = b"chan:";
-        let len = cmp::min(PREFIX.len(), buf.len());
-        buf[..len].copy_from_slice(&PREFIX[..len]);
-        if len < PREFIX.len() {
-            return Ok(len);
-        }
+        FpathWriter::with_legacy(buf, "chan", |w| {
+            let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
+            if let Extra::SchemeRoot = handle.extra {
+                return Ok(());
+            }
+            w.push_str(handle.path.as_ref().ok_or(Error::new(EBADF))?);
 
-        // Write path
-        let handle = self.handles.get(&id).ok_or(Error::new(EBADF))?;
-        if let Extra::SchemeRoot = handle.extra {
-            return Ok(len);
-        }
-        let path = handle.path.as_ref().ok_or(Error::new(EBADF))?;
-        let len = cmp::min(path.len(), buf.len() - PREFIX.len());
-        buf[PREFIX.len()..][..len].copy_from_slice(&path.as_bytes()[..len]);
-
-        Ok(PREFIX.len() + len)
+            Ok(())
+        })
     }
     fn fsync(&mut self, id: usize, _ctx: &CallerCtx) -> Result<()> {
         self.handles.get(&id).ok_or(Error::new(EBADF)).and(Ok(()))

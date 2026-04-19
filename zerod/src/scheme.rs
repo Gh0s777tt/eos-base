@@ -1,5 +1,6 @@
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult};
+use scheme_utils::FpathWriter;
 use syscall::{error::*, schemev2::NewFdFlags, MODE_CHR};
 
 use crate::Ty;
@@ -67,12 +68,7 @@ impl SchemeSync for ZeroScheme {
     }
 
     fn fpath(&mut self, _id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let scheme_path = b"zero:";
-        let size = std::cmp::min(buf.len(), scheme_path.len());
-
-        buf[..size].copy_from_slice(&scheme_path[..size]);
-
-        Ok(size)
+        FpathWriter::with(buf, "zero", |_| Ok(()))
     }
 
     fn fsync(&mut self, _id: usize, _ctx: &CallerCtx) -> Result<()> {

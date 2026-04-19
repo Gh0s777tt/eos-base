@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Sender};
 
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult, SendFdRequest, Socket};
-use scheme_utils::HandleMap;
+use scheme_utils::{FpathWriter, HandleMap};
 use syscall::error::*;
 use syscall::schemev2::NewFdFlags;
 
@@ -229,29 +229,14 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let handle = self.handles.get(id)?;
-
-        let scheme_path = b"/scheme/log/";
-
-        let mut i = 0;
-        while i < buf.len() && i < scheme_path.len() {
-            buf[i] = scheme_path[i];
-            i += 1;
-        }
-
-        let path_bytes = match handle {
-            LogHandle::Log { context, .. } => context.as_bytes(),
-            LogHandle::AddSink => b"add_sink",
-            LogHandle::SchemeRoot => return Err(Error::new(EBADF)),
-        };
-        let mut j = 0;
-        while i < buf.len() && j < path_bytes.len() {
-            buf[i] = path_bytes[j];
-            i += 1;
-            j += 1;
-        }
-
-        Ok(i)
+        FpathWriter::with(buf, "log", |w| {
+            w.push_str(match self.handles.get(id)? {
+                LogHandle::Log { context, .. } => context,
+                LogHandle::AddSink => "add_sink",
+                LogHandle::SchemeRoot => return Err(Error::new(EBADF)),
+            });
+            Ok(())
+        })
     }
 
     fn fsync(&mut self, id: usize, _ctx: &CallerCtx) -> Result<()> {

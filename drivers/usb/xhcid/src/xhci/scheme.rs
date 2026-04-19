@@ -26,6 +26,7 @@ use common::dma::Dma;
 use futures::executor::block_on;
 use log::{debug, error, info, trace, warn};
 use redox_scheme::scheme::SchemeSync;
+use scheme_utils::FpathWriter;
 use smallvec::SmallVec;
 
 use common::io::Io;
@@ -197,7 +198,7 @@ impl Handle {
     ///
     /// # Returns
     /// - A [String] containing the scheme path that the handle is associated with.
-    pub(crate) fn to_scheme(&self) -> String {
+    pub(crate) fn to_path(&self) -> String {
         match self {
             Handle::TopLevel(_) => String::from(""),
             Handle::Port(port_num, _) => {
@@ -2212,22 +2213,12 @@ impl<const N: usize> SchemeSync for &Xhci<N> {
         Ok(())
     }
 
-    fn fpath(&mut self, fd: usize, buffer: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let mut cursor = io::Cursor::new(buffer);
-
-        let guard = self.handles.get(&fd).ok_or(Error::new(EBADF))?;
-        let scheme = (&*guard).to_scheme();
-
-        write!(cursor, "{}", scheme.as_str()).expect(
-            format!(
-                "Failed to convert the file descriptor with value {} to the associated file path",
-                fd
-            )
-            .as_str(),
-        );
-
-        let src_len = usize::try_from(cursor.seek(io::SeekFrom::End(0)).unwrap()).unwrap();
-        Ok(src_len)
+    fn fpath(&mut self, fd: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
+        FpathWriter::with(buf, "xhci", |w| {
+            let handle = self.handles.get(&fd).ok_or(Error::new(EBADF))?;
+            write!(w, "{}", handle.to_path()).unwrap();
+            Ok(())
+        })
     }
 
     fn read(

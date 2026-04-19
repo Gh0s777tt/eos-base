@@ -9,6 +9,7 @@ use inputd::ConsumerHandle;
 use orbclient::{Event, EventOption};
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult};
+use scheme_utils::FpathWriter;
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error, Result, EACCES, EBADF, EINVAL, ENOENT};
 
@@ -196,15 +197,7 @@ impl SchemeSync for FbbootlogScheme {
     }
 
     fn fpath(&mut self, _id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let path = b"fbbootlog:";
-
-        let mut i = 0;
-        while i < buf.len() && i < path.len() {
-            buf[i] = path[i];
-            i += 1;
-        }
-
-        Ok(i)
+        FpathWriter::with_legacy(buf, "fbbootlog", |_| Ok(()))
     }
 
     fn fsync(&mut self, _id: usize, _ctx: &CallerCtx) -> Result<()> {

@@ -12,7 +12,7 @@ pub const MODE_READ: u16 = 0o4;
 use raw_cpuid::CpuId;
 
 use redox_scheme::{scheme::SchemeSync, CallerCtx, OpenResult, Socket};
-use scheme_utils::{Blocking, HandleMap};
+use scheme_utils::{Blocking, FpathWriter, HandleMap};
 use syscall::data::Stat;
 use syscall::flag::{EventFlags, O_CREAT, O_EXCL, O_RDONLY, O_RDWR, O_WRONLY};
 use syscall::schemev2::NewFdFlags;
@@ -431,13 +431,7 @@ impl SchemeSync for RandScheme {
         Ok(EventFlags::EVENT_READ)
     }
     fn fpath(&mut self, _file: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let mut i = 0;
-        let scheme_path = b"rand";
-        while i < buf.len() && i < scheme_path.len() {
-            buf[i] = scheme_path[i];
-            i += 1;
-        }
-        Ok(i)
+        FpathWriter::with(buf, "rand", |_| Ok(()))
     }
 
     fn fstat(&mut self, file: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {

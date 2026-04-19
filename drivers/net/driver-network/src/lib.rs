@@ -6,7 +6,7 @@ use redox_scheme::{
     scheme::{IntoTag, Op, SchemeResponse, SchemeState, SchemeSync},
     CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket,
 };
-use scheme_utils::HandleMap;
+use scheme_utils::{FpathWriter, HandleMap};
 use syscall::schemev2::NewFdFlags;
 use syscall::{
     Error, EventFlags, Result, Stat, EACCES, EAGAIN, EBADF, EINTR, EINVAL, EWOULDBLOCK, MODE_FILE,
@@ -315,38 +315,15 @@ impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let handle = self.handles.get(id)?;
-
-        const PREFIX: &[u8] = b"/scheme/";
-        let len = cmp::min(PREFIX.len(), buf.len());
-        buf[..len].copy_from_slice(&PREFIX[..len]);
-        if len < PREFIX.len() {
-            return Ok(len);
-        }
-        let mut i = len;
-
-        let scheme_name = self.scheme_name.as_bytes();
-        let mut j = 0;
-        while i < buf.len() && j < scheme_name.len() {
-            buf[i] = scheme_name[j];
-            i += 1;
-            j += 1;
-        }
-
-        let path = match handle {
-            Handle::Data { .. } => &b""[..],
-            Handle::Mac { .. } => &b"mac"[..],
-            _ => &b""[..],
-        };
-
-        j = 0;
-        while i < buf.len() && j < path.len() {
-            buf[i] = path[j];
-            i += 1;
-            j += 1;
-        }
-
-        Ok(i)
+        FpathWriter::with(buf, &self.scheme_name, |w| {
+            let path = match self.handles.get(id)? {
+                Handle::Data { .. } => "",
+                Handle::Mac { .. } => "mac",
+                _ => "",
+            };
+            write!(w, "{path}").unwrap();
+            Ok(())
+        })
     }
 
     fn fstat(&mut self, id: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {

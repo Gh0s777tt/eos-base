@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
-use std::io::{Cursor, Write};
 
 use redox_termios::*;
+use scheme_utils::FpathWriter;
 use syscall::error::Result;
 
 pub struct Pty {
@@ -32,9 +32,10 @@ impl Pty {
     }
 
     pub fn path(&self, buf: &mut [u8]) -> Result<usize> {
-        let mut buf = Cursor::new(buf);
-        let _ = write!(buf, "/scheme/pty/{}", self.id);
-        Ok(buf.position().try_into().unwrap_or(usize::MAX))
+        FpathWriter::with(buf, "pty", |w| {
+            write!(w, "{}", self.id).unwrap();
+            Ok(())
+        })
     }
 
     pub fn input(&mut self, buf: &[u8]) {

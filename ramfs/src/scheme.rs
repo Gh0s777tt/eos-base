@@ -1,10 +1,8 @@
 use std::convert::{TryFrom, TryInto};
-use std::io::{Cursor, Seek};
-use std::iter;
 use std::os::unix::io::AsRawFd;
 use std::{mem, str};
 
-use scheme_utils::HandleMap;
+use scheme_utils::{FpathWriter, HandleMap};
 use syscall::dirent::{DirEntry, DirentBuf, DirentKind};
 use syscall::error::{
     EACCES, EBADF, EBADFD, EEXIST, EINVAL, EIO, EISDIR, ENOMEM, ENOSYS, ENOTDIR, ENOTEMPTY,
@@ -461,49 +459,49 @@ impl SchemeSync for Scheme {
         Err(Error::new(ENOSYS))
     }
     fn fpath(&mut self, fd: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let mut current_inode = match *self.handles.get(fd)? {
-            Handle::Inode(inode) => inode,
-            Handle::SchemeRoot => return Err(Error::new(EISDIR)),
-        };
+        FpathWriter::with(buf, &self.scheme_name, |w| {
+            let mut current_inode = match *self.handles.get(fd)? {
+                Handle::Inode(inode) => inode,
+                Handle::SchemeRoot => return Err(Error::new(EISDIR)),
+            };
 
-        let mut chain = Vec::new();
+            let mut chain = Vec::new();
 
-        let mut current_info = self
-            .filesystem
-            .files
-            .get(&current_inode)
-            .ok_or(Error::new(EBADFD))?;
-
-        while current_inode != Filesystem::ROOT_INODE {
-            let parent_info = self
+            let mut current_info = self
                 .filesystem
                 .files
-                .get(&current_info.parent.0)
+                .get(&current_inode)
                 .ok_or(Error::new(EBADFD))?;
 
-            let FileData::Directory(ref dir) = parent_info.data else {
-                return Err(Error::new(EBADFD));
-            };
-            // TODO: error handling?
-            let (name, _) = dir
-                .iter()
-                .find(|(_name, inode)| inode.0 == current_inode)
-                .ok_or(Error::new(ENOENT))?;
-            chain.push(&**name);
+            while current_inode != Filesystem::ROOT_INODE {
+                let parent_info = self
+                    .filesystem
+                    .files
+                    .get(&current_info.parent.0)
+                    .ok_or(Error::new(EBADFD))?;
 
-            current_inode = current_info.parent.0;
-            current_info = parent_info;
-        }
+                let FileData::Directory(ref dir) = parent_info.data else {
+                    return Err(Error::new(EBADFD));
+                };
+                // TODO: error handling?
+                let (name, _) = dir
+                    .iter()
+                    .find(|(_name, inode)| inode.0 == current_inode)
+                    .ok_or(Error::new(ENOENT))?;
+                chain.push(&**name);
 
-        let mut cursor = Cursor::new(buf);
-        for component in
-            iter::once(self.scheme_name.trim_start_matches('/')).chain(chain.iter().copied().rev())
-        {
-            use std::io::Write;
+                current_inode = current_info.parent.0;
+                current_info = parent_info;
+            }
 
-            write!(cursor, "/{component}").unwrap();
-        }
-        Ok(cursor.stream_position().unwrap() as usize)
+            for (i, component) in chain.iter().copied().rev().enumerate() {
+                if i != 0 {
+                    w.push_str("/");
+                }
+                w.push_str(component);
+            }
+            Ok(())
+        })
     }
     fn frename(&mut self, _inode: usize, _path: &str, _ctx: &CallerCtx) -> Result<usize> {
         // TODO
