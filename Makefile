@@ -91,7 +91,7 @@ initfs: $(SYSROOT)/bin/redoxfs
 
 install-initfs: initfs
 	@mkdir -pv "$(DESTDIR)/usr/lib/boot"
-	@cp -v "$<" "$(DESTDIR)/usr/lib/boot/initfs"
+	@cp -v "$(TARGET_DIR)/initfs.img" "$(DESTDIR)/usr/lib/boot/initfs"
 
 # -----------------------------------------------------------------------------
 # base
