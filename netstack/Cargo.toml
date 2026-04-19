@@ -8,11 +8,6 @@ edition = "2021"
 name = "netstack"
 path = "src/main.rs"
 
-# FIXME remove
-[[bin]]
-name = "smolnetd"
-path = "src/main.rs"
-
 [dependencies]
 redox_event.workspace = true
 daemon = { path = "../daemon" }
