@@ -1,7 +1,7 @@
+use scheme_utils::FpathWriter;
 use smoltcp::iface::SocketHandle;
 use smoltcp::socket::tcp::{Socket as TcpSocket, SocketBuffer as TcpSocketBuffer};
 use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
-use std::fmt::Write;
 use std::str;
 use syscall;
 use syscall::{Error as SyscallError, Result as SyscallResult};
@@ -273,40 +273,34 @@ impl<'a> SchemeSocket for TcpSocket<'a> {
     }
 
     fn fpath(&self, file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
-        let unspecified = "0.0.0.0:0";
-        let mut path = String::from("/scheme/tcp/");
-        match self.remote_endpoint() {
-            Some(endpoint) => write!(&mut path, "{}", endpoint).unwrap(),
-            None => path.push_str(unspecified),
-        }
-        path.push('/');
-        match (self.local_endpoint(), file) {
-            (Some(endpoint), _) => write!(&mut path, "{}", endpoint).unwrap(),
-            (
-                None,
-                SchemeFile::Socket(SocketFile {
-                    data: Some(endpoint),
-                    ..
-                }),
-            ) => {
-                if endpoint.is_specified() {
-                    write!(&mut path, "{}", endpoint).unwrap()
-                } else {
-                    write!(&mut path, "0.0.0.0:{}", endpoint.port).unwrap()
-                }
+        FpathWriter::with(buf, |w| {
+            let unspecified = "0.0.0.0:0";
+            write!(w, "/scheme/tcp/").unwrap();
+            match self.remote_endpoint() {
+                Some(endpoint) => write!(w, "{}", endpoint).unwrap(),
+                None => w.push_str(unspecified),
             }
-            _ => path.push_str(unspecified),
-        }
-        trace!("fpath: {}", path);
-        let path = path.as_bytes();
+            w.push_str("/");
+            match (self.local_endpoint(), file) {
+                (Some(endpoint), _) => write!(w, "{}", endpoint).unwrap(),
+                (
+                    None,
+                    SchemeFile::Socket(SocketFile {
+                        data: Some(endpoint),
+                        ..
+                    }),
+                ) => {
+                    if endpoint.is_specified() {
+                        write!(w, "{}", endpoint).unwrap()
+                    } else {
+                        write!(w, "0.0.0.0:{}", endpoint.port).unwrap()
+                    }
+                }
+                _ => w.push_str(unspecified),
+            }
 
-        let mut i = 0;
-        while i < buf.len() && i < path.len() {
-            buf[i] = path[i];
-            i += 1;
-        }
-
-        Ok(i)
+            Ok(())
+        })
     }
 
     fn handle_recvmsg(

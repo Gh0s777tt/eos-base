@@ -13,7 +13,7 @@ use libredox::Fd;
 use partitionlib::{LogicalBlockSize, PartitionTable};
 use redox_scheme::scheme::{register_scheme_inner, SchemeAsync, SchemeState};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket};
-use scheme_utils::HandleMap;
+use scheme_utils::{FpathWriter, HandleMap};
 use syscall::dirent::DirentBuf;
 use syscall::schemev2::NewFdFlags;
 use syscall::{
@@ -559,50 +559,20 @@ impl<T: Disk> SchemeAsync for DiskSchemeInner<T> {
     }
 
     async fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let handle = self.handles.get(id)?;
-
-        let mut i = 0;
-
-        let scheme_name = self.scheme_name.as_bytes();
-        let mut j = 0;
-        // TODO: copy_from_slice
-        while i < buf.len() && j < scheme_name.len() {
-            buf[i] = scheme_name[j];
-            i += 1;
-            j += 1;
-        }
-
-        if i < buf.len() {
-            buf[i] = b':';
-            i += 1;
-        }
-
-        match *handle {
-            Handle::List(_) => (),
-            Handle::Disk(number) => {
-                let number_str = format!("{}", number);
-                let number_bytes = number_str.as_bytes();
-                j = 0;
-                while i < buf.len() && j < number_bytes.len() {
-                    buf[i] = number_bytes[j];
-                    i += 1;
-                    j += 1;
+        FpathWriter::with(buf, |w| {
+            write!(w, "{}:", self.scheme_name).unwrap();
+            match *self.handles.get(id)? {
+                Handle::List(_) => (),
+                Handle::Disk(number) => {
+                    write!(w, "{number}").unwrap();
                 }
-            }
-            Handle::Partition(disk_num, part_num) => {
-                let number_str = format!("{}p{}", disk_num, part_num);
-                let number_bytes = number_str.as_bytes();
-                j = 0;
-                while i < buf.len() && j < number_bytes.len() {
-                    buf[i] = number_bytes[j];
-                    i += 1;
-                    j += 1;
+                Handle::Partition(disk_num, part_num) => {
+                    write!(w, "{disk_num}p{part_num}").unwrap();
                 }
+                Handle::SchemeRoot => return Err(Error::new(EBADF)),
             }
-            Handle::SchemeRoot => return Err(Error::new(EBADF)),
-        }
-
-        Ok(i)
+            Ok(())
+        })
     }
 
     async fn read(

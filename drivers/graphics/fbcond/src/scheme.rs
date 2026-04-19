@@ -4,7 +4,7 @@ use std::os::fd::AsRawFd;
 use event::{EventQueue, UserData};
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult};
-use scheme_utils::HandleMap;
+use scheme_utils::{FpathWriter, HandleMap};
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error, EventFlags, Result, EACCES, EAGAIN, EBADF, ENOENT, O_NONBLOCK};
 
@@ -125,18 +125,11 @@ impl SchemeSync for FbconScheme {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let handle = self.get_vt_handle_mut(id)?;
-
-        let path_str = format!("fbcon:{}", handle.vt_i.0);
-        let path = path_str.as_bytes();
-
-        let mut i = 0;
-        while i < buf.len() && i < path.len() {
-            buf[i] = path[i];
-            i += 1;
-        }
-
-        Ok(i)
+        FpathWriter::with(buf, |w| {
+            let handle = self.get_vt_handle_mut(id)?;
+            write!(w, "fbcon:{}", handle.vt_i.0).unwrap();
+            Ok(())
+        })
     }
 
     fn fsync(&mut self, id: usize, _ctx: &CallerCtx) -> Result<()> {

@@ -13,6 +13,7 @@ use redox_scheme::{
     scheme::SchemeSync, CallerCtx, OpenResult, RecvFdRequest, Response, SendFdRequest,
     SignalBehavior, Socket as SchemeSocket,
 };
+use scheme_utils::FpathWriter;
 use std::{
     cell::RefCell,
     cmp,
@@ -566,19 +567,11 @@ impl<'sock> UdsDgramScheme<'sock> {
     }
 
     fn fpath_inner(path: &String, buf: &mut [u8]) -> Result<usize> {
-        // Write scheme name
-        const PREFIX: &[u8] = b"/scheme/uds_dgram/";
-        let len = cmp::min(PREFIX.len(), buf.len());
-        buf[..len].copy_from_slice(&PREFIX[..len]);
-        if len < PREFIX.len() {
-            return Ok(len);
-        }
-
-        // Write path
-        let len = cmp::min(path.len(), buf.len() - PREFIX.len());
-        buf[PREFIX.len()..][..len].copy_from_slice(&path.as_bytes()[..len]);
-
-        Ok(PREFIX.len() + len)
+        FpathWriter::with(buf, |w| {
+            w.push_str("/scheme/uds_dgram/");
+            w.push_str(path);
+            Ok(())
+        })
     }
 
     fn read_inner(&mut self, id: usize, buf: &mut [u8], flags: u32) -> Result<usize> {

@@ -1,6 +1,7 @@
 #![feature(never_type)]
 
 use std::collections::{BTreeMap, btree_map};
+use std::fmt;
 use std::num::Wrapping;
 
 use syscall::{EBADF, Error, Result};
@@ -71,5 +72,35 @@ impl<T> HandleMap<T> {
 
     pub fn values_mut(&mut self) -> btree_map::ValuesMut<'_, usize, T> {
         self.handles.values_mut()
+    }
+}
+
+pub struct FpathWriter<'a> {
+    buf: &'a mut [u8],
+    written: usize,
+}
+
+impl<'a> FpathWriter<'a> {
+    pub fn with(buf: &'a mut [u8], f: impl FnOnce(&mut Self) -> Result<()>) -> Result<usize> {
+        let mut w = FpathWriter { buf, written: 0 };
+        f(&mut w)?;
+        Ok(w.written)
+    }
+
+    pub fn push_str(&mut self, s: &str) {
+        let count = core::cmp::min(s.len(), self.buf.len() - self.written);
+        self.buf[self.written..self.written + count].copy_from_slice(&s.as_bytes()[..count]);
+        self.written += count;
+    }
+
+    pub fn write_fmt(&mut self, args: fmt::Arguments<'_>) -> fmt::Result {
+        std::fmt::write(self, args)
+    }
+}
+
+impl fmt::Write for FpathWriter<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.push_str(s);
+        Ok(())
     }
 }

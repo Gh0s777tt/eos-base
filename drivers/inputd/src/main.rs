@@ -25,7 +25,7 @@ use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult, Response, SignalBehavior, Socket};
 
 use orbclient::{Event, EventOption};
-use scheme_utils::{Blocking, HandleMap};
+use scheme_utils::{Blocking, FpathWriter, HandleMap};
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error as SysError, EventFlags, EACCES, EBADF, EEXIST, EINVAL};
 
@@ -269,19 +269,17 @@ impl SchemeSync for InputScheme {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
-        let handle = self.handles.get(id)?;
+        FpathWriter::with(buf, |w| {
+            let handle = self.handles.get(id)?;
 
-        if let Handle::Consumer { vt, .. } = handle {
-            let display = self.display.as_ref().ok_or(SysError::new(EINVAL))?;
-            let vt = format!("/scheme/{}/{vt}", display);
-
-            let size = core::cmp::min(vt.len(), buf.len());
-            buf[..size].copy_from_slice(&vt.as_bytes()[..size]);
-
-            Ok(size)
-        } else {
-            Err(SysError::new(EINVAL))
-        }
+            if let Handle::Consumer { vt, .. } = handle {
+                let display = self.display.as_ref().ok_or(SysError::new(EINVAL))?;
+                write!(w, "/scheme/{}/{vt}", display).unwrap();
+                Ok(())
+            } else {
+                Err(SysError::new(EINVAL))
+            }
+        })
     }
 
     fn read(

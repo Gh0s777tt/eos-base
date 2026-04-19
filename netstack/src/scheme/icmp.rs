@@ -1,3 +1,4 @@
+use scheme_utils::FpathWriter;
 use smoltcp::iface::SocketHandle;
 use smoltcp::socket::icmp::{
     Endpoint as IcmpEndpoint, PacketBuffer as IcmpSocketBuffer,
@@ -249,36 +250,21 @@ impl<'a> SchemeSocket for IcmpSocket<'a> {
     }
 
     fn fpath(&self, file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
-        if let SchemeFile::Socket(ref socket_file) = *file {
-            match socket_file.data.socket_type {
-                IcmpSocketType::Echo => {
-                    let path = format!("/scheme/icmp/echo/{}", socket_file.data.ip);
-                    let path = path.as_bytes();
-
-                    let mut i = 0;
-                    while i < buf.len() && i < path.len() {
-                        buf[i] = path[i];
-                        i += 1;
+        FpathWriter::with(buf, |w| {
+            if let SchemeFile::Socket(ref socket_file) = *file {
+                match socket_file.data.socket_type {
+                    IcmpSocketType::Echo => {
+                        write!(w, "/scheme/icmp/echo/{}", socket_file.data.ip).unwrap();
                     }
-
-                    Ok(i)
-                }
-                IcmpSocketType::Udp => {
-                    let path = format!("/scheme/icmp/udp/{}", socket_file.data.ip);
-                    let path = path.as_bytes();
-
-                    let mut i = 0;
-                    while i < buf.len() && i < path.len() {
-                        buf[i] = path[i];
-                        i += 1;
+                    IcmpSocketType::Udp => {
+                        write!(w, "/scheme/icmp/udp/{}", socket_file.data.ip).unwrap();
                     }
-
-                    Ok(i)
                 }
+                Ok(())
+            } else {
+                Err(SyscallError::new(syscall::EBADF))
             }
-        } else {
-            Err(SyscallError::new(syscall::EBADF))
-        }
+        })
     }
 
     fn handle_recvmsg(

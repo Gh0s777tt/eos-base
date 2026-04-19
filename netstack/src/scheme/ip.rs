@@ -1,3 +1,4 @@
+use scheme_utils::FpathWriter;
 use smoltcp::iface::SocketHandle;
 use smoltcp::socket::raw::{
     PacketBuffer as RawSocketBuffer, PacketMetadata as RawPacketMetadata, Socket as RawSocket,
@@ -137,16 +138,10 @@ impl<'a> SchemeSocket for RawSocket<'a> {
     }
 
     fn fpath(&self, _file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
-        let path = format!("/scheme/ip/{}", self.ip_protocol());
-        let path = path.as_bytes();
-
-        let mut i = 0;
-        while i < buf.len() && i < path.len() {
-            buf[i] = path[i];
-            i += 1;
-        }
-
-        Ok(i)
+        FpathWriter::with(buf, |w| {
+            write!(w, "/scheme/ip/{}", self.ip_protocol()).unwrap();
+            Ok(())
+        })
     }
 
     fn handle_recvmsg(

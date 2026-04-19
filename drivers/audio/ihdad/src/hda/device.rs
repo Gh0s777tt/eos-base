@@ -13,7 +13,7 @@ use common::timeout::Timeout;
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::CallerCtx;
 use redox_scheme::OpenResult;
-use scheme_utils::HandleMap;
+use scheme_utils::{FpathWriter, HandleMap};
 use syscall::error::{Error, Result, EACCES, EBADF, EIO, ENODEV, EWOULDBLOCK};
 
 use spin::Mutex;
@@ -1077,16 +1077,11 @@ impl SchemeSync for IntelHDA {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        let mut handles = self.handles.lock();
-        let _handle = handles.get_mut(id)?;
-
-        let mut i = 0;
-        let scheme_path = b"/scheme/audiohw";
-        while i < buf.len() && i < scheme_path.len() {
-            buf[i] = scheme_path[i];
-            i += 1;
-        }
-        Ok(i)
+        FpathWriter::with(buf, |w| {
+            let _handle = self.handles.lock().get_mut(id)?;
+            w.push_str("/scheme/audiohw");
+            Ok(())
+        })
     }
 
     fn on_close(&mut self, id: usize) {

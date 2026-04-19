@@ -1,3 +1,4 @@
+use scheme_utils::FpathWriter;
 use smoltcp::iface::SocketHandle;
 use smoltcp::socket::udp::{
     PacketBuffer as UdpSocketBuffer, PacketMetadata as UdpPacketMetadata, Socket as UdpSocket,
@@ -12,7 +13,6 @@ use super::{parse_endpoint, SchemeWrapper, Smolnetd, SocketSet};
 use crate::port_set::PortSet;
 use crate::router::Router;
 use libredox::flag;
-use std::fmt::Write;
 
 const SO_SNDBUF: usize = 7;
 const SO_RCVBUF: usize = 8;
@@ -269,37 +269,32 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
     }
 
     fn fpath(&self, file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
-        let unspecified = "0.0.0.0:0";
-        let mut path = String::from("/scheme/udp/");
+        FpathWriter::with(buf, |w| {
+            let unspecified = "0.0.0.0:0";
+            w.push_str("/scheme/udp/");
 
-        // remote
-        match file {
-            SchemeFile::Socket(SocketFile { data: endpoint, .. }) => {
-                if endpoint.is_specified() {
-                    write!(&mut path, "{}", endpoint).unwrap()
-                } else {
-                    write!(&mut path, "0.0.0.0:{}", endpoint.port).unwrap()
+            // remote
+            match file {
+                SchemeFile::Socket(SocketFile { data: endpoint, .. }) => {
+                    if endpoint.is_specified() {
+                        write!(w, "{}", endpoint).unwrap()
+                    } else {
+                        write!(w, "0.0.0.0:{}", endpoint.port).unwrap()
+                    }
                 }
+                _ => w.push_str(unspecified),
             }
-            _ => path.push_str(unspecified),
-        }
-        path.push('/');
-        // local
-        let endpoint = self.endpoint();
-        if endpoint.is_specified() {
-            write!(&mut path, "{}", endpoint).unwrap()
-        } else {
-            write!(&mut path, "0.0.0.0:{}", endpoint.port).unwrap()
-        }
-        let path = path.as_bytes();
+            w.push_str("/");
+            // local
+            let endpoint = self.endpoint();
+            if endpoint.is_specified() {
+                write!(w, "{}", endpoint).unwrap()
+            } else {
+                write!(w, "0.0.0.0:{}", endpoint.port).unwrap()
+            }
 
-        let mut i = 0;
-        while i < buf.len() && i < path.len() {
-            buf[i] = path[i];
-            i += 1;
-        }
-
-        Ok(i)
+            Ok(())
+        })
     }
 
     fn handle_recvmsg(

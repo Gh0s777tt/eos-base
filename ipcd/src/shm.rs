@@ -1,5 +1,5 @@
 use redox_scheme::{scheme::SchemeSync, CallerCtx, OpenResult};
-use scheme_utils::HandleMap;
+use scheme_utils::{FpathWriter, HandleMap};
 use std::{
     cmp,
     collections::{hash_map::Entry, HashMap},
@@ -90,20 +90,11 @@ impl SchemeSync for ShmScheme {
         })
     }
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        // Write scheme name
-        const PREFIX: &[u8] = b"/scheme/shm/";
-        let len = cmp::min(PREFIX.len(), buf.len());
-        buf[..len].copy_from_slice(&PREFIX[..len]);
-        if len < PREFIX.len() {
-            return Ok(len);
-        }
-
-        // Write path
-        let path = self.handles.get(id).and_then(Handle::as_shm)?;
-        let len = cmp::min(path.len(), buf.len() - PREFIX.len());
-        buf[PREFIX.len()..][..len].copy_from_slice(&path.as_bytes()[..len]);
-
-        Ok(PREFIX.len() + len)
+        FpathWriter::with(buf, |w| {
+            w.push_str("/scheme/shm/");
+            w.push_str(self.handles.get(id).and_then(Handle::as_shm)?);
+            Ok(())
+        })
     }
     fn on_close(&mut self, id: usize) {
         let Handle::Shm(path) = self.handles.remove(id).unwrap() else {
