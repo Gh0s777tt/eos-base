@@ -42,8 +42,6 @@ DRIVERS_CARGO_ARGS = $(foreach bin,$(DRIVERS_BINS),-p $(bin))
 
 all: initfs base
 install: install-initfs install-base
-initfs: $(TARGET_DIR)/initfs.img
-base: $(TARGET_DIR)/bin.tag
 
 clean:
 	rm -rf $(SRC_DIR)/target $(SRC_DIR)/sysroot $(SYSROOT) $(TARGET_DIR)
@@ -64,53 +62,49 @@ test-gui: all
 $(SYSROOT)/bin/redoxfs:
 	redoxer pkg redoxfs
 
-$(TARGET_DIR)/initfs: $(SYSROOT)/bin/redoxfs
-	rm -rf "$@" "$@.partial"
+initfs: $(SYSROOT)/bin/redoxfs
+	rm -rf "$(TARGET_DIR)/initfs"
 # Copy config files
-	mkdir -p "$@.partial/lib/init.d" "$@.partial/lib/pcid.d"
-	cp "$(SRC_DIR)/init.initfs.d"/* "$@.partial/lib/init.d/"
-	cp "$(SRC_DIR)/drivers/initfs.toml" "$@.partial/lib/pcid.d/initfs.toml"
+	mkdir -p "$(TARGET_DIR)/initfs/lib/init.d" "$(TARGET_DIR)/initfs/lib/pcid.d"
+	cp "$(SRC_DIR)/init.initfs.d"/* "$(TARGET_DIR)/initfs/lib/init.d/"
+	cp "$(SRC_DIR)/drivers/initfs.toml" "$(TARGET_DIR)/initfs/lib/pcid.d/initfs.toml"
 # Build daemons and drivers
 	CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_PANIC=abort \
 		$(CARGO) build $(BUILD_FLAGS) \
 		--manifest-path "$(SRC_DIR)/Cargo.toml" \
 		$(INITFS_CARGO_ARGS) $(INITFS_DRIVERS_CARGO_ARGS)
 # Distribute binaries
-	mkdir -pv "$@.partial/bin" "$@.partial/lib/drivers"
+	mkdir -pv "$(TARGET_DIR)/initfs/bin" "$(TARGET_DIR)/initfs/lib/drivers"
 	for bin in $(INITFS_BINS); do \
-		cp -v "$(TARGET_DIR)/$$bin" "$@.partial/bin"; \
+		cp -v "$(TARGET_DIR)/$$bin" "$(TARGET_DIR)/initfs/bin"; \
 	done
 	for bin in $(INITFS_DRIVERS_BINS); do \
-		cp -v "$(TARGET_DIR)/$$bin" "$@.partial/lib/drivers"; \
+		cp -v "$(TARGET_DIR)/$$bin" "$(TARGET_DIR)/initfs/lib/drivers"; \
 	done
-	cp "$(SYSROOT)/bin/redoxfs" "$@.partial/bin"
-	mv "$@.partial" "$@"
+	cp "$(SYSROOT)/bin/redoxfs" "$(TARGET_DIR)/initfs/bin"
 
-$(TARGET_DIR)/bootstrap:
 	cd "$(SRC_DIR)/bootstrap" && $(CARGO) rustc $(BUILD_FLAGS) \
 		-- -Ctarget-feature=+crt-static -Clinker="$(LINKER)"
 
-$(TARGET_DIR)/initfs.img: $(TARGET_DIR)/initfs $(TARGET_DIR)/bootstrap
 	$(CARGO_HOST) run --manifest-path "$(SRC_DIR)/initfs/tools/Cargo.toml" --bin redox-initfs-ar -- \
-		"$(TARGET_DIR)/initfs" "$(TARGET_DIR)/bootstrap" -o "$@"
+		"$(TARGET_DIR)/initfs" "$(TARGET_DIR)/bootstrap" -o "$(TARGET_DIR)/initfs.img"
 
-install-initfs: $(TARGET_DIR)/initfs.img
+install-initfs: initfs
 	@mkdir -pv "$(DESTDIR)/usr/lib/boot"
 	@cp -v "$<" "$(DESTDIR)/usr/lib/boot/initfs"
 
 # -----------------------------------------------------------------------------
 # base
 # -----------------------------------------------------------------------------
-$(TARGET_DIR)/bin.tag:
+base:
 # Build daemons and drivers
 	CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_PANIC=abort \
 		$(CARGO) build $(BUILD_FLAGS) \
 		--manifest-path "$(SRC_DIR)/Cargo.toml" \
 		$(BASE_CARGO_ARGS) $(DRIVERS_CARGO_ARGS)
 	mv $(TARGET_DIR)/smolnetd $(TARGET_DIR)/netstack
-	touch "$@"
 
-install-base: $(TARGET_DIR)/bin.tag
+install-base: base
 	@mkdir -pv "$(DESTDIR)/usr/bin" "$(DESTDIR)/usr/lib/drivers"
 	@mkdir -pv "$(DESTDIR)/usr/lib/init.d/" "$(DESTDIR)/usr/lib/pcid.d"
 # Distribute binaries
