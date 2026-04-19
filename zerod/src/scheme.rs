@@ -68,10 +68,7 @@ impl SchemeSync for ZeroScheme {
     }
 
     fn fpath(&mut self, _id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
-            w.push_str("zero:");
-            Ok(())
-        })
+        FpathWriter::with(buf, "zero", |_| Ok(()))
     }
 
     fn fsync(&mut self, _id: usize, _ctx: &CallerCtx) -> Result<()> {

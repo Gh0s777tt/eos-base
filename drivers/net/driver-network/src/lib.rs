@@ -315,8 +315,7 @@ impl<T: NetworkAdapter> SchemeSync for NetworkSchemeInner<T> {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
-            write!(w, "/scheme/{}/", self.scheme_name).unwrap();
+        FpathWriter::with(buf, &self.scheme_name, |w| {
             let path = match self.handles.get(id)? {
                 Handle::Data { .. } => "",
                 Handle::Mac { .. } => "mac",

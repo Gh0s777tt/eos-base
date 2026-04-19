@@ -269,9 +269,8 @@ impl<'a> SchemeSocket for UdpSocket<'a> {
     }
 
     fn fpath(&self, file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
-        FpathWriter::with(buf, |w| {
+        FpathWriter::with(buf, "udp", |w| {
             let unspecified = "0.0.0.0:0";
-            w.push_str("/scheme/udp/");
 
             // remote
             match file {

@@ -273,9 +273,8 @@ impl<'a> SchemeSocket for TcpSocket<'a> {
     }
 
     fn fpath(&self, file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
-        FpathWriter::with(buf, |w| {
+        FpathWriter::with(buf, "tcp", |w| {
             let unspecified = "0.0.0.0:0";
-            write!(w, "/scheme/tcp/").unwrap();
             match self.remote_endpoint() {
                 Some(endpoint) => write!(w, "{}", endpoint).unwrap(),
                 None => w.push_str(unspecified),

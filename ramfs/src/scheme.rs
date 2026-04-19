@@ -1,5 +1,4 @@
 use std::convert::{TryFrom, TryInto};
-use std::iter;
 use std::os::unix::io::AsRawFd;
 use std::{mem, str};
 
@@ -460,7 +459,7 @@ impl SchemeSync for Scheme {
         Err(Error::new(ENOSYS))
     }
     fn fpath(&mut self, fd: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
+        FpathWriter::with(buf, &self.scheme_name, |w| {
             let mut current_inode = match *self.handles.get(fd)? {
                 Handle::Inode(inode) => inode,
                 Handle::SchemeRoot => return Err(Error::new(EISDIR)),
@@ -495,10 +494,11 @@ impl SchemeSync for Scheme {
                 current_info = parent_info;
             }
 
-            for component in iter::once(self.scheme_name.trim_start_matches('/'))
-                .chain(chain.iter().copied().rev())
-            {
-                write!(w, "/{component}").unwrap();
+            for (i, component) in chain.iter().copied().rev().enumerate() {
+                if i != 0 {
+                    w.push_str("/");
+                }
+                w.push_str(component);
             }
             Ok(())
         })

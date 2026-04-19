@@ -567,8 +567,7 @@ impl<'sock> UdsDgramScheme<'sock> {
     }
 
     fn fpath_inner(path: &String, buf: &mut [u8]) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
-            w.push_str("/scheme/uds_dgram/");
+        FpathWriter::with(buf, "uds_dgram", |w| {
             w.push_str(path);
             Ok(())
         })

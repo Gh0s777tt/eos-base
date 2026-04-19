@@ -424,13 +424,13 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
-        FpathWriter::with(buf, |w| {
+        FpathWriter::with(buf, &self.scheme_name, |w| {
             match self.handles.get(id)? {
                 Handle::V2 {
                     vt,
                     next_id: _,
                     buffers: _,
-                } => write!(w, "/scheme/{}/v2/{vt}", self.scheme_name).unwrap(),
+                } => write!(w, "v2/{vt}").unwrap(),
                 Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
             };
             Ok(())

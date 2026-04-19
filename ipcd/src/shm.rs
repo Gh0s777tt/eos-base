@@ -90,8 +90,7 @@ impl SchemeSync for ShmScheme {
         })
     }
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
-            w.push_str("/scheme/shm/");
+        FpathWriter::with(buf, "shm", |w| {
             w.push_str(self.handles.get(id).and_then(Handle::as_shm)?);
             Ok(())
         })

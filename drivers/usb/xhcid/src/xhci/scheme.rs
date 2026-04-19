@@ -198,7 +198,7 @@ impl Handle {
     ///
     /// # Returns
     /// - A [String] containing the scheme path that the handle is associated with.
-    pub(crate) fn to_scheme(&self) -> String {
+    pub(crate) fn to_path(&self) -> String {
         match self {
             Handle::TopLevel(_) => String::from(""),
             Handle::Port(port_num, _) => {
@@ -2214,9 +2214,9 @@ impl<const N: usize> SchemeSync for &Xhci<N> {
     }
 
     fn fpath(&mut self, fd: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
+        FpathWriter::with(buf, "xhci", |w| {
             let handle = self.handles.get(&fd).ok_or(Error::new(EBADF))?;
-            write!(w, "{}", handle.to_scheme()).unwrap();
+            write!(w, "{}", handle.to_path()).unwrap();
             Ok(())
         })
     }

@@ -138,8 +138,8 @@ impl<'a> SchemeSocket for RawSocket<'a> {
     }
 
     fn fpath(&self, _file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
-        FpathWriter::with(buf, |w| {
-            write!(w, "/scheme/ip/{}", self.ip_protocol()).unwrap();
+        FpathWriter::with(buf, "ip", |w| {
+            write!(w, "{}", self.ip_protocol()).unwrap();
             Ok(())
         })
     }

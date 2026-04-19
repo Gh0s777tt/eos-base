@@ -269,12 +269,12 @@ impl SchemeSync for InputScheme {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
-        FpathWriter::with(buf, |w| {
+        let display = self.display.as_ref().ok_or(SysError::new(EINVAL))?;
+        FpathWriter::with(buf, display, |w| {
             let handle = self.handles.get(id)?;
 
             if let Handle::Consumer { vt, .. } = handle {
-                let display = self.display.as_ref().ok_or(SysError::new(EINVAL))?;
-                write!(w, "/scheme/{}/{vt}", display).unwrap();
+                write!(w, "{vt}").unwrap();
                 Ok(())
             } else {
                 Err(SysError::new(EINVAL))

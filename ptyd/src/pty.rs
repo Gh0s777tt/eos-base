@@ -32,8 +32,8 @@ impl Pty {
     }
 
     pub fn path(&self, buf: &mut [u8]) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
-            write!(w, "/scheme/pty/{}", self.id).unwrap();
+        FpathWriter::with(buf, "pty", |w| {
+            write!(w, "{}", self.id).unwrap();
             Ok(())
         })
     }

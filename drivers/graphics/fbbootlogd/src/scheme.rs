@@ -197,10 +197,7 @@ impl SchemeSync for FbbootlogScheme {
     }
 
     fn fpath(&mut self, _id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
-            w.push_str("fbbootlog:");
-            Ok(())
-        })
+        FpathWriter::with_legacy(buf, "fbbootlog", |_| Ok(()))
     }
 
     fn fsync(&mut self, _id: usize, _ctx: &CallerCtx) -> Result<()> {

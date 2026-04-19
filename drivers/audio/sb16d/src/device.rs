@@ -222,12 +222,8 @@ impl SchemeSync for Sb16 {
         Err(Error::new(EBADF))
     }
 
-    fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
-            let _handle = self.handles.lock().get_mut(id)?;
-            w.push_str("/scheme/audiohw");
-            Ok(())
-        })
+    fn fpath(&mut self, _id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
+        FpathWriter::with(buf, "audiohw", |_| Ok(()))
     }
 
     fn on_close(&mut self, id: usize) {

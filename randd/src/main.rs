@@ -431,10 +431,7 @@ impl SchemeSync for RandScheme {
         Ok(EventFlags::EVENT_READ)
     }
     fn fpath(&mut self, _file: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
-            w.push_str("/scheme/rand");
-            Ok(())
-        })
+        FpathWriter::with(buf, "rand", |_| Ok(()))
     }
 
     fn fstat(&mut self, file: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {

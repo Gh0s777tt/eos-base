@@ -250,14 +250,14 @@ impl<'a> SchemeSocket for IcmpSocket<'a> {
     }
 
     fn fpath(&self, file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
-        FpathWriter::with(buf, |w| {
+        FpathWriter::with(buf, "icmp", |w| {
             if let SchemeFile::Socket(ref socket_file) = *file {
                 match socket_file.data.socket_type {
                     IcmpSocketType::Echo => {
-                        write!(w, "/scheme/icmp/echo/{}", socket_file.data.ip).unwrap();
+                        write!(w, "echo/{}", socket_file.data.ip).unwrap();
                     }
                     IcmpSocketType::Udp => {
-                        write!(w, "/scheme/icmp/udp/{}", socket_file.data.ip).unwrap();
+                        write!(w, "udp/{}", socket_file.data.ip).unwrap();
                     }
                 }
                 Ok(())

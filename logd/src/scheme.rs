@@ -229,8 +229,7 @@ impl<'sock> SchemeSync for LogScheme<'sock> {
     }
 
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
-        FpathWriter::with(buf, |w| {
-            w.push_str("/scheme/log/");
+        FpathWriter::with(buf, "log", |w| {
             w.push_str(match self.handles.get(id)? {
                 LogHandle::Log { context, .. } => context,
                 LogHandle::AddSink => "add_sink",

@@ -81,8 +81,24 @@ pub struct FpathWriter<'a> {
 }
 
 impl<'a> FpathWriter<'a> {
-    pub fn with(buf: &'a mut [u8], f: impl FnOnce(&mut Self) -> Result<()>) -> Result<usize> {
+    pub fn with(
+        buf: &'a mut [u8],
+        scheme_name: &str,
+        f: impl FnOnce(&mut Self) -> Result<()>,
+    ) -> Result<usize> {
         let mut w = FpathWriter { buf, written: 0 };
+        write!(w, "/scheme/{scheme_name}/").unwrap();
+        f(&mut w)?;
+        Ok(w.written)
+    }
+
+    pub fn with_legacy(
+        buf: &'a mut [u8],
+        scheme_name: &str,
+        f: impl FnOnce(&mut Self) -> Result<()>,
+    ) -> Result<usize> {
+        let mut w = FpathWriter { buf, written: 0 };
+        write!(w, "{scheme_name}:").unwrap();
         f(&mut w)?;
         Ok(w.written)
     }
