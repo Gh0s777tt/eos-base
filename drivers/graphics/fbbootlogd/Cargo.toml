@@ -11,6 +11,7 @@ ransid.workspace = true
 redox_event.workspace = true
 redox_syscall.workspace = true
 redox-scheme.workspace = true
+scheme-utils = { path = "../../../scheme-utils" }
 
 console-draw = { path = "../console-draw" }
 daemon = { path = "../../../daemon" }

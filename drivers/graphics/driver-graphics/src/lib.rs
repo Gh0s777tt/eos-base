@@ -978,9 +978,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         let ptr = T::map_dumb_buffer(&mut self.adapter, framebuffer);
         Ok(unsafe { ptr.add(offset as usize) } as usize)
     }
-}
 
-impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     fn on_close(&mut self, id: usize) {
         self.handles.remove(id);
     }

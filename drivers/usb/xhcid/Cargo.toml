@@ -22,6 +22,7 @@ lazy_static = "1.4"
 log.workspace = true
 redox_event.workspace = true
 redox-scheme.workspace = true
+scheme-utils = { path = "../../../scheme-utils" }
 redox_syscall.workspace = true
 serde.workspace = true
 serde_json.workspace = true

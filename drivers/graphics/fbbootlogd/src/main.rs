@@ -7,13 +7,14 @@
 //! In the future fbbootlogd may also pull from logd as opposed to have logd push logs to it. And it
 //! it could display a boot splash like plymouth instead of a boot log when booting in quiet mode.
 
+use std::ops::ControlFlow;
 use std::os::fd::AsRawFd;
 
 use event::EventQueue;
 use inputd::ConsumerHandleEvent;
-use libredox::errno::EAGAIN;
 use orbclient::Event;
-use redox_scheme::{scheme::SchemeState, RequestKind, SignalBehavior, Socket};
+use redox_scheme::Socket;
+use scheme_utils::Blocking;
 
 use crate::scheme::FbbootlogScheme;
 
@@ -34,8 +35,8 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
 
     let socket = Socket::nonblock().expect("fbbootlogd: failed to create fbbootlog scheme");
 
-    let mut state = SchemeState::new();
     let mut scheme = FbbootlogScheme::new();
+    let mut handler = Blocking::new(&socket, 16);
 
     event_queue
         .subscribe(
@@ -77,33 +78,15 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
 
     for event in event_queue {
         match event.expect("fbbootlogd: failed to get event").user_data {
-            Source::Scheme => {
-                loop {
-                    let request = match socket.next_request(SignalBehavior::Restart) {
-                        Ok(Some(request)) => request,
-                        Ok(None) => {
-                            // Scheme likely got unmounted
-                            std::process::exit(0);
-                        }
-                        Err(err) if err.errno == EAGAIN => break,
-                        Err(err) => panic!("fbbootlogd: failed to read display scheme: {err:?}"),
-                    };
-
-                    match request.kind() {
-                        RequestKind::Call(call) => {
-                            let response = call.handle_sync(&mut scheme, &mut state);
-
-                            socket
-                                .write_response(response, SignalBehavior::Restart)
-                                .expect("pcid: failed to write next scheme response");
-                        }
-                        RequestKind::OnClose { id } => {
-                            scheme.on_close(id);
-                        }
-                        _ => (),
-                    }
+            Source::Scheme => loop {
+                match handler
+                    .process_requests_nonblocking(&mut scheme)
+                    .expect("fbbootlogd: failed to process requests")
+                {
+                    ControlFlow::Continue(()) => {}
+                    ControlFlow::Break(()) => break,
                 }
-            }
+            },
             Source::Input => {
                 let mut events = [Event::new(); 16];
                 loop {

@@ -1,8 +1,5 @@
-use redox_scheme::{
-    scheme::{SchemeState, SchemeSync},
-    RequestKind, Response, SignalBehavior, Socket,
-};
-use std::process;
+use redox_scheme::Socket;
+use scheme_utils::Blocking;
 
 use crate::scheme::LogScheme;
 
@@ -11,38 +8,16 @@ mod scheme;
 fn daemon(daemon: daemon::SchemeDaemon) -> ! {
     let socket = Socket::create().expect("logd: failed to create log scheme");
 
-    let mut state = SchemeState::new();
     let mut scheme = LogScheme::new(&socket);
+    let handler = Blocking::new(&socket, 16);
 
     let _ = daemon.ready_sync_scheme(&socket, &mut scheme);
 
     libredox::call::setrens(0, 0).expect("logd: failed to enter null namespace");
 
-    while let Some(request) = socket
-        .next_request(SignalBehavior::Restart)
-        .expect("logd: failed to read events from log scheme")
-    {
-        match request.kind() {
-            RequestKind::Call(call) => {
-                let response = call.handle_sync(&mut scheme, &mut state);
-                socket
-                    .write_response(response, SignalBehavior::Restart)
-                    .expect("logd: failed to write responses to log scheme");
-            }
-            RequestKind::OnClose { id } => {
-                scheme.on_close(id);
-            }
-            RequestKind::SendFd(sendfd_request) => {
-                let result = scheme.on_sendfd(&sendfd_request);
-                let resp = Response::new(result, sendfd_request);
-                socket
-                    .write_response(resp, SignalBehavior::Restart)
-                    .expect("logd: failed to write responses to log scheme");
-            }
-            _ => {}
-        };
-    }
-    process::exit(0);
+    handler
+        .process_requests_blocking(scheme)
+        .expect("logd: failed to process requests");
 }
 
 fn main() {

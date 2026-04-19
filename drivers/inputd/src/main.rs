@@ -15,16 +15,17 @@ use core::mem::size_of;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::mem::transmute;
+use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use inputd::{ControlEvent, VtEvent, VtEventKind};
 
 use libredox::errno::ESTALE;
-use redox_scheme::scheme::{SchemeState, SchemeSync};
-use redox_scheme::{CallerCtx, OpenResult, RequestKind, Response, SignalBehavior, Socket};
+use redox_scheme::scheme::SchemeSync;
+use redox_scheme::{CallerCtx, OpenResult, Response, SignalBehavior, Socket};
 
 use orbclient::{Event, EventOption};
-use scheme_utils::HandleMap;
+use scheme_utils::{Blocking, HandleMap};
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error as SysError, EventFlags, EACCES, EBADF, EEXIST, EINVAL};
 
@@ -525,29 +526,16 @@ impl SchemeSync for InputScheme {
 fn deamon(daemon: daemon::SchemeDaemon) -> anyhow::Result<()> {
     // Create the ":input" scheme.
     let socket_file = Socket::create()?;
-    let mut state = SchemeState::new();
     let mut scheme = InputScheme::new();
+    let mut handler = Blocking::new(&socket_file, 16);
 
     let _ = daemon.ready_sync_scheme(&socket_file, &mut scheme);
 
     loop {
         scheme.has_new_events = false;
-        let Some(request) = socket_file.next_request(SignalBehavior::Restart)? else {
-            // Scheme likely got unmounted
-            return Ok(());
-        };
-
-        match request.kind() {
-            RequestKind::Call(call_request) => {
-                socket_file.write_response(
-                    call_request.handle_sync(&mut scheme, &mut state),
-                    SignalBehavior::Restart,
-                )?;
-            }
-            RequestKind::OnClose { id } => {
-                scheme.on_close(id);
-            }
-            _ => {}
+        match handler.process_requests_nonblocking(&mut scheme)? {
+            ControlFlow::Continue(()) => {}
+            ControlFlow::Break(()) => unreachable!("scheme should be non-blocking"),
         }
 
         if !scheme.has_new_events {

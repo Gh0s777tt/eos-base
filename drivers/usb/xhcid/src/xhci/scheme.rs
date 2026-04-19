@@ -2350,12 +2350,13 @@ impl<const N: usize> SchemeSync for &Xhci<N> {
             _ => Err(Error::new(EBADF)),
         }
     }
-}
-impl<const N: usize> Xhci<N> {
-    pub fn on_close(&self, fd: usize) {
+
+    fn on_close(&mut self, fd: usize) {
         self.handles.remove(&fd);
     }
+}
 
+impl<const N: usize> Xhci<N> {
     pub fn get_endp_status(&self, port_num: PortId, endp_num: u8) -> Result<EndpointStatus> {
         let port_state = self.port_states.get(&port_num).ok_or(Error::new(EBADFD))?;
 

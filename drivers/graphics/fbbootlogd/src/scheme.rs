@@ -249,7 +249,3 @@ impl SchemeSync for FbbootlogScheme {
         Ok(buf.len())
     }
 }
-
-impl FbbootlogScheme {
-    pub fn on_close(&mut self, _id: usize) {}
-}

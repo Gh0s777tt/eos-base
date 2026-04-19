@@ -1,9 +1,9 @@
-use std::{env, process};
+use std::env;
 
 mod filesystem;
 mod scheme;
 
-use redox_scheme::{scheme::SchemeState, RequestKind, SignalBehavior};
+use scheme_utils::Blocking;
 
 use self::scheme::Scheme;
 
@@ -16,34 +16,14 @@ fn daemon(daemon: daemon::SchemeDaemon) -> ! {
 
     let socket = redox_scheme::Socket::create().expect("ramfs: failed to create socket");
 
-    let mut state = SchemeState::new();
     let mut scheme = Scheme::new(scheme_name.clone()).expect("ramfs: failed to initialize scheme");
+    let handler = Blocking::new(&socket, 16);
 
     let _ = daemon.ready_sync_scheme(&socket, &mut scheme);
 
     libredox::call::setrens(0, 0).expect("ramfs: failed to enter null namespace");
 
-    loop {
-        let Some(request) = socket
-            .next_request(SignalBehavior::Restart)
-            .expect("ramfs: failed to get next scheme request")
-        else {
-            break;
-        };
-        match request.kind() {
-            RequestKind::Call(call) => {
-                let response = call.handle_sync(&mut scheme, &mut state);
-
-                socket
-                    .write_response(response, SignalBehavior::Restart)
-                    .expect("ramfs: failed to write next scheme response");
-            }
-            RequestKind::OnClose { id } => {
-                scheme.on_close(id);
-            }
-            _ => (),
-        }
-    }
-
-    process::exit(0);
+    handler
+        .process_requests_blocking(scheme)
+        .expect("ramfs: failed to process events from zero scheme");
 }

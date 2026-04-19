@@ -1,10 +1,14 @@
+#![feature(never_type)]
+
 use std::collections::{BTreeMap, btree_map};
 use std::num::Wrapping;
 
 use syscall::{EBADF, Error, Result};
 
+mod blocking;
 mod readiness_based;
 
+pub use blocking::Blocking;
 pub use readiness_based::ReadinessBased;
 
 pub struct HandleMap<T> {

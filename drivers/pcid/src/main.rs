@@ -10,10 +10,8 @@ use pci_types::{
     Bar as TyBar, CommandRegister, EndpointHeader, HeaderType, PciAddress,
     PciHeader as TyPciHeader, PciPciBridgeHeader,
 };
-use redox_scheme::{
-    scheme::{register_sync_scheme, SchemeState},
-    RequestKind, SignalBehavior,
-};
+use redox_scheme::scheme::register_sync_scheme;
+use scheme_utils::Blocking;
 
 use crate::cfg_access::Pcie;
 use pcid_interface::{FullDeviceId, LegacyInterruptLine, PciBar, PciFunction, PciRom};
@@ -252,9 +250,9 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
     info!("PCI SG-BS:DV.F VEND:DEVI CL.SC.IN.RV");
 
-    let mut state = SchemeState::new();
     let mut scheme = scheme::PciScheme::new(pcie);
     let socket = redox_scheme::Socket::create().expect("failed to open pci scheme socket");
+    let handler = Blocking::new(&socket, 16);
 
     {
         match libredox::Fd::open("/scheme/acpi/register_pci", libredox::flag::O_WRONLY, 0) {
@@ -311,30 +309,9 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
     let _ = daemon.ready();
 
-    loop {
-        let Some(request) = socket
-            .next_request(SignalBehavior::Restart)
-            .expect("pcid: failed to get next scheme request")
-        else {
-            break;
-        };
-        match request.kind() {
-            RequestKind::Call(call) => {
-                let response = call.handle_sync(&mut scheme, &mut state);
-
-                socket
-                    .write_response(response, SignalBehavior::Restart)
-                    .expect("pcid: failed to write next scheme response");
-            }
-            RequestKind::OnClose { id } => {
-                scheme.on_close(id);
-            }
-            _ => (),
-        }
-    }
-
-    println!("pcid: exit");
-    std::process::exit(0);
+    handler
+        .process_requests_blocking(scheme)
+        .expect("pcid: failed to process requests");
 }
 
 fn scan_device(
