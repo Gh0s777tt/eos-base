@@ -102,7 +102,6 @@ base:
 		$(CARGO) build $(BUILD_FLAGS) \
 		--manifest-path "$(SRC_DIR)/Cargo.toml" \
 		$(BASE_CARGO_ARGS) $(DRIVERS_CARGO_ARGS)
-	mv $(TARGET_DIR)/smolnetd $(TARGET_DIR)/netstack
 
 install-base: base
 	@mkdir -pv "$(DESTDIR)/usr/bin" "$(DESTDIR)/usr/lib/drivers"
