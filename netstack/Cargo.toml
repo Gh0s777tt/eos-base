@@ -5,6 +5,11 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
+name = "netstack"
+path = "src/main.rs"
+
+# FIXME remove
+[[bin]]
 name = "smolnetd"
 path = "src/main.rs"
 

@@ -91,7 +91,7 @@ initfs: $(SYSROOT)/bin/redoxfs
 
 install-initfs: initfs
 	@mkdir -pv "$(DESTDIR)/usr/lib/boot"
-	@cp -v "$<" "$(DESTDIR)/usr/lib/boot/initfs"
+	@cp -v "$(TARGET_DIR)/initfs.img" "$(DESTDIR)/usr/lib/boot/initfs"
 
 # -----------------------------------------------------------------------------
 # base
@@ -102,7 +102,6 @@ base:
 		$(CARGO) build $(BUILD_FLAGS) \
 		--manifest-path "$(SRC_DIR)/Cargo.toml" \
 		$(BASE_CARGO_ARGS) $(DRIVERS_CARGO_ARGS)
-	mv $(TARGET_DIR)/smolnetd $(TARGET_DIR)/netstack
 
 install-base: base
 	@mkdir -pv "$(DESTDIR)/usr/bin" "$(DESTDIR)/usr/lib/drivers"
