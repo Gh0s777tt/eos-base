@@ -49,12 +49,12 @@ clean:
 # test if booting
 test: all
 	$(MAKE) install
-	REDOXER_QEMU_SMP=1 redoxer exec --folder ./sysroot/:/ true
+	redoxer exec --folder ./sysroot/:/ true
 
 # test with interactive gui
 test-gui: all
 	$(MAKE) install
-	REDOXER_QEMU_SMP=1 redoxer exec --gui --folder ./sysroot/:/ ion
+	redoxer exec --gui --folder ./sysroot/:/ ion
 
 # -----------------------------------------------------------------------------
 # base-initfs
