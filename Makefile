@@ -10,7 +10,6 @@ SRC_DIR ?= $(CURDIR)
 BUILD_DIR ?= $(shell pwd)/target/$(TARGET)/build
 DESTDIR ?= ./sysroot
 SYSROOT ?= $(shell pwd)/target/$(TARGET)/sysroot
-export REDOXER_SYSROOT=$(SYSROOT)
 TARGET_DIR = $(BUILD_DIR)/$(TARGET)/$(BUILD_TYPE)
 BUILD_FLAGS +=  --target-dir $(BUILD_DIR)
 
@@ -61,7 +60,7 @@ test-gui: all
 # base
 # -----------------------------------------------------------------------------
 $(SYSROOT)/bin/redoxfs:
-	redoxer pkg redoxfs
+	REDOXER_SYSROOT=$(SYSROOT) redoxer pkg redoxfs
 
 base:
 	@mkdir -pv "$(BUILD_DIR)"

@@ -71,7 +71,6 @@ done
 
 run_redoxer() {
     export TARGET=$1
-    export REDOXER_SYSROOT="target/${CURRENT_TARGET}/sysroot"
     redoxer toolchain || { echo -e "${RED}Fail: redoxer toolchain for: $target.${NC}" && exit 1; }
 
     echo "----------------------------------------"
