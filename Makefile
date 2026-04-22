@@ -10,7 +10,6 @@ SRC_DIR ?= $(CURDIR)
 BUILD_DIR ?= $(shell pwd)/target/$(TARGET)/build
 DESTDIR ?= ./sysroot
 SYSROOT ?= $(shell pwd)/target/$(TARGET)/sysroot
-export REDOXER_SYSROOT=$(SYSROOT)
 TARGET_DIR = $(BUILD_DIR)/$(TARGET)/$(BUILD_TYPE)
 BUILD_FLAGS +=  --target-dir $(BUILD_DIR)
 
@@ -39,10 +38,10 @@ INITFS_DRIVERS_CARGO_ARGS = $(foreach bin,$(INITFS_DRIVERS_BINS),-p $(bin))
 BASE_CARGO_ARGS = $(foreach bin,$(BASE_BINS),-p $(bin))
 DRIVERS_CARGO_ARGS = $(foreach bin,$(DRIVERS_BINS),-p $(bin))
 
-.PHONY: all initfs base install install-initfs install-base test
+.PHONY: all base install install-base test
 
-all: initfs base
-install: install-initfs install-base
+all: base
+install: install-base
 
 clean:
 	rm -rf $(SRC_DIR)/target $(SRC_DIR)/sysroot $(SYSROOT) $(TARGET_DIR)
@@ -58,54 +57,30 @@ test-gui: all
 	redoxer exec --gui --folder ./sysroot/:/ ion
 
 # -----------------------------------------------------------------------------
-# base-initfs
-# -----------------------------------------------------------------------------
-$(SYSROOT)/bin/redoxfs:
-	redoxer pkg redoxfs
-
-initfs: $(SYSROOT)/bin/redoxfs
-	mkdir -pv "$(BUILD_DIR)"
-	rm -rf "$(BUILD_DIR)/initfs"
-# Copy config files
-	mkdir -p "$(BUILD_DIR)/initfs/lib/init.d" "$(BUILD_DIR)/initfs/lib/pcid.d"
-	cp "$(SRC_DIR)/init.initfs.d"/* "$(BUILD_DIR)/initfs/lib/init.d/"
-	cp "$(SRC_DIR)/drivers/initfs.toml" "$(BUILD_DIR)/initfs/lib/pcid.d/initfs.toml"
-# Build daemons and drivers
-	CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_PANIC=abort \
-		$(CARGO) build $(BUILD_FLAGS) \
-		--manifest-path "$(SRC_DIR)/Cargo.toml" \
-		$(INITFS_CARGO_ARGS) $(INITFS_DRIVERS_CARGO_ARGS)
-# Distribute binaries
-	mkdir -pv "$(BUILD_DIR)/initfs/bin" "$(BUILD_DIR)/initfs/lib/drivers"
-	for bin in $(INITFS_BINS); do \
-		cp -v "$(TARGET_DIR)/$$bin" "$(BUILD_DIR)/initfs/bin"; \
-	done
-	for bin in $(INITFS_DRIVERS_BINS); do \
-		cp -v "$(TARGET_DIR)/$$bin" "$(BUILD_DIR)/initfs/lib/drivers"; \
-	done
-	cp "$(SYSROOT)/bin/redoxfs" "$(BUILD_DIR)/initfs/bin"
-
-	cd "$(SRC_DIR)/bootstrap" && $(CARGO) rustc $(BUILD_FLAGS) \
-		-- -Ctarget-feature=+crt-static -Clinker="$(LINKER)"
-
-	$(CARGO_HOST) run --manifest-path "$(SRC_DIR)/initfs/tools/Cargo.toml" --bin redox-initfs-ar -- \
-		"$(BUILD_DIR)/initfs" "$(TARGET_DIR)/bootstrap" -o "$(BUILD_DIR)/initfs.img"
-
-install-initfs: initfs
-	@mkdir -pv "$(DESTDIR)/usr/lib/boot"
-	@cp -v "$(BUILD_DIR)/initfs.img" "$(DESTDIR)/usr/lib/boot/initfs"
-
-# -----------------------------------------------------------------------------
 # base
 # -----------------------------------------------------------------------------
+$(SYSROOT)/bin/redoxfs:
+	REDOXER_SYSROOT=$(SYSROOT) redoxer pkg redoxfs
+
 base:
+	@mkdir -pv "$(BUILD_DIR)"
 # Build daemons and drivers
 	CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_PANIC=abort \
 		$(CARGO) build $(BUILD_FLAGS) \
 		--manifest-path "$(SRC_DIR)/Cargo.toml" \
 		$(BASE_CARGO_ARGS) $(DRIVERS_CARGO_ARGS)
+# Build initfs daemons and drivers
+# FIXME fix whatever issue (feature unification?) causes most logs to be omitted
+# if this is merged with the above build command.
+	CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_PANIC=abort \
+		$(CARGO) build $(BUILD_FLAGS) \
+		--manifest-path "$(SRC_DIR)/Cargo.toml" \
+		$(INITFS_CARGO_ARGS) $(INITFS_DRIVERS_CARGO_ARGS)
+# Build bootstrap
+	cd "$(SRC_DIR)/bootstrap" && $(CARGO) rustc $(BUILD_FLAGS) \
+		-- -Ctarget-feature=+crt-static -Clinker="$(LINKER)"
 
-install-base: base
+install-base: base $(SYSROOT)/bin/redoxfs
 	@mkdir -pv "$(DESTDIR)/usr/bin" "$(DESTDIR)/usr/lib/drivers"
 	@mkdir -pv "$(DESTDIR)/usr/lib/init.d/" "$(DESTDIR)/usr/lib/pcid.d"
 # Distribute binaries
@@ -121,3 +96,24 @@ install-base: base
 		driver=$$(basename "$$(dirname "$$conf")"); \
 		cp -v "$$conf" "$(DESTDIR)/usr/lib/pcid.d/$$driver.toml"; \
 	done
+
+	rm -rf "$(BUILD_DIR)/initfs"
+# Distribute initfs binaries
+	@mkdir -pv "$(BUILD_DIR)/initfs/bin" "$(BUILD_DIR)/initfs/lib/drivers"
+	for bin in $(INITFS_BINS); do \
+		cp -v "$(TARGET_DIR)/$$bin" "$(BUILD_DIR)/initfs/bin"; \
+	done
+	for bin in $(INITFS_DRIVERS_BINS); do \
+		cp -v "$(TARGET_DIR)/$$bin" "$(BUILD_DIR)/initfs/lib/drivers"; \
+	done
+	cp "$(SYSROOT)/bin/redoxfs" "$(BUILD_DIR)/initfs/bin"
+# Copy initfs config files
+	@mkdir -p "$(BUILD_DIR)/initfs/lib/init.d" "$(BUILD_DIR)/initfs/lib/pcid.d"
+	cp "$(SRC_DIR)/init.initfs.d"/* "$(BUILD_DIR)/initfs/lib/init.d/"
+	cp "$(SRC_DIR)/drivers/initfs.toml" "$(BUILD_DIR)/initfs/lib/pcid.d/initfs.toml"
+# Build initfs
+	$(CARGO_HOST) run --manifest-path "$(SRC_DIR)/initfs/tools/Cargo.toml" --bin redox-initfs-ar -- \
+		"$(BUILD_DIR)/initfs" "$(TARGET_DIR)/bootstrap" -o "$(BUILD_DIR)/initfs.img"
+# Distribute initfs
+	@mkdir -pv "$(DESTDIR)/usr/lib/boot"
+	cp -v "$(BUILD_DIR)/initfs.img" "$(DESTDIR)/usr/lib/boot/initfs"
