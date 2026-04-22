@@ -603,9 +603,9 @@ dependencies = [
 
 [[package]]
 name = "drm"
-version = "0.14.2"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5b71449a23fe79542d6527ca572844b2016abf9573c49e43144d546b1735aec"
+checksum = "7a41816e58f47f49acfd956651055ddcf137c4882c2098c30c448817af21183a"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
