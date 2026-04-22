@@ -117,3 +117,14 @@ install-base: base $(SYSROOT)/bin/redoxfs
 # Distribute initfs
 	@mkdir -pv "$(DESTDIR)/usr/lib/boot"
 	cp -v "$(BUILD_DIR)/initfs.img" "$(DESTDIR)/usr/lib/boot/initfs"
+
+# Device file symlinks
+	@mkdir -pv "$(DESTDIR)/dev"
+	ln -s /scheme/null $(DESTDIR)/dev/null
+	ln -s /scheme/rand $(DESTDIR)/dev/random
+	ln -s /scheme/rand $(DESTDIR)/dev/urandom
+	ln -s /scheme/zero $(DESTDIR)/dev/zero
+	ln -s libc:tty $(DESTDIR)/dev/tty
+	ln -s libc:stdin $(DESTDIR)/dev/stdin
+	ln -s libc:stdout $(DESTDIR)/dev/stdout
+	ln -s libc:stderr $(DESTDIR)/dev/stderr
