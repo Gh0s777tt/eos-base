@@ -82,7 +82,6 @@ base:
 
 install-base: base $(SYSROOT)/bin/redoxfs
 	@mkdir -pv "$(DESTDIR)/usr/bin" "$(DESTDIR)/usr/lib/drivers"
-	@mkdir -pv "$(DESTDIR)/usr/lib/init.d/" "$(DESTDIR)/usr/lib/pcid.d"
 # Distribute binaries
 	@for bin in $(BASE_BINS); do \
 		cp -v "$(TARGET_DIR)/$$bin" "$(DESTDIR)/usr/bin"; \
@@ -91,11 +90,13 @@ install-base: base $(SYSROOT)/bin/redoxfs
 		cp -v "$(TARGET_DIR)/$$bin" "$(DESTDIR)/usr/lib/drivers"; \
 	done
 # Copy configurations
+	@mkdir -pv "$(DESTDIR)/usr/lib/init.d/" "$(DESTDIR)/usr/lib/pcid.d/" "$(DESTDIR)/usr/lib/xhcid.d/"
 	@cp -v "$(SRC_DIR)/init.d"/* "$(DESTDIR)/usr/lib/init.d/"
 	@find "$(SRC_DIR)/drivers" -maxdepth 3 -type f -name 'config.toml' | while read -r conf; do \
 		driver=$$(basename "$$(dirname "$$conf")"); \
 		cp -v "$$conf" "$(DESTDIR)/usr/lib/pcid.d/$$driver.toml"; \
 	done
+	@cp -v "$(SRC_DIR)/drivers/usb/xhcid/drivers.toml" "$(DESTDIR)/usr/lib/xhcid.d/"
 
 	rm -rf "$(BUILD_DIR)/initfs"
 # Distribute initfs binaries

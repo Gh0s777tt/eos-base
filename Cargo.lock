@@ -2900,6 +2900,7 @@ dependencies = [
  "bitflags 2.11.0",
  "chashmap",
  "common",
+ "config",
  "crossbeam-channel",
  "daemon",
  "futures",

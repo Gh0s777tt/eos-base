@@ -11,7 +11,7 @@
 //! documents are specified in the crate-level documentation.
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
-use std::fs::File;
+use std::fs::{self, File};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
@@ -63,6 +63,8 @@ use self::scheme::EndpIfState;
 
 pub use crate::driver_interface::PortId;
 use crate::driver_interface::*;
+use crate::xhci::device_enumerator::{DeviceEnumerationRequest, DeviceEnumerator};
+use crate::xhci::port::PortFlags;
 
 /// Specifies the configurable interrupt mechanism used by the xhci subsystem for registering
 /// device state change notifications.
@@ -280,6 +282,7 @@ pub struct Xhci<const N: usize> {
     // used for the extended capabilities, and so far none of them are mutated, and thus no lock.
     base: *const u8,
 
+    drivers_config: DriversConfig,
     handles: CHashMap<usize, scheme::Handle>,
     next_handle: AtomicUsize,
     port_states: CHashMap<PortId, PortState<N>>,
@@ -445,6 +448,25 @@ impl<const N: usize> Xhci<N> {
 
         let (device_enumerator_sender, device_enumerator_receiver) = crossbeam_channel::unbounded();
 
+        let mut drivers_config = DriversConfig { drivers: vec![] };
+        for file in config::config("xhcid").expect("xhcid: Failed to read driver configs") {
+            let config = match fs::read(&file) {
+                Ok(config) => config,
+                Err(err) => {
+                    println!("xhcid: Failed to read config {}: {err}", file.display());
+                    continue;
+                }
+            };
+            let config = match toml::from_slice::<DriversConfig>(&config) {
+                Ok(config) => config,
+                Err(err) => {
+                    println!("xhcid: Failed to parse config {}: {err}", file.display());
+                    continue;
+                }
+            };
+            drivers_config.drivers.extend(config.drivers);
+        }
+
         let mut xhci = Self {
             base: address as *const u8,
 
@@ -460,6 +482,7 @@ impl<const N: usize> Xhci<N> {
 
             cmd: Mutex::new(cmd),
             primary_event_ring: Mutex::new(EventRing::new::<N>(cap.ac64())?),
+            drivers_config,
             handles: CHashMap::new(),
             next_handle: AtomicUsize::new(0),
             port_states: CHashMap::new(),
@@ -1243,7 +1266,6 @@ impl<const N: usize> Xhci<N> {
             })?;
 
         trace!("Got config and device descriptors on port {}", port);
-        let drivers_usercfg: &DriversConfig = &DRIVERS_CONFIG;
 
         for ifdesc in config_desc.interface_descs.iter() {
             //TODO: support alternate settings
@@ -1264,7 +1286,7 @@ impl<const N: usize> Xhci<N> {
                 continue;
             }
 
-            if let Some(driver) = drivers_usercfg.drivers.iter().find(|driver| {
+            if let Some(driver) = self.drivers_config.drivers.iter().find(|driver| {
                 driver.class == ifdesc.class
                     && driver
                         .subclass()
@@ -1473,17 +1495,4 @@ impl DriverConfig {
 #[derive(Deserialize)]
 struct DriversConfig {
     drivers: Vec<DriverConfig>,
-}
-
-use crate::xhci::device_enumerator::{DeviceEnumerationRequest, DeviceEnumerator};
-use crate::xhci::port::PortFlags;
-use lazy_static::lazy_static;
-
-lazy_static! {
-    static ref DRIVERS_CONFIG: DriversConfig = {
-        // TODO: Load this at runtime.
-        const TOML: &'static [u8] = include_bytes!("../../drivers.toml");
-
-        toml::from_slice::<DriversConfig>(TOML).expect("Failed to parse internally embedded config file")
-    };
 }
