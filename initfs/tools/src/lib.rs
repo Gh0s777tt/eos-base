@@ -418,7 +418,7 @@ pub struct Args<'a> {
     pub destination_path: &'a Path,
     pub max_size: u64,
     pub source: &'a Path,
-    pub bootstrap_code: Option<&'a Path>,
+    pub bootstrap_code: &'a Path,
 }
 pub fn archive(
     &Args {
@@ -479,26 +479,22 @@ pub fn archive(
     let header_offset = bump_alloc(&mut state, 4096, "allocate header")?;
     assert_eq!(header_offset, 0);
 
-    let bootstrap_entry = if let Some(bootstrap_code) = bootstrap_code {
-        allocate_and_write_file(
-            &mut state,
-            &File::open(bootstrap_code).with_context(|| {
-                anyhow!(
-                    "failed to open bootstrap code file `{}`",
-                    bootstrap_code.to_string_lossy(),
-                )
-            })?,
-        )?;
-        let bootstrap_data = std::fs::read(bootstrap_code).with_context(|| {
+    allocate_and_write_file(
+        &mut state,
+        &File::open(bootstrap_code).with_context(|| {
             anyhow!(
-                "failed to read bootstrap code file `{}`",
+                "failed to open bootstrap code file `{}`",
                 bootstrap_code.to_string_lossy(),
             )
-        })?;
-        elf_entry(&bootstrap_data)
-    } else {
-        u64::MAX
-    };
+        })?,
+    )?;
+    let bootstrap_data = std::fs::read(bootstrap_code).with_context(|| {
+        anyhow!(
+            "failed to read bootstrap code file `{}`",
+            bootstrap_code.to_string_lossy(),
+        )
+    })?;
+    let bootstrap_entry = elf_entry(&bootstrap_data);
 
     let inode_table_length = {
         let inode_entry_size: u64 = std::mem::size_of::<initfs::InodeHeader>()

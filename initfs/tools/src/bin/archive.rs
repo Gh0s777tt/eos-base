@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Arg, Command};
 
 use redox_initfs_tools::{self as archive, Args, DEFAULT_MAX_SIZE};
@@ -10,13 +10,6 @@ fn main() -> Result<()> {
         .about("create an initfs image from a directory")
         .version(clap::crate_version!())
         .author(clap::crate_authors!())
-        .arg(
-            Arg::new("MAX_SIZE")
-                .long("max-size")
-                .short('m')
-                .required(false)
-                .help("Set the upper limit for how large the image can become (default 64 MiB)."),
-        )
         // TODO: support non-utf8 paths (applies to other paths as well)
         .arg(
             Arg::new("SOURCE")
@@ -25,7 +18,7 @@ fn main() -> Result<()> {
         )
         .arg(
             Arg::new("BOOTSTRAP_CODE")
-                .required(false)
+                .required(true)
                 .help("Specify the bootstrap ELF file to include in the image."),
         )
         .arg(
@@ -39,19 +32,13 @@ fn main() -> Result<()> {
 
     env_logger::init();
 
-    let max_size = if let Some(max_size_str) = matches.get_one::<String>("MAX_SIZE") {
-        max_size_str
-            .parse::<u64>()
-            .context("expected an integer for MAX_SIZE")?
-    } else {
-        DEFAULT_MAX_SIZE
-    };
-
     let source = matches
         .get_one::<String>("SOURCE")
         .expect("expected the required arg SOURCE to exist");
 
-    let bootstrap_code = matches.get_one::<String>("BOOTSTRAP_CODE");
+    let bootstrap_code = matches
+        .get_one::<String>("BOOTSTRAP_CODE")
+        .expect("expected the required arg BOOTSTRAP_CODE to exist");
 
     let destination = matches
         .get_one::<String>("OUTPUT")
@@ -59,9 +46,9 @@ fn main() -> Result<()> {
 
     let args = Args {
         source: Path::new(source),
-        bootstrap_code: bootstrap_code.map(Path::new),
+        bootstrap_code: Path::new(bootstrap_code),
         destination_path: Path::new(destination),
-        max_size,
+        max_size: DEFAULT_MAX_SIZE,
     };
     archive::archive(&args)
 }
