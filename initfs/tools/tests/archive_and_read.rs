@@ -94,11 +94,11 @@ fn archive_and_read() -> Result<()> {
     let reference_tree = Node::dir([(
         b"foo",
         Node::dir([
+            (b"file-link.txt".as_slice(), Node::link(b"file.txt")),
             (
                 b"file.txt".as_slice(),
                 Node::file(b"This is a file meant to be used in a redox-initfs test.\n"),
             ),
-            (b"file-link.txt".as_slice(), Node::link(b"foo/file.txt")),
         ]),
     )]);
 
