@@ -8,10 +8,10 @@ use std::os::unix::fs::{FileExt, FileTypeExt, PermissionsExt};
 
 use anyhow::{anyhow, bail, Context, Result};
 
-use redox_initfs::types::{self as initfs, Offset};
+use redox_initfs::types as initfs;
 
-pub const KIBIBYTE: u64 = 1024;
-pub const MEBIBYTE: u64 = KIBIBYTE * 1024;
+const KIBIBYTE: u64 = 1024;
+const MEBIBYTE: u64 = KIBIBYTE * 1024;
 
 #[cfg(debug_assertions)]
 pub const DEFAULT_MAX_SIZE: u64 = 256 * MEBIBYTE;
@@ -369,7 +369,7 @@ impl InodeTable {
     }
 }
 
-fn write_inode_table(state: &mut State) -> Result<Offset> {
+fn write_inode_table(state: &mut State) -> Result<initfs::Offset> {
     log::debug!("there are {} inodes", state.inode_table.count());
 
     let inode_size: u32 = std::mem::size_of::<initfs::InodeHeader>()
