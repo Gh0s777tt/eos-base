@@ -22,15 +22,15 @@ pub const DEFAULT_MAX_SIZE: u64 = 64 * MEBIBYTE;
 // FIXME make this configurable to handle systems with 16k and 64k pages.
 const PAGE_SIZE: u16 = 4096;
 
-enum EntryKind {
+pub enum EntryKind {
     File { file: File, executable: bool },
     Dir(Vec<Entry>),
     Link(PathBuf),
 }
 
-struct Entry {
-    name: Vec<u8>,
-    kind: EntryKind,
+pub struct Entry {
+    pub name: Vec<u8>,
+    pub kind: EntryKind,
 }
 
 struct State<'path> {
@@ -458,6 +458,15 @@ pub fn archive(
     let root_path = source;
     let root = read_directory(root_path, root_path).context("failed to read root")?;
 
+    build_initfs(destination_path, max_size, bootstrap_code, root)
+}
+
+pub fn build_initfs(
+    destination_path: &Path,
+    max_size: u64,
+    bootstrap_code: &Path,
+    root: Vec<Entry>,
+) -> std::result::Result<(), anyhow::Error> {
     let previous_extension = destination_path.extension().map_or("", |ext| {
         ext.to_str()
             .expect("expected destination path to be valid UTF-8")
