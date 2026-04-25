@@ -77,7 +77,7 @@ fn archive_and_read() -> Result<()> {
     let args = redox_initfs_tools::Args {
         destination_path: &Path::new(env!("CARGO_TARGET_TMPDIR")).join("out.img"),
         source: Path::new("data"),
-        bootstrap_code: None,
+        bootstrap_code: Path::new("data/foo/bootstrap.elf"),
         max_size: redox_initfs_tools::DEFAULT_MAX_SIZE,
     };
     redox_initfs_tools::archive(&args).context("failed to archive")?;
@@ -86,7 +86,7 @@ fn archive_and_read() -> Result<()> {
     let filesystem =
         redox_initfs::InitFs::new(&data, None).context("failed to parse archive header")?;
     let inode = filesystem
-        .get_inode(redox_initfs::InitFs::ROOT_INODE)
+        .get_inode(filesystem.root_inode())
         .ok_or_else(|| anyhow!("Failed to get root inode"))?;
 
     let tree = build_tree(filesystem, inode)?;
@@ -95,10 +95,14 @@ fn archive_and_read() -> Result<()> {
         b"foo",
         Node::dir([
             (
+                b"bootstrap.elf".as_slice(),
+                Node::file("\x7FELF\x01\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"),
+            ),
+            (b"file-link.txt".as_slice(), Node::link(b"file.txt")),
+            (
                 b"file.txt".as_slice(),
                 Node::file(b"This is a file meant to be used in a redox-initfs test.\n"),
             ),
-            (b"file-link.txt".as_slice(), Node::link(b"foo/file.txt")),
         ]),
     )]);
 

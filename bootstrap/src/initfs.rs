@@ -135,7 +135,7 @@ impl SchemeSync for InitFsScheme {
             // filter out double slashes (e.g. /usr//bin/...)
             .filter(|c| !c.is_empty());
 
-        let mut current_inode = InitFs::ROOT_INODE;
+        let mut current_inode = self.fs.root_inode();
 
         while let Some(component) = components.next() {
             match component {
