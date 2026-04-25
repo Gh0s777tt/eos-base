@@ -70,6 +70,7 @@ pub struct Header {
     pub bootstrap_entry: U64,
     pub initfs_size: U64,
     pub page_size: U16,
+    pub root_inode: U16,
 }
 
 const _: () = {

@@ -229,12 +229,20 @@ fn allocate_and_write_link(state: &mut State, link: &Path) -> Result<WriteResult
     Ok(WriteResult { size, offset })
 }
 
-fn write_inode(state: &mut State, ty: initfs::InodeType, write_result: WriteResult, inode: u16) {
+fn write_inode(
+    state: &mut State,
+    ty: initfs::InodeType,
+    write_result: WriteResult,
+    current_inode: &mut u16,
+) -> u16 {
+    let inode = *current_inode;
+    *current_inode += 1;
     state.inode_table[usize::from(inode)] = Some(initfs::InodeHeader {
         type_: (ty as u32).into(),
         length: initfs::Length(write_result.size.into()),
         offset: initfs::Offset(write_result.offset.into()),
     });
+    inode
 }
 fn allocate_and_write_dir(
     state: &mut State,
@@ -293,8 +301,7 @@ fn allocate_and_write_dir(
             .try_into()
             .expect("expected dir entry count not to exceed u32");
 
-        *current_inode += 1;
-        write_inode(state, ty, write_result, *current_inode);
+        let inode = write_inode(state, ty, write_result, current_inode);
 
         let (name_offset, name_len) = {
             let name_len: u16 = entry.name.len().try_into().context("file name too long")?;
@@ -317,13 +324,13 @@ fn allocate_and_write_dir(
 
             log::debug!(
                 "Linking inode {} into dir entry index {}, file name `{}`",
-                current_inode,
+                inode,
                 index,
                 String::from_utf8_lossy(&entry.name)
             );
 
             *direntry = initfs::DirEntry {
-                inode: (*current_inode).into(),
+                inode: inode.into(),
                 name_len: name_len.into(),
                 name_offset: initfs::Offset(name_offset.into()),
             };
@@ -343,18 +350,22 @@ fn allocate_and_write_dir(
         offset: entry_table_offset,
     })
 }
-fn allocate_contents(state: &mut State, dir: &Dir) -> Result<()> {
-    let start_inode = 0;
-    let mut current_inode = start_inode;
+fn allocate_contents(state: &mut State, dir: &Dir) -> Result<initfs::U16> {
+    let mut current_inode = 0;
 
     let write_result = allocate_and_write_dir(state, dir, &mut current_inode)
         .context("failed to allocate and write all directories and files")?;
 
-    write_inode(state, initfs::InodeType::Dir, write_result, start_inode);
+    let root_inode = write_inode(
+        state,
+        initfs::InodeType::Dir,
+        write_result,
+        &mut current_inode,
+    );
 
-    state.inode_count = current_inode + 1;
+    state.inode_count = current_inode;
 
-    Ok(())
+    Ok(root_inode.into())
 }
 
 fn write_inode_table(state: &mut State) -> Result<Offset> {
@@ -485,8 +496,7 @@ pub fn archive(
         file: guard,
         offset: 0,
         max_size,
-        // Include root directory.
-        inode_count: 1,
+        inode_count: 0,
         buffer: vec![0_u8; BUFFER_SIZE].into_boxed_slice(),
         inode_table: [None; 65536],
     };
@@ -512,7 +522,7 @@ pub fn archive(
     })?;
     let bootstrap_entry = elf_entry(&bootstrap_data);
 
-    allocate_contents(&mut state, &root)?;
+    let root_inode = allocate_contents(&mut state, &root)?;
 
     let inode_table_offset = write_inode_table(&mut state)?;
 
@@ -543,6 +553,7 @@ pub fn archive(
                 .len()
                 .into(),
             page_size: PAGE_SIZE.into(),
+            root_inode,
         };
         write_all_at(&state.file, &header_bytes, header_offset, "writing header")
             .context("failed to write header")?;

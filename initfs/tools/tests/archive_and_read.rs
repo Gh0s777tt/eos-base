@@ -86,7 +86,7 @@ fn archive_and_read() -> Result<()> {
     let filesystem =
         redox_initfs::InitFs::new(&data, None).context("failed to parse archive header")?;
     let inode = filesystem
-        .get_inode(redox_initfs::InitFs::ROOT_INODE)
+        .get_inode(filesystem.root_inode())
         .ok_or_else(|| anyhow!("Failed to get root inode"))?;
 
     let tree = build_tree(filesystem, inode)?;

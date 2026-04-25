@@ -268,8 +268,9 @@ impl<'initfs> InitFs<'initfs> {
         plain::slice_from_bytes::<InodeHeader>(inode_table_bytes)
             .expect("expected inode struct alignment to be 1")
     }
-    pub const ROOT_INODE: Inode = Inode(0);
-
+    pub fn root_inode(&self) -> Inode {
+        Inode(self.get_header_assume_valid().root_inode.get())
+    }
     pub fn all_inodes(&self) -> impl Iterator<Item = Inode> {
         (0..self.inode_count()).map(Inode)
     }
