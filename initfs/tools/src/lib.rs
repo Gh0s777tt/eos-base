@@ -57,7 +57,7 @@ fn write_all_at(file: &File, buf: &[u8], offset: u64, r#where: &str) -> Result<(
     Ok(())
 }
 
-fn read_directory(state: &mut State, path: &Path, root_path: &Path) -> Result<Dir> {
+fn read_directory(path: &Path, root_path: &Path) -> Result<Dir> {
     let read_dir = path
         .read_dir()
         .with_context(|| anyhow!("failed to read directory `{}`", path.to_string_lossy(),))?;
@@ -106,7 +106,7 @@ fn read_directory(state: &mut State, path: &Path, root_path: &Path) -> Result<Di
                     anyhow!("failed to open file `{}`", entry.path().to_string_lossy(),)
                 })?)
             } else if file_type.is_dir() {
-                EntryKind::Dir(read_directory(state, &entry.path(), root_path)?)
+                EntryKind::Dir(read_directory(&entry.path(), root_path)?)
             } else if file_type.is_symlink() {
                 let link_file_path = entry.path();
 
@@ -137,12 +137,6 @@ fn read_directory(state: &mut State, path: &Path, root_path: &Path) -> Result<Di
                     entry.path().to_string_lossy()
                 ));
             };
-
-            // TODO: Allow the user to specify a lower limit than u16::MAX.
-            state.inode_count = state
-                .inode_count
-                .checked_add(1)
-                .ok_or_else(|| anyhow!("exceeded the maximum inode limit"))?;
 
             Ok(Entry {
                 kind: entry_kind,
@@ -358,10 +352,14 @@ fn allocate_contents(state: &mut State, dir: &Dir) -> Result<()> {
 
     write_inode(state, initfs::InodeType::Dir, write_result, start_inode);
 
+    state.inode_count = current_inode + 1;
+
     Ok(())
 }
 
 fn write_inode_table(state: &mut State) -> Result<Offset> {
+    log::debug!("there are {} inodes", state.inode_count);
+
     let inode_size: u32 = std::mem::size_of::<initfs::InodeHeader>()
         .try_into()
         .expect("inode header length cannot fit within u32");
@@ -448,6 +446,9 @@ pub fn archive(
         bootstrap_code,
     }: &Args,
 ) -> Result<()> {
+    let root_path = source;
+    let root = read_directory(root_path, root_path).context("failed to read root")?;
+
     let previous_extension = destination_path.extension().map_or("", |ext| {
         ext.to_str()
             .expect("expected destination path to be valid UTF-8")
@@ -489,11 +490,6 @@ pub fn archive(
         buffer: vec![0_u8; BUFFER_SIZE].into_boxed_slice(),
         inode_table: [None; 65536],
     };
-
-    let root_path = source;
-    let root = read_directory(&mut state, root_path, root_path).context("failed to read root")?;
-
-    log::debug!("there are {} inodes", state.inode_count);
 
     // NOTE: The header is always stored at offset zero.
     let header_offset = bump_alloc(&mut state, 4096, "allocate header")?;
