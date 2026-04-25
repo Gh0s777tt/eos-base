@@ -8,7 +8,7 @@ use std::os::unix::fs::{FileExt, FileTypeExt, PermissionsExt};
 
 use anyhow::{anyhow, bail, Context, Result};
 
-use redox_initfs::types as initfs;
+use redox_initfs::types::{self as initfs, Offset};
 
 pub const KIBIBYTE: u64 = 1024;
 pub const MEBIBYTE: u64 = KIBIBYTE * 1024;
@@ -43,7 +43,7 @@ struct State<'path> {
     max_size: u64,
     inode_count: u16,
     buffer: Box<[u8]>,
-    inode_table_offset: u32,
+    inode_table: [Option<initfs::InodeHeader>; 65536],
 }
 
 fn write_all_at(file: &File, buf: &[u8], offset: u64, r#where: &str) -> Result<()> {
@@ -235,40 +235,12 @@ fn allocate_and_write_link(state: &mut State, link: &Path) -> Result<WriteResult
     Ok(WriteResult { size, offset })
 }
 
-fn write_inode(
-    state: &mut State,
-    ty: initfs::InodeType,
-    write_result: WriteResult,
-    inode: u16,
-) -> Result<()> {
-    let inode_size: u32 = std::mem::size_of::<initfs::InodeHeader>()
-        .try_into()
-        .expect("inode header length cannot fit within u32");
-
-    // TODO: Use main buffer and write in bulk.
-    let mut inode_buf = [0_u8; std::mem::size_of::<initfs::InodeHeader>()];
-
-    let inode_hdr = plain::from_mut_bytes::<initfs::InodeHeader>(&mut inode_buf)
-        .expect("expected inode struct to have alignment 1, and buffer size to match");
-
-    *inode_hdr = initfs::InodeHeader {
+fn write_inode(state: &mut State, ty: initfs::InodeType, write_result: WriteResult, inode: u16) {
+    state.inode_table[usize::from(inode)] = Some(initfs::InodeHeader {
         type_: (ty as u32).into(),
         length: initfs::Length(write_result.size.into()),
         offset: initfs::Offset(write_result.offset.into()),
-    };
-
-    log::debug!(
-        "Writing inode index {} from offset {}",
-        inode,
-        state.inode_table_offset
-    );
-    write_all_at(
-        &state.file,
-        &inode_buf,
-        u64::from(state.inode_table_offset + u32::from(inode) * inode_size),
-        "write_inode",
-    )
-    .context("failed to write inode struct to disk image")
+    });
 }
 fn allocate_and_write_dir(
     state: &mut State,
@@ -328,7 +300,7 @@ fn allocate_and_write_dir(
             .expect("expected dir entry count not to exceed u32");
 
         *current_inode += 1;
-        write_inode(state, ty, write_result, *current_inode)?;
+        write_inode(state, ty, write_result, *current_inode);
 
         let (name_offset, name_len) = {
             let name_len: u16 = entry.name.len().try_into().context("file name too long")?;
@@ -377,14 +349,62 @@ fn allocate_and_write_dir(
         offset: entry_table_offset,
     })
 }
-fn allocate_contents_and_write_inodes(state: &mut State, dir: &Dir) -> Result<()> {
+fn allocate_contents(state: &mut State, dir: &Dir) -> Result<()> {
     let start_inode = 0;
     let mut current_inode = start_inode;
 
     let write_result = allocate_and_write_dir(state, dir, &mut current_inode)
         .context("failed to allocate and write all directories and files")?;
 
-    write_inode(state, initfs::InodeType::Dir, write_result, start_inode)
+    write_inode(state, initfs::InodeType::Dir, write_result, start_inode);
+
+    Ok(())
+}
+
+fn write_inode_table(state: &mut State) -> Result<Offset> {
+    let inode_size: u32 = std::mem::size_of::<initfs::InodeHeader>()
+        .try_into()
+        .expect("inode header length cannot fit within u32");
+
+    let inode_table_length = {
+        u64::from(inode_size)
+            .checked_mul(u64::from(state.inode_count))
+            .ok_or_else(|| anyhow!("inode table too large"))?
+    };
+
+    let inode_table_offset = bump_alloc(state, inode_table_length, "allocate inode table")?;
+    let inode_table_offset =
+        u32::try_from(inode_table_offset).with_context(|| "inode table located too far away")?;
+
+    for (i, inode) in state.inode_table[..usize::from(state.inode_count)]
+        .iter()
+        .enumerate()
+    {
+        // TODO: Use main buffer and write in bulk.
+        let mut inode_buf = [0_u8; std::mem::size_of::<initfs::InodeHeader>()];
+
+        let inode_hdr = plain::from_mut_bytes::<initfs::InodeHeader>(&mut inode_buf)
+            .expect("expected inode struct to have alignment 1, and buffer size to match");
+
+        *inode_hdr = inode.unwrap();
+
+        log::debug!(
+            "Writing inode index {} from offset {}",
+            i,
+            inode_table_offset
+        );
+        write_all_at(
+            &state.file,
+            &inode_buf,
+            u64::from(inode_table_offset + u32::try_from(i).unwrap() * inode_size),
+            "write_inode",
+        )
+        .context("failed to write inode struct to disk image")?;
+    }
+
+    let inode_table_offset = initfs::Offset(inode_table_offset.into());
+
+    Ok(inode_table_offset)
 }
 
 struct OutputImageGuard<'a> {
@@ -467,7 +487,7 @@ pub fn archive(
         // Include root directory.
         inode_count: 1,
         buffer: vec![0_u8; BUFFER_SIZE].into_boxed_slice(),
-        inode_table_offset: 0,
+        inode_table: [None; 65536],
     };
 
     let root_path = source;
@@ -496,29 +516,9 @@ pub fn archive(
     })?;
     let bootstrap_entry = elf_entry(&bootstrap_data);
 
-    let inode_table_length = {
-        let inode_entry_size: u64 = std::mem::size_of::<initfs::InodeHeader>()
-            .try_into()
-            .expect("expected table entry size to fit");
+    allocate_contents(&mut state, &root)?;
 
-        inode_entry_size
-            .checked_mul(u64::from(state.inode_count))
-            .ok_or_else(|| anyhow!("inode table too large"))?
-    };
-
-    let inode_table_offset = bump_alloc(&mut state, inode_table_length, "allocate inode table")?;
-
-    // Finally, write the header to the disk image.
-
-    let inode_table_offset = initfs::Offset(
-        u32::try_from(inode_table_offset)
-            .with_context(|| "inode table located too far away")?
-            .into(),
-    );
-
-    state.inode_table_offset = inode_table_offset.0.get();
-
-    allocate_contents_and_write_inodes(&mut state, &root)?;
+    let inode_table_offset = write_inode_table(&mut state)?;
 
     let current_system_time = std::time::SystemTime::now();
 
