@@ -24,16 +24,13 @@ const PAGE_SIZE: u16 = 4096;
 
 enum EntryKind {
     File { file: File, executable: bool },
-    Dir(Dir),
+    Dir(Vec<Entry>),
     Link(PathBuf),
 }
 
 struct Entry {
     name: Vec<u8>,
     kind: EntryKind,
-}
-struct Dir {
-    entries: Vec<Entry>,
 }
 
 struct State<'path> {
@@ -55,7 +52,7 @@ fn write_all_at(file: &File, buf: &[u8], offset: u64, r#where: &str) -> Result<(
     Ok(())
 }
 
-fn read_directory(path: &Path, root_path: &Path) -> Result<Dir> {
+fn read_directory(path: &Path, root_path: &Path) -> Result<Vec<Entry>> {
     let read_dir = path
         .read_dir()
         .with_context(|| anyhow!("failed to read directory `{}`", path.to_string_lossy(),))?;
@@ -147,7 +144,7 @@ fn read_directory(path: &Path, root_path: &Path) -> Result<Dir> {
         })
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(Dir { entries })
+    Ok(entries)
 }
 
 fn bump_alloc(state: &mut State, size: u64, why: &str) -> Result<u64> {
@@ -230,10 +227,10 @@ fn allocate_and_write_link(state: &mut State, link: &Path) -> Result<WriteResult
     Ok(WriteResult { size, offset })
 }
 
-fn allocate_and_write_dir(state: &mut State, dir: &Dir) -> Result<WriteResult> {
+fn allocate_and_write_dir(state: &mut State, dir: &[Entry]) -> Result<WriteResult> {
     let entry_size =
         u16::try_from(std::mem::size_of::<initfs::DirEntry>()).context("entry size too large")?;
-    let entry_count = u16::try_from(dir.entries.len()).context("too many subdirectories")?;
+    let entry_count = u16::try_from(dir.len()).context("too many subdirectories")?;
 
     let entry_table_length = u32::from(entry_count)
         .checked_mul(u32::from(entry_size))
@@ -245,7 +242,7 @@ fn allocate_and_write_dir(state: &mut State, dir: &Dir) -> Result<WriteResult> {
             .try_into()
             .context("directory entries offset too high")?;
 
-    for (index, entry) in dir.entries.iter().enumerate() {
+    for (index, entry) in dir.iter().enumerate() {
         let (write_result, ty) = match entry.kind {
             EntryKind::Dir(ref subdir) => {
                 let write_result = allocate_and_write_dir(state, subdir).with_context(|| {
@@ -334,7 +331,7 @@ fn allocate_and_write_dir(state: &mut State, dir: &Dir) -> Result<WriteResult> {
         offset: entry_table_offset,
     })
 }
-fn allocate_contents(state: &mut State, dir: &Dir) -> Result<initfs::U16> {
+fn allocate_contents(state: &mut State, dir: &[Entry]) -> Result<initfs::U16> {
     let write_result = allocate_and_write_dir(state, dir)
         .context("failed to allocate and write all directories and files")?;
 
