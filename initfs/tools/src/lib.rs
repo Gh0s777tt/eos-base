@@ -41,9 +41,8 @@ struct State<'path> {
     file: OutputImageGuard<'path>,
     offset: u64,
     max_size: u64,
-    inode_count: u16,
     buffer: Box<[u8]>,
-    inode_table: [Option<initfs::InodeHeader>; 65536],
+    inode_table: InodeTable,
 }
 
 fn write_all_at(file: &File, buf: &[u8], offset: u64, r#where: &str) -> Result<()> {
@@ -229,26 +228,7 @@ fn allocate_and_write_link(state: &mut State, link: &Path) -> Result<WriteResult
     Ok(WriteResult { size, offset })
 }
 
-fn write_inode(
-    state: &mut State,
-    ty: initfs::InodeType,
-    write_result: WriteResult,
-    current_inode: &mut u16,
-) -> u16 {
-    let inode = *current_inode;
-    *current_inode += 1;
-    state.inode_table[usize::from(inode)] = Some(initfs::InodeHeader {
-        type_: (ty as u32).into(),
-        length: initfs::Length(write_result.size.into()),
-        offset: initfs::Offset(write_result.offset.into()),
-    });
-    inode
-}
-fn allocate_and_write_dir(
-    state: &mut State,
-    dir: &Dir,
-    current_inode: &mut u16,
-) -> Result<WriteResult> {
+fn allocate_and_write_dir(state: &mut State, dir: &Dir) -> Result<WriteResult> {
     let entry_size =
         u16::try_from(std::mem::size_of::<initfs::DirEntry>()).context("entry size too large")?;
     let entry_count = u16::try_from(dir.entries.len()).context("too many subdirectories")?;
@@ -266,13 +246,12 @@ fn allocate_and_write_dir(
     for (index, entry) in dir.entries.iter().enumerate() {
         let (write_result, ty) = match entry.kind {
             EntryKind::Dir(ref subdir) => {
-                let write_result = allocate_and_write_dir(state, subdir, current_inode)
-                    .with_context(|| {
-                        anyhow!(
-                            "failed to copy directory entries from `{}` into image",
-                            String::from_utf8_lossy(&entry.name)
-                        )
-                    })?;
+                let write_result = allocate_and_write_dir(state, subdir).with_context(|| {
+                    anyhow!(
+                        "failed to copy directory entries from `{}` into image",
+                        String::from_utf8_lossy(&entry.name)
+                    )
+                })?;
 
                 (write_result, initfs::InodeType::Dir)
             }
@@ -301,7 +280,7 @@ fn allocate_and_write_dir(
             .try_into()
             .expect("expected dir entry count not to exceed u32");
 
-        let inode = write_inode(state, ty, write_result, current_inode);
+        let inode = state.inode_table.allocate(ty, write_result);
 
         let (name_offset, name_len) = {
             let name_len: u16 = entry.name.len().try_into().context("file name too long")?;
@@ -351,25 +330,45 @@ fn allocate_and_write_dir(
     })
 }
 fn allocate_contents(state: &mut State, dir: &Dir) -> Result<initfs::U16> {
-    let mut current_inode = 0;
-
-    let write_result = allocate_and_write_dir(state, dir, &mut current_inode)
+    let write_result = allocate_and_write_dir(state, dir)
         .context("failed to allocate and write all directories and files")?;
 
-    let root_inode = write_inode(
-        state,
-        initfs::InodeType::Dir,
-        write_result,
-        &mut current_inode,
-    );
-
-    state.inode_count = current_inode;
+    let root_inode = state
+        .inode_table
+        .allocate(initfs::InodeType::Dir, write_result);
 
     Ok(root_inode.into())
 }
 
+struct InodeTable {
+    entries: Vec<initfs::InodeHeader>,
+}
+
+impl InodeTable {
+    fn new() -> Self {
+        Self { entries: vec![] }
+    }
+
+    fn count(&self) -> u16 {
+        self.entries
+            .len()
+            .try_into()
+            .expect("inode count too large")
+    }
+
+    fn allocate(&mut self, ty: initfs::InodeType, write_result: WriteResult) -> u16 {
+        let inode = self.entries.len();
+        self.entries.push(initfs::InodeHeader {
+            type_: (ty as u32).into(),
+            length: initfs::Length(write_result.size.into()),
+            offset: initfs::Offset(write_result.offset.into()),
+        });
+        inode.try_into().expect("inode count too large")
+    }
+}
+
 fn write_inode_table(state: &mut State) -> Result<Offset> {
-    log::debug!("there are {} inodes", state.inode_count);
+    log::debug!("there are {} inodes", state.inode_table.count());
 
     let inode_size: u32 = std::mem::size_of::<initfs::InodeHeader>()
         .try_into()
@@ -377,7 +376,7 @@ fn write_inode_table(state: &mut State) -> Result<Offset> {
 
     let inode_table_length = {
         u64::from(inode_size)
-            .checked_mul(u64::from(state.inode_count))
+            .checked_mul(u64::from(state.inode_table.count()))
             .ok_or_else(|| anyhow!("inode table too large"))?
     };
 
@@ -385,17 +384,14 @@ fn write_inode_table(state: &mut State) -> Result<Offset> {
     let inode_table_offset =
         u32::try_from(inode_table_offset).with_context(|| "inode table located too far away")?;
 
-    for (i, inode) in state.inode_table[..usize::from(state.inode_count)]
-        .iter()
-        .enumerate()
-    {
+    for (i, inode) in state.inode_table.entries.iter().enumerate() {
         // TODO: Use main buffer and write in bulk.
         let mut inode_buf = [0_u8; std::mem::size_of::<initfs::InodeHeader>()];
 
         let inode_hdr = plain::from_mut_bytes::<initfs::InodeHeader>(&mut inode_buf)
             .expect("expected inode struct to have alignment 1, and buffer size to match");
 
-        *inode_hdr = inode.unwrap();
+        *inode_hdr = *inode;
 
         log::debug!(
             "Writing inode index {} from offset {}",
@@ -496,9 +492,8 @@ pub fn archive(
         file: guard,
         offset: 0,
         max_size,
-        inode_count: 0,
         buffer: vec![0_u8; BUFFER_SIZE].into_boxed_slice(),
-        inode_table: [None; 65536],
+        inode_table: InodeTable::new(),
     };
 
     // NOTE: The header is always stored at offset zero.
@@ -543,7 +538,7 @@ pub fn archive(
                 sec: time_since_epoch.as_secs().into(),
                 nsec: time_since_epoch.subsec_nanos().into(),
             },
-            inode_count: state.inode_count.into(),
+            inode_count: state.inode_table.count().into(),
             inode_table_offset,
             bootstrap_entry: bootstrap_entry.into(),
             initfs_size: state
