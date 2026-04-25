@@ -1,5 +1,5 @@
 use std::convert::{TryFrom, TryInto};
-use std::fs::{DirEntry, File, Metadata, OpenOptions};
+use std::fs::{DirEntry, File, OpenOptions};
 use std::io::{prelude::*, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,7 @@ pub const DEFAULT_MAX_SIZE: u64 = 64 * MEBIBYTE;
 const PAGE_SIZE: u16 = 4096;
 
 enum EntryKind {
-    File(File),
+    File { file: File, executable: bool },
     Dir(Dir),
     Link(PathBuf),
 }
@@ -31,7 +31,6 @@ enum EntryKind {
 struct Entry {
     name: Vec<u8>,
     kind: EntryKind,
-    metadata: Metadata,
 }
 struct Dir {
     entries: Vec<Entry>,
@@ -101,9 +100,13 @@ fn read_directory(path: &Path, root_path: &Path) -> Result<Dir> {
             } else if file_type.is_char_device() {
                 return unsupported_type("character device", &entry);
             } else if file_type.is_file() {
-                EntryKind::File(File::open(entry.path()).with_context(|| {
-                    anyhow!("failed to open file `{}`", entry.path().to_string_lossy(),)
-                })?)
+                let executable = metadata.permissions().mode() & 0o100 != 0;
+                EntryKind::File {
+                    file: File::open(entry.path()).with_context(|| {
+                        anyhow!("failed to open file `{}`", entry.path().to_string_lossy(),)
+                    })?,
+                    executable,
+                }
             } else if file_type.is_dir() {
                 EntryKind::Dir(read_directory(&entry.path(), root_path)?)
             } else if file_type.is_symlink() {
@@ -139,7 +142,6 @@ fn read_directory(path: &Path, root_path: &Path) -> Result<Dir> {
 
             Ok(Entry {
                 kind: entry_kind,
-                metadata,
                 name,
             })
         })
@@ -256,11 +258,14 @@ fn allocate_and_write_dir(state: &mut State, dir: &Dir) -> Result<WriteResult> {
                 (write_result, initfs::InodeType::Dir)
             }
 
-            EntryKind::File(ref file) => {
+            EntryKind::File {
+                ref file,
+                executable,
+            } => {
                 let write_result = allocate_and_write_file(state, file)
                     .context("failed to copy file into image")?;
 
-                let type_ = if entry.metadata.permissions().mode() & 0o100 != 0 {
+                let type_ = if executable {
                     initfs::InodeType::ExecutableFile
                 } else {
                     initfs::InodeType::RegularFile
