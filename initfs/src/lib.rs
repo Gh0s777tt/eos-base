@@ -216,9 +216,6 @@ impl<'initfs> InitFs<'initfs> {
 
         Ok(this)
     }
-    pub fn image_creation_time(&self) -> Timespec {
-        self.get_header_assume_valid().creation_time
-    }
     fn get_header_assume_valid(&self) -> &Header {
         plain::from_bytes::<Header>(&self.base[..core::mem::size_of::<Header>()])
             .expect("expected header type to require no alignment, and size to be sufficient")
