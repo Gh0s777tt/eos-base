@@ -1,5 +1,5 @@
 use std::convert::{TryFrom, TryInto};
-use std::fs::{DirEntry, File, Metadata, OpenOptions};
+use std::fs::{DirEntry, File, OpenOptions};
 use std::io::{prelude::*, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -8,10 +8,10 @@ use std::os::unix::fs::{FileExt, FileTypeExt, PermissionsExt};
 
 use anyhow::{anyhow, bail, Context, Result};
 
-use redox_initfs::types::{self as initfs, Offset};
+use redox_initfs::types as initfs;
 
-pub const KIBIBYTE: u64 = 1024;
-pub const MEBIBYTE: u64 = KIBIBYTE * 1024;
+const KIBIBYTE: u64 = 1024;
+const MEBIBYTE: u64 = KIBIBYTE * 1024;
 
 #[cfg(debug_assertions)]
 pub const DEFAULT_MAX_SIZE: u64 = 256 * MEBIBYTE;
@@ -22,19 +22,15 @@ pub const DEFAULT_MAX_SIZE: u64 = 64 * MEBIBYTE;
 // FIXME make this configurable to handle systems with 16k and 64k pages.
 const PAGE_SIZE: u16 = 4096;
 
-enum EntryKind {
-    File(File),
-    Dir(Dir),
+pub enum EntryKind {
+    File { file: File, executable: bool },
+    Dir(Vec<Entry>),
     Link(PathBuf),
 }
 
-struct Entry {
-    name: Vec<u8>,
-    kind: EntryKind,
-    metadata: Metadata,
-}
-struct Dir {
-    entries: Vec<Entry>,
+pub struct Entry {
+    pub name: Vec<u8>,
+    pub kind: EntryKind,
 }
 
 struct State<'path> {
@@ -56,7 +52,7 @@ fn write_all_at(file: &File, buf: &[u8], offset: u64, r#where: &str) -> Result<(
     Ok(())
 }
 
-fn read_directory(path: &Path, root_path: &Path) -> Result<Dir> {
+fn read_directory(path: &Path, root_path: &Path) -> Result<Vec<Entry>> {
     let read_dir = path
         .read_dir()
         .with_context(|| anyhow!("failed to read directory `{}`", path.to_string_lossy(),))?;
@@ -101,9 +97,13 @@ fn read_directory(path: &Path, root_path: &Path) -> Result<Dir> {
             } else if file_type.is_char_device() {
                 return unsupported_type("character device", &entry);
             } else if file_type.is_file() {
-                EntryKind::File(File::open(entry.path()).with_context(|| {
-                    anyhow!("failed to open file `{}`", entry.path().to_string_lossy(),)
-                })?)
+                let executable = metadata.permissions().mode() & 0o100 != 0;
+                EntryKind::File {
+                    file: File::open(entry.path()).with_context(|| {
+                        anyhow!("failed to open file `{}`", entry.path().to_string_lossy(),)
+                    })?,
+                    executable,
+                }
             } else if file_type.is_dir() {
                 EntryKind::Dir(read_directory(&entry.path(), root_path)?)
             } else if file_type.is_symlink() {
@@ -139,13 +139,12 @@ fn read_directory(path: &Path, root_path: &Path) -> Result<Dir> {
 
             Ok(Entry {
                 kind: entry_kind,
-                metadata,
                 name,
             })
         })
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(Dir { entries })
+    Ok(entries)
 }
 
 fn bump_alloc(state: &mut State, size: u64, why: &str) -> Result<u64> {
@@ -228,10 +227,10 @@ fn allocate_and_write_link(state: &mut State, link: &Path) -> Result<WriteResult
     Ok(WriteResult { size, offset })
 }
 
-fn allocate_and_write_dir(state: &mut State, dir: &Dir) -> Result<WriteResult> {
+fn allocate_and_write_dir(state: &mut State, dir: &[Entry]) -> Result<WriteResult> {
     let entry_size =
         u16::try_from(std::mem::size_of::<initfs::DirEntry>()).context("entry size too large")?;
-    let entry_count = u16::try_from(dir.entries.len()).context("too many subdirectories")?;
+    let entry_count = u16::try_from(dir.len()).context("too many subdirectories")?;
 
     let entry_table_length = u32::from(entry_count)
         .checked_mul(u32::from(entry_size))
@@ -243,7 +242,7 @@ fn allocate_and_write_dir(state: &mut State, dir: &Dir) -> Result<WriteResult> {
             .try_into()
             .context("directory entries offset too high")?;
 
-    for (index, entry) in dir.entries.iter().enumerate() {
+    for (index, entry) in dir.iter().enumerate() {
         let (write_result, ty) = match entry.kind {
             EntryKind::Dir(ref subdir) => {
                 let write_result = allocate_and_write_dir(state, subdir).with_context(|| {
@@ -256,11 +255,14 @@ fn allocate_and_write_dir(state: &mut State, dir: &Dir) -> Result<WriteResult> {
                 (write_result, initfs::InodeType::Dir)
             }
 
-            EntryKind::File(ref file) => {
+            EntryKind::File {
+                ref file,
+                executable,
+            } => {
                 let write_result = allocate_and_write_file(state, file)
                     .context("failed to copy file into image")?;
 
-                let type_ = if entry.metadata.permissions().mode() & 0o100 != 0 {
+                let type_ = if executable {
                     initfs::InodeType::ExecutableFile
                 } else {
                     initfs::InodeType::RegularFile
@@ -329,7 +331,7 @@ fn allocate_and_write_dir(state: &mut State, dir: &Dir) -> Result<WriteResult> {
         offset: entry_table_offset,
     })
 }
-fn allocate_contents(state: &mut State, dir: &Dir) -> Result<initfs::U16> {
+fn allocate_contents(state: &mut State, dir: &[Entry]) -> Result<initfs::U16> {
     let write_result = allocate_and_write_dir(state, dir)
         .context("failed to allocate and write all directories and files")?;
 
@@ -367,7 +369,7 @@ impl InodeTable {
     }
 }
 
-fn write_inode_table(state: &mut State) -> Result<Offset> {
+fn write_inode_table(state: &mut State) -> Result<initfs::Offset> {
     log::debug!("there are {} inodes", state.inode_table.count());
 
     let inode_size: u32 = std::mem::size_of::<initfs::InodeHeader>()
@@ -456,6 +458,15 @@ pub fn archive(
     let root_path = source;
     let root = read_directory(root_path, root_path).context("failed to read root")?;
 
+    build_initfs(destination_path, max_size, bootstrap_code, root)
+}
+
+pub fn build_initfs(
+    destination_path: &Path,
+    max_size: u64,
+    bootstrap_code: &Path,
+    root: Vec<Entry>,
+) -> std::result::Result<(), anyhow::Error> {
     let previous_extension = destination_path.extension().map_or("", |ext| {
         ext.to_str()
             .expect("expected destination path to be valid UTF-8")
