@@ -481,8 +481,8 @@ fn main() {
     pcid_interface::pci_daemon(daemon_runner);
 }
 
-fn daemon_runner(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
-    daemon(daemon, pcid_handle).unwrap();
+fn daemon_runner(redox_daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
+    daemon(redox_daemon, pcid_handle).unwrap();
     unreachable!();
 }
 

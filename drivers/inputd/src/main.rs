@@ -588,8 +588,8 @@ fn daemon(daemon: daemon::SchemeDaemon) -> anyhow::Result<()> {
     }
 }
 
-fn daemon_runner(daemon: daemon::SchemeDaemon) -> ! {
-    daemon(daemon).unwrap();
+fn daemon_runner(redox_daemon: daemon::SchemeDaemon) -> ! {
+    daemon(redox_daemon).unwrap();
     unreachable!();
 }
 
