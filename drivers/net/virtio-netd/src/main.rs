@@ -31,11 +31,11 @@ fn main() {
 }
 
 fn daemon_runner(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
-    deamon(daemon, pcid_handle).unwrap();
+    daemon(daemon, pcid_handle).unwrap();
     unreachable!();
 }
 
-fn deamon(
+fn daemon(
     daemon: daemon::Daemon,
     mut pcid_handle: PciFunctionHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {

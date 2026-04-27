@@ -482,11 +482,11 @@ fn main() {
 }
 
 fn daemon_runner(daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
-    deamon(daemon, pcid_handle).unwrap();
+    daemon(daemon, pcid_handle).unwrap();
     unreachable!();
 }
 
-fn deamon(deamon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow::Result<()> {
+fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow::Result<()> {
     common::setup_logging(
         "graphics",
         "pci",
@@ -540,7 +540,7 @@ fn deamon(deamon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow:
         device.transport.clone(),
         has_edid,
     )?;
-    deamon.ready();
+    daemon.ready();
 
     user_data! {
         enum Source {
