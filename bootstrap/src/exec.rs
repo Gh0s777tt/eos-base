@@ -222,16 +222,14 @@ pub fn main() -> ! {
         cwd_fd: Some(cwd_fd.as_raw_fd()),
     };
 
-    let path = "/scheme/initfs/bin/init";
+    let exe_path = "/scheme/initfs/bin/init";
 
     let image_file = FdGuard::new(
-        syscall::openat(extrainfo.ns_fd.unwrap(), path, O_RDONLY | O_CLOEXEC, 0)
+        syscall::openat(extrainfo.ns_fd.unwrap(), exe_path, O_RDONLY | O_CLOEXEC, 0)
             .expect("failed to open init"),
     )
     .to_upper()
     .unwrap();
-
-    let exe_path = alloc::format!("/scheme/initfs{}", path);
 
     let FexecResult::Interp {
         path: interp_path,
