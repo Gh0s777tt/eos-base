@@ -21,7 +21,7 @@ dependencies = [
 [[package]]
 name = "acpi"
 version = "6.1.1"
-source = "git+https://github.com/jackpot51/acpi.git#3dc8a2d98a7a164cbf87e7a86855c4d3bed4de75"
+source = "git+https://gitlab.redox-os.org/redox-os/acpi.git?branch=redox-6.x#90cbe88e13468c7cc80a68c801a3dd2ea8f51d02"
 dependencies = [
  "bit_field",
  "bitflags 2.11.0",

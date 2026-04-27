@@ -152,7 +152,10 @@ pub enum AmlSerdeFieldUpdateRule {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum AmlSerdeReferenceKind {
     RefOf,
-    LocalOrArg,
+    Local,
+    Arg,
+    Index,
+    Named,
     Unresolved,
 }
 
@@ -292,7 +295,10 @@ impl AmlSerdeValue {
             Object::Reference { kind, inner } => AmlSerdeValue::Reference {
                 kind: match kind {
                     ReferenceKind::RefOf => AmlSerdeReferenceKind::RefOf,
-                    ReferenceKind::LocalOrArg => AmlSerdeReferenceKind::LocalOrArg,
+                    ReferenceKind::Local => AmlSerdeReferenceKind::Local,
+                    ReferenceKind::Arg => AmlSerdeReferenceKind::Arg,
+                    ReferenceKind::Index => AmlSerdeReferenceKind::Index,
+                    ReferenceKind::Named => AmlSerdeReferenceKind::Named,
                     ReferenceKind::Unresolved => AmlSerdeReferenceKind::Unresolved,
                 },
                 inner: AmlSerdeValue::from_aml_value(inner.deref()).map(Box::new)?,
@@ -415,7 +421,10 @@ impl AmlSerdeValue {
             AmlSerdeValue::Reference { kind, inner } => Object::Reference {
                 kind: match kind {
                     AmlSerdeReferenceKind::RefOf => ReferenceKind::RefOf,
-                    AmlSerdeReferenceKind::LocalOrArg => ReferenceKind::LocalOrArg,
+                    AmlSerdeReferenceKind::Local => ReferenceKind::Local,
+                    AmlSerdeReferenceKind::Arg => ReferenceKind::Arg,
+                    AmlSerdeReferenceKind::Index => ReferenceKind::Index,
+                    AmlSerdeReferenceKind::Named => ReferenceKind::Named,
                     AmlSerdeReferenceKind::Unresolved => ReferenceKind::Unresolved,
                 },
                 inner: inner.to_aml_object()?.wrap(),
