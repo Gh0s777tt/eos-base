@@ -521,7 +521,7 @@ impl SchemeSync for InputScheme {
     }
 }
 
-fn deamon(daemon: daemon::SchemeDaemon) -> anyhow::Result<()> {
+fn daemon(daemon: daemon::SchemeDaemon) -> anyhow::Result<()> {
     // Create the ":input" scheme.
     let socket_file = Socket::create()?;
     let mut scheme = InputScheme::new();
@@ -589,7 +589,7 @@ fn deamon(daemon: daemon::SchemeDaemon) -> anyhow::Result<()> {
 }
 
 fn daemon_runner(daemon: daemon::SchemeDaemon) -> ! {
-    deamon(daemon).unwrap();
+    daemon(daemon).unwrap();
     unreachable!();
 }
 
