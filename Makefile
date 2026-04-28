@@ -121,11 +121,11 @@ install-base: base $(SYSROOT)/bin/redoxfs
 
 # Device file symlinks
 	@mkdir -pv "$(DESTDIR)/dev"
-	ln -s /scheme/null $(DESTDIR)/dev/null
-	ln -s /scheme/rand $(DESTDIR)/dev/random
-	ln -s /scheme/rand $(DESTDIR)/dev/urandom
-	ln -s /scheme/zero $(DESTDIR)/dev/zero
-	ln -s libc:tty $(DESTDIR)/dev/tty
-	ln -s libc:stdin $(DESTDIR)/dev/stdin
-	ln -s libc:stdout $(DESTDIR)/dev/stdout
-	ln -s libc:stderr $(DESTDIR)/dev/stderr
+	ln -sf /scheme/null $(DESTDIR)/dev/null
+	ln -sf /scheme/rand $(DESTDIR)/dev/random
+	ln -sf /scheme/rand $(DESTDIR)/dev/urandom
+	ln -sf /scheme/zero $(DESTDIR)/dev/zero
+	ln -sf libc:tty $(DESTDIR)/dev/tty
+	ln -sf libc:stdin $(DESTDIR)/dev/stdin
+	ln -sf libc:stdout $(DESTDIR)/dev/stdout
+	ln -sf libc:stderr $(DESTDIR)/dev/stderr
