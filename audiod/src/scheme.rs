@@ -1,7 +1,10 @@
 use redox_scheme::{CallerCtx, OpenResult};
 use scheme_utils::HandleMap;
-use std::collections::VecDeque;
-use std::str;
+use std::{
+    collections::VecDeque,
+    str,
+    sync::{Arc, Mutex},
+};
 use syscall::error::{Error, Result, EACCES, EBADF, EINVAL, ENOENT, EWOULDBLOCK};
 
 use redox_scheme::scheme::SchemeSync;
@@ -20,14 +23,14 @@ enum Handle {
     SchemeRoot,
 }
 
-pub struct AudioScheme {
+pub struct AudioSchemeInner {
     handles: HandleMap<Handle>,
     volume: i32,
 }
 
-impl AudioScheme {
+impl AudioSchemeInner {
     pub fn new() -> Self {
-        AudioScheme {
+        Self {
             handles: HandleMap::new(),
             volume: 50,
         }
@@ -63,9 +66,22 @@ impl AudioScheme {
     }
 }
 
+pub struct AudioScheme {
+    pub inner: Arc<Mutex<AudioSchemeInner>>,
+}
+
+impl AudioScheme {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(AudioSchemeInner::new())),
+        }
+    }
+}
+
 impl SchemeSync for AudioScheme {
     fn scheme_root(&mut self) -> Result<usize> {
-        Ok(self.handles.insert(Handle::SchemeRoot))
+        let mut inner = self.inner.lock().unwrap();
+        Ok(inner.handles.insert(Handle::SchemeRoot))
     }
     fn openat(
         &mut self,
@@ -75,7 +91,9 @@ impl SchemeSync for AudioScheme {
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
+        let mut inner = self.inner.lock().unwrap();
+
+        if !matches!(inner.handles.get(dirfd)?, Handle::SchemeRoot) {
             return Err(Error::new(EACCES));
         }
 
@@ -90,7 +108,7 @@ impl SchemeSync for AudioScheme {
             _ => return Err(Error::new(ENOENT)),
         };
 
-        let id = self.handles.insert(handle);
+        let id = inner.handles.insert(handle);
 
         Ok(OpenResult::ThisScheme { number: id, flags })
     }
@@ -103,8 +121,10 @@ impl SchemeSync for AudioScheme {
         _flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
+        let mut inner = self.inner.lock().unwrap();
+
         //TODO: check flags for readable
-        match self.handles.get_mut(id)? {
+        match inner.handles.get_mut(id)? {
             Handle::Audio { buffer: _ } => {
                 //TODO: audio input?
                 Err(Error::new(EBADF))
@@ -114,7 +134,7 @@ impl SchemeSync for AudioScheme {
                     return Ok(0);
                 };
                 //TODO: should we allocate every time?
-                let bytes = format!("{}", self.volume).into_bytes();
+                let bytes = format!("{}", inner.volume).into_bytes();
                 let src = bytes.get(off..).unwrap_or(&[]);
                 let len = src.len().min(buf.len());
                 buf[..len].copy_from_slice(&src[..len]);
@@ -133,8 +153,10 @@ impl SchemeSync for AudioScheme {
         _flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
+        let mut inner = self.inner.lock().unwrap();
+
         //TODO: check flags for writable
-        match self.handles.get_mut(id)? {
+        match inner.handles.get_mut(id)? {
             Handle::Audio { ref mut buffer } => {
                 if buffer.len() >= HANDLE_BUFFER_SIZE {
                     Err(Error::new(EWOULDBLOCK))
@@ -161,7 +183,7 @@ impl SchemeSync for AudioScheme {
                         .parse::<i32>()
                         .map_err(|_| Error::new(EINVAL))?;
                     if value >= 0 && value <= 100 {
-                        self.volume = value;
+                        inner.volume = value;
                         Ok(buf.len())
                     } else {
                         Err(Error::new(EINVAL))

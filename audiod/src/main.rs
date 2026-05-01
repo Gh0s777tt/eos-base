@@ -14,15 +14,18 @@ use scheme_utils::ReadinessBased;
 
 use daemon::SchemeDaemon;
 
-use self::scheme::AudioScheme;
+use self::scheme::{AudioScheme, AudioSchemeInner};
 
 mod scheme;
 
 extern "C" fn sigusr_handler(_sig: usize) {}
 
-fn thread(scheme: Arc<Mutex<AudioScheme>>, pid: usize, hw_file: Fd) -> Result<()> {
+fn thread(inner_mutex: Arc<Mutex<AudioSchemeInner>>, pid: usize, hw_file: Fd) -> Result<()> {
     loop {
-        let buffer = scheme.lock().unwrap().buffer();
+        let buffer = {
+            let mut inner = inner_mutex.lock().unwrap();
+            inner.buffer()
+        };
         let buffer_u8 = unsafe {
             slice::from_raw_parts(buffer.as_ptr() as *const u8, mem::size_of_val(&buffer))
         };
@@ -52,9 +55,9 @@ fn daemon(daemon: SchemeDaemon) -> anyhow::Result<()> {
 
     let socket = Socket::create().context("failed to create scheme")?;
 
-    let scheme = Arc::new(Mutex::new(AudioScheme::new()));
+    let mut scheme = AudioScheme::new();
 
-    let _ = daemon.ready_sync_scheme(&socket, &mut *scheme.lock().unwrap());
+    let _ = daemon.ready_sync_scheme(&socket, &mut scheme).unwrap();
 
     // Enter a constrained namespace
     let ns = libredox::call::mkns(&[
@@ -65,14 +68,14 @@ fn daemon(daemon: SchemeDaemon) -> anyhow::Result<()> {
     libredox::call::setns(ns).context("failed to set namespace")?;
 
     // Spawn a thread to mix and send audio data
-    let scheme_thread = scheme.clone();
-    let _thread = thread::spawn(move || thread(scheme_thread, pid, hw_file));
+    let inner_thread = scheme.inner.clone();
+    let _thread = thread::spawn(move || thread(inner_thread, pid, hw_file));
 
     let mut readiness = ReadinessBased::new(&socket, 16);
 
     loop {
-        readiness.read_and_process_requests(&mut *scheme.lock().unwrap())?;
-        readiness.poll_all_requests(&mut *scheme.lock().unwrap())?;
+        readiness.read_and_process_requests(&mut scheme)?;
+        readiness.poll_all_requests(&mut scheme)?;
         readiness.write_responses()?;
     }
 }
