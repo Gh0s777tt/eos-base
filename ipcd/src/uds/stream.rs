@@ -1270,15 +1270,17 @@ impl<'sock> SchemeSync for UdsStreamScheme<'sock> {
             if flags & O_CREAT == O_CREAT {
                 self.handle_unnamed_socket(flags, ctx)
             } else {
-                eprintln!(
-                    "open(path: '{}'): Attempting to open an unnamed socket without O_CREAT.",
-                    path
-                );
+                if flags & O_STAT != O_STAT {
+                    eprintln!(
+                        "uds_stream: open({:?}, {:x}): Attempting to open an unnamed socket without O_CREAT.",
+                        path, flags
+                    );
+                }
                 return Err(Error::new(EINVAL));
             }
         } else {
             eprintln!(
-                "open(path: '{}'): Attempting to open a named socket, which is not supported.",
+                "uds_stream: open({:?}): Attempting to open a named socket, which is not supported.",
                 path
             );
             return Err(Error::new(EINVAL));
