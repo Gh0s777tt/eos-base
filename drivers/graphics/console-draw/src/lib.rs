@@ -239,14 +239,24 @@ impl TextScreen {
     ) -> Damage {
         let map = unsafe { &mut map.console_map() };
 
-        let mut min_changed = map.height;
-        let mut max_changed = 0;
-        let mut line_changed = |line| {
-            if line < min_changed {
-                min_changed = line;
+        let mut min_changed_x = map.width;
+        let mut max_changed_x = 0;
+        let mut min_changed_y = map.height;
+        let mut max_changed_y = 0;
+        let mut col_changed = |col| {
+            if col < min_changed_x {
+                min_changed_x = col;
             }
-            if line > max_changed {
-                max_changed = line;
+            if col > max_changed_x {
+                max_changed_x = col;
+            }
+        };
+        let mut line_changed = |line| {
+            if line < min_changed_y {
+                min_changed_y = line;
+            }
+            if line > max_changed_y {
+                max_changed_y = line;
             }
         };
 
@@ -265,6 +275,7 @@ impl TextScreen {
             let x = self.console.state.x;
             let y = self.console.state.y;
             Self::invert(map, x * 8, y * 16, 8, 16);
+            col_changed(x);
             line_changed(y);
         }
 
@@ -278,6 +289,7 @@ impl TextScreen {
                 ..
             } => {
                 Self::char(map, x * 8, y * 16, c, color.as_rgb(), bold, false);
+                col_changed(x);
                 line_changed(y);
             }
             ransid::Event::Input { data } => input.extend(data),
@@ -285,6 +297,9 @@ impl TextScreen {
                 Self::rect(map, x * 8, y * 16, w * 8, h * 16, color.as_rgb());
                 for y2 in y..y + h {
                     line_changed(y2);
+                }                
+                for x2 in x..x + w {
+                    col_changed(x2);
                 }
             }
             ransid::Event::ScreenBuffer { .. } => (),
@@ -320,7 +335,9 @@ impl TextScreen {
                             }
                         }
                     }
-
+                    for col in to_x..to_x + w {
+                        col_changed(col);
+                    }
                     line_changed(to_y + y);
                 }
             }
@@ -338,12 +355,11 @@ impl TextScreen {
             line_changed(y);
         }
 
-        let width = map.width.try_into().unwrap();
         let damage = Damage {
-            x: 0,
-            y: u32::try_from(min_changed).unwrap() * 16,
-            width,
-            height: u32::try_from(max_changed.saturating_sub(min_changed) + 1).unwrap() * 16,
+            x: u32::try_from(min_changed_x).unwrap() * 8,
+            y: u32::try_from(min_changed_y).unwrap() * 16,
+            width: u32::try_from(max_changed_x.saturating_sub(min_changed_x) + 1).unwrap() * 8,
+            height: u32::try_from(max_changed_y.saturating_sub(min_changed_y) + 1).unwrap() * 16,
         };
 
         damage
