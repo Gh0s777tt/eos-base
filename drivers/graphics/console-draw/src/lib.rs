@@ -297,7 +297,7 @@ impl TextScreen {
                 Self::rect(map, x * 8, y * 16, w * 8, h * 16, color.as_rgb());
                 for y2 in y..y + h {
                     line_changed(y2);
-                }                
+                }
                 for x2 in x..x + w {
                     col_changed(x2);
                 }
