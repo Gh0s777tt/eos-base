@@ -6,7 +6,7 @@ pub fn init_logger(process_name: &str) {
             OutputBuilder::stdout()
                 .with_ansi_escape_codes()
                 .flush_on_newline(true)
-                .with_filter(log::LevelFilter::Trace)
+                .with_filter(log::LevelFilter::Warn)
                 .build(),
         )
         .with_process_name(process_name.into())
