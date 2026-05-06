@@ -89,7 +89,8 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
                 if scheme.adapter_mut().handle_irq() {
                     irq_file.irq_handle().write(&mut irq).unwrap();
 
-                    scheme.adapter_mut().handle_events();
+                    let (adapter, objects) = scheme.adapter_and_kms_objects_mut();
+                    adapter.handle_events(objects);
                     scheme.tick().unwrap();
                 }
             }

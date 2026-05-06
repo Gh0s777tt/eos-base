@@ -2,6 +2,8 @@ use common::{
     io::{Io, MmioPtr},
     timeout::Timeout,
 };
+use driver_graphics::kms::connector::KmsConnectorStatus;
+use driver_graphics::kms::objects::{KmsFramebuffer, KmsObjects};
 use pcid_interface::{PciFunction, PciFunctionHandle};
 use range_alloc::RangeAllocator;
 use std::{collections::VecDeque, fmt, mem, sync::Arc};
@@ -11,6 +13,7 @@ mod aux;
 mod bios;
 use self::bios::*;
 mod buffer;
+use self::buffer::*;
 mod ddi;
 use self::ddi::*;
 mod dpll;
@@ -28,6 +31,7 @@ use self::pipe::*;
 mod power;
 use self::power::*;
 mod scheme;
+use self::scheme::*;
 mod transcoder;
 use self::transcoder::*;
 
@@ -160,7 +164,6 @@ pub struct Device {
     dpclka_cfgcr0: Option<MmioPtr<u32>>,
     dplls: Vec<Dpll>,
     events: VecDeque<Event>,
-    framebuffers: Vec<DeviceFb>,
     int: Interrupter,
     gttmm: Arc<MmioRegion>,
     ggtt: GlobalGtt,
@@ -422,7 +425,6 @@ impl Device {
             dpclka_cfgcr0,
             dplls,
             events: VecDeque::new(),
-            framebuffers: Vec::new(),
             int,
             gttmm,
             ggtt,
@@ -435,17 +437,36 @@ impl Device {
         })
     }
 
-    pub fn init_inner(&mut self) {
+    fn add_kms_pipe(objects: &mut KmsObjects<Self>, pipe_idx: usize, fb: KmsFramebuffer<Self>) {
+        let crtc_id = objects.add_crtc(Crtc { pipe_idx }, ());
+
+        let connector_id = objects.add_connector((), (), &[crtc_id]);
+        let mut connector = objects.get_connector(connector_id).unwrap().lock().unwrap();
+        connector.connection = KmsConnectorStatus::Connected;
+        connector.update_from_size(fb.width, fb.height);
+        drop(connector);
+
+        let fb_id = objects.add_framebuffer(fb);
+        objects
+            .get_crtc(crtc_id)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .state
+            .fb_id = Some(fb_id);
+    }
+
+    pub fn init_inner(&mut self, objects: &mut KmsObjects<Self>) {
         // Discover current framebuffers
         self.alloc_buffers.reset();
-        self.framebuffers.clear();
         for pipe in self.pipes.iter() {
             for plane in pipe.planes.iter() {
                 if plane.ctl.readf(PLANE_CTL_ENABLE) {
                     plane.fetch_modeset(&mut self.alloc_buffers);
 
-                    self.framebuffers
-                        .push(plane.fetch_framebuffer(&self.gm, &mut self.ggtt));
+                    let fb = plane.fetch_framebuffer(&self.gm, &mut self.ggtt);
+
+                    Self::add_kms_pipe(objects, pipe.index, fb);
                 }
             }
         }
@@ -453,14 +474,15 @@ impl Device {
         // Probe all DDIs
         let ddi_names: Vec<&str> = self.ddis.iter().map(|ddi| ddi.name).collect();
         for ddi_name in ddi_names {
-            self.probe_ddi(ddi_name).expect("failed to probe DDI");
+            self.probe_ddi(objects, ddi_name)
+                .expect("failed to probe DDI");
         }
 
         self.dump();
 
         log::info!(
             "device initialized with {} framebuffers",
-            self.framebuffers.len()
+            objects.fb_ids().len()
         );
 
         // Enable SDE interrupts
@@ -522,7 +544,7 @@ impl Device {
         }
     }
 
-    pub fn probe_ddi(&mut self, name: &str) -> Result<bool> {
+    pub fn probe_ddi(&mut self, objects: &mut KmsObjects<Self>, name: &str) -> Result<bool> {
         let Some(ddi) = self.ddis.iter_mut().find(|ddi| ddi.name == name) else {
             log::warn!("DDI {} not found", name);
             return Err(Error::new(EIO));
@@ -729,12 +751,23 @@ impl Device {
                     let width = timing.horizontal_active_pixels as u32;
                     let height = timing.vertical_active_lines as u32;
 
-                    let fb = DeviceFb::alloc(&self.gm, &mut self.ggtt, width, height)?;
+                    let (buffer, stride) =
+                        GpuBuffer::alloc_dumb(&self.gm, &mut self.ggtt, width, height)?;
+
+                    let fb = KmsFramebuffer {
+                        width,
+                        height,
+                        pitch: stride,
+                        bpp: 32,
+                        depth: 32,
+                        buffer: Arc::new(buffer),
+                        driver_data: (),
+                    };
 
                     plane.modeset(&mut self.alloc_buffers)?;
-                    plane.set_framebuffer(&fb);
+                    plane.set_framebuffer(Some(&fb));
 
-                    self.framebuffers.push(fb);
+                    Self::add_kms_pipe(objects, pipe.index, fb);
                 }
 
                 //TODO: VGA and panel fitter steps?
@@ -938,14 +971,14 @@ impl Device {
         had_irq
     }
 
-    pub fn handle_events(&mut self) {
+    pub fn handle_events(&mut self, objects: &mut KmsObjects<Self>) {
         while let Some(event) = self.events.pop_front() {
             match event {
                 Event::DdiHotplug(ddi_name) => {
                     log::info!("DDI {} plugged", ddi_name);
                     for _attempt in 0..4 {
                         //TODO: gmbus times out!
-                        match self.probe_ddi(ddi_name) {
+                        match self.probe_ddi(objects, ddi_name) {
                             Ok(true) => {
                                 break;
                             }

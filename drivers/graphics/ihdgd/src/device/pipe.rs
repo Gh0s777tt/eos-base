@@ -1,57 +1,18 @@
+use std::sync::Arc;
+
 use common::io::{Io, MmioPtr};
+use driver_graphics::kms::objects::KmsFramebuffer;
 use range_alloc::RangeAllocator;
 use syscall::error::Result;
 use syscall::{Error, EIO};
 
 use super::buffer::GpuBuffer;
-use super::{GlobalGtt, MmioRegion};
+use super::{Device, GlobalGtt, MmioRegion};
 
 pub const PLANE_CTL_ENABLE: u32 = 1 << 31;
 
 pub const PLANE_WM_ENABLE: u32 = 1 << 31;
 pub const PLANE_WM_LINES_SHIFT: u32 = 14;
-
-#[derive(Debug)]
-pub struct DeviceFb {
-    pub buffer: GpuBuffer,
-    pub width: u32,
-    pub height: u32,
-    pub stride: u32,
-}
-
-impl DeviceFb {
-    pub unsafe fn new(
-        gm: &MmioRegion,
-        surf: u32,
-        width: u32,
-        height: u32,
-        stride: u32,
-        clear: bool,
-    ) -> Self {
-        Self {
-            buffer: unsafe { GpuBuffer::new(gm, surf, stride * height, clear) },
-            width,
-            height,
-            stride,
-        }
-    }
-
-    pub fn alloc(
-        gm: &MmioRegion,
-        ggtt: &mut GlobalGtt,
-        width: u32,
-        height: u32,
-    ) -> syscall::Result<Self> {
-        let (buffer, stride) = GpuBuffer::alloc_dumb(gm, ggtt, width, height)?;
-
-        Ok(DeviceFb {
-            buffer,
-            width,
-            height,
-            stride,
-        })
-    }
-}
 
 pub struct Plane {
     pub name: &'static str,
@@ -112,7 +73,11 @@ impl Plane {
         Ok(())
     }
 
-    pub fn fetch_framebuffer(&self, gm: &MmioRegion, ggtt: &mut GlobalGtt) -> DeviceFb {
+    pub fn fetch_framebuffer(
+        &self,
+        gm: &MmioRegion,
+        ggtt: &mut GlobalGtt,
+    ) -> KmsFramebuffer<Device> {
         let size = self.size.read();
         let width = (size & 0xFFFF) + 1;
         let height = ((size >> 16) & 0xFFFF) + 1;
@@ -124,12 +89,27 @@ impl Plane {
         let surf_size = (stride * height).next_multiple_of(4096);
         ggtt.reserve(surf, surf_size);
 
-        unsafe { DeviceFb::new(gm, surf, width, height, stride, true) }
+        let buffer = unsafe { GpuBuffer::new(gm, surf, stride * height, true) };
+
+        KmsFramebuffer {
+            width,
+            height,
+            pitch: stride,
+            bpp: 32,
+            depth: 32,
+            buffer: Arc::new(buffer),
+            driver_data: (),
+        }
     }
 
-    pub fn set_framebuffer(&mut self, fb: &DeviceFb) {
+    pub fn set_framebuffer(&mut self, fb: Option<&KmsFramebuffer<Device>>) {
+        let Some(fb) = fb else {
+            self.ctl.write(0); // Disable plane
+            return;
+        };
+
         //TODO: documentation on this is not great
-        let stride_64 = fb.stride / 64;
+        let stride_64 = fb.pitch / 64;
 
         self.size.write((fb.width - 1) | ((fb.height - 1) << 16));
         self.stride.write(stride_64);
