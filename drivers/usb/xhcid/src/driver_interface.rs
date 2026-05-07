@@ -59,9 +59,10 @@ pub struct ConfDesc {
     pub attributes: u8,
     pub max_power: u8,
     pub interface_descs: SmallVec<[IfDesc; 1]>,
+    pub unknown_descs: SmallVec<[UnknownDesc; 1]>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct EndpDesc {
     pub kind: u8,
     pub address: u8,
@@ -215,7 +216,7 @@ impl EndpDesc {
             .unwrap_or(false)
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct IfDesc {
     pub kind: u8,
     pub number: u8,
@@ -225,31 +226,26 @@ pub struct IfDesc {
     pub protocol: u8,
     pub interface_str: Option<String>,
     pub endpoints: SmallVec<[EndpDesc; 4]>,
-    pub hid_descs: SmallVec<[HidDesc; 1]>,
+    pub unknown_descs: SmallVec<[UnknownDesc; 1]>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SuperSpeedCmp {
     pub kind: u8,
     pub max_burst: u8,
     pub attributes: u8,
     pub bytes_per_interval: u16,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SuperSpeedPlusIsochCmp {
     pub kind: u8,
     pub bytes_per_interval: u32,
 }
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct HidDesc {
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct UnknownDesc {
+    pub len: u8,
     pub kind: u8,
-    pub hid_spec_release: u16,
-    pub country: u8,
-    pub desc_count: u8,
-    pub desc_ty: u8,
-    pub desc_len: u16,
-    pub optional_desc_ty: u8,
-    pub optional_desc_len: u16,
+    pub all_bytes: Vec<u8>,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct PortReq {

@@ -477,20 +477,6 @@ impl From<usb::EndpointDescriptor> for EndpDesc {
     }
 }
 
-impl From<usb::HidDescriptor> for HidDesc {
-    fn from(d: usb::HidDescriptor) -> Self {
-        Self {
-            kind: d.kind,
-            hid_spec_release: d.hid_spec_release,
-            country: d.country_code,
-            desc_count: d.num_descriptors,
-            desc_ty: d.report_desc_ty,
-            desc_len: d.report_desc_len,
-            optional_desc_ty: d.optional_desc_ty,
-            optional_desc_len: d.optional_desc_len,
-        }
-    }
-}
 
 impl From<usb::SuperSpeedCompanionDescriptor> for SuperSpeedCmp {
     fn from(d: usb::SuperSpeedCompanionDescriptor) -> Self {
@@ -519,9 +505,9 @@ pub enum AnyDescriptor {
     Config(usb::ConfigDescriptor),
     Interface(usb::InterfaceDescriptor),
     Endpoint(usb::EndpointDescriptor),
-    Hid(usb::HidDescriptor),
     SuperSpeedCompanion(usb::SuperSpeedCompanionDescriptor),
     SuperSpeedPlusCompanion(usb::SuperSpeedPlusIsochCmpDescriptor),
+    Unknown(Vec<u8>),
 }
 
 impl AnyDescriptor {
@@ -534,6 +520,7 @@ impl AnyDescriptor {
         let kind = bytes[1];
 
         if bytes.len() < len.into() {
+            error!("Parsed length is bigger than buffer len");
             return None;
         }
 
@@ -543,13 +530,9 @@ impl AnyDescriptor {
                 2 => Self::Config(*plain::from_bytes(bytes).ok()?),
                 4 => Self::Interface(*plain::from_bytes(bytes).ok()?),
                 5 => Self::Endpoint(*plain::from_bytes(bytes).ok()?),
-                33 => Self::Hid(*plain::from_bytes(bytes).ok()?),
                 48 => Self::SuperSpeedCompanion(*plain::from_bytes(bytes).ok()?),
                 49 => Self::SuperSpeedPlusCompanion(*plain::from_bytes(bytes).ok()?),
-                _ => {
-                    //panic!("Descriptor unknown {}: bytes {:#0x?}", kind, bytes);
-                    return None;
-                }
+                _ => Self::Unknown(bytes[..len as usize].iter().cloned().collect()),
             },
             len.into(),
         ))
@@ -563,7 +546,7 @@ impl<const N: usize> Xhci<N> {
         slot: u8,
         desc: usb::InterfaceDescriptor,
         endps: impl IntoIterator<Item = EndpDesc>,
-        hid_descs: impl IntoIterator<Item = HidDesc>,
+        unknown_descs: impl IntoIterator<Item = UnknownDesc>,
         lang_id: u16,
     ) -> Result<IfDesc> {
         Ok(IfDesc {
@@ -582,7 +565,7 @@ impl<const N: usize> Xhci<N> {
             protocol: desc.protocol,
             sub_class: desc.sub_class,
             endpoints: endps.into_iter().collect(),
-            hid_descs: hid_descs.into_iter().collect(),
+            unknown_descs: unknown_descs.into_iter().collect(),
         })
     }
     /// Pushes a command TRB to the command ring, rings the doorbell, and then awaits its Command
@@ -1539,54 +1522,83 @@ impl<const N: usize> Xhci<N> {
             }
 
             let mut interface_descs = SmallVec::new();
+            let mut unknown_descs = SmallVec::new();
+            let mut iface_unknown_descs = SmallVec::<[UnknownDesc; 1]>::new();
             let mut iter = descriptors.into_iter().peekable();
+            
+            let mut cur_iface = None;
+            let mut cur_endpoint = None;
+            let mut endpoints = SmallVec::<[EndpDesc; 4]>::new();
 
             while let Some(item) = iter.next() {
-                if let AnyDescriptor::Interface(idesc) = item {
-                    let mut endpoints = SmallVec::<[EndpDesc; 4]>::new();
-                    let mut hid_descs = SmallVec::<[HidDesc; 1]>::new();
-
-                    while endpoints.len() < idesc.endpoints as usize {
-                        let next = match iter.next() {
-                            Some(AnyDescriptor::Endpoint(n)) => n,
-                            Some(AnyDescriptor::Hid(h)) if idesc.class == 3 => {
-                                hid_descs.push(h.into());
-                                continue;
-                            }
-                            Some(unexpected) => {
-                                log::warn!("expected endpoint, got {:X?}", unexpected);
-                                break;
-                            }
-                            None => break,
-                        };
-                        let mut endp = EndpDesc::from(next);
-
-                        loop {
-                            match iter.peek() {
-                                Some(AnyDescriptor::SuperSpeedCompanion(n)) => {
-                                    endp.ssc = Some(SuperSpeedCmp::from(n.clone()));
-                                    iter.next().unwrap();
+                debug!("Processing descriptor {item:?}");
+                
+                
+                match item {
+                    AnyDescriptor::Interface(idesc) => {
+                        if let Some(cur_idesc) = cur_iface {
+                            if let Some(endp) = cur_endpoint{
+                                if !endpoints.contains(&endp) {
+                                    endpoints.push(endp);
                                 }
-                                Some(AnyDescriptor::SuperSpeedPlusCompanion(n)) => {
-                                    endp.sspc = Some(SuperSpeedPlusIsochCmp::from(n.clone()));
-                                    iter.next().unwrap();
-                                }
-                                _ => break,
                             }
+                            interface_descs.push(
+                                self.new_if_desc(port_id, slot, cur_idesc, endpoints, iface_unknown_descs, lang_id)
+                                    .await?,
+                            );
                         }
-
-                        endpoints.push(endp);
+                        cur_iface = Some(idesc);
+                        endpoints = SmallVec::new();
+                        iface_unknown_descs = SmallVec::new();
+                    },
+                    AnyDescriptor::Endpoint(endpdesc) => {
+                        if let Some(desc) = cur_endpoint {
+                            endpoints.push(desc);
+                        }
+                        cur_endpoint = Some(EndpDesc::from(endpdesc));
+                    },
+                    AnyDescriptor::SuperSpeedCompanion(ssc) => {
+                        if let Some(endp) = cur_endpoint.as_mut() {
+                            endp.ssc = Some(SuperSpeedCmp::from(ssc.clone()));
+                        } else {
+                            error!("Found a superspeedcompanion descriptor before encountering any endpoint descriptor.");
+                        }
+                    },
+                    AnyDescriptor::SuperSpeedPlusCompanion(sscp) => {
+                        if let Some(endp) = cur_endpoint.as_mut() {
+                            endp.sspc = Some(SuperSpeedPlusIsochCmp::from(sscp.clone()));
+                        } else {
+                            error!("Found a superspeedpluscompanion descriptor before encountering any endpoint descriptor.");
+                        }
+                    },
+                    AnyDescriptor::Unknown(bytes) => {
+                        // If we're processing an interface, add the desc to it, otherwise add it to the configuration
+                        if cur_iface.is_none() {
+                            unknown_descs.push(UnknownDesc {len: bytes[0], kind: bytes[1], all_bytes: bytes});
+                        } else {
+                            iface_unknown_descs.push(UnknownDesc {len: bytes[0], kind: bytes[1], all_bytes: bytes});
+                        }
+                    },
+                    _ => {
+                        error!("Found unexpected descriptor {item:?} while parsing config descriptors, skipping");
+                        continue;
                     }
-
-                    interface_descs.push(
-                        self.new_if_desc(port_id, slot, idesc, endpoints, hid_descs, lang_id)
-                            .await?,
-                    );
-                } else {
-                    log::warn!("expected interface, got {:?}", item);
-                    // TODO
-                    //break;
                 }
+            }
+
+            // Push the last endpoint
+            if let Some(endp) = cur_endpoint{
+                if !endpoints.contains(&endp) {
+                    endpoints.push(endp);
+                }
+            }
+            
+            // Push the last interface
+            if let Some(idesc) = cur_iface {
+                        let new_if_desc = self.new_if_desc(port_id, slot, idesc, endpoints, iface_unknown_descs, lang_id).await?;
+                        if !interface_descs.contains(&new_if_desc) {
+                            interface_descs.push(new_if_desc);
+                        }
             }
 
             config_descs.push(ConfDesc {
@@ -1603,6 +1615,7 @@ impl<const N: usize> Xhci<N> {
                 attributes: desc.attributes,
                 max_power: desc.max_power,
                 interface_descs,
+                unknown_descs
             });
         }
 
