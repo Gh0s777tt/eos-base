@@ -229,7 +229,7 @@ macro_rules! define_object_props {
         }
     )* }) => {
         impl$(<$($T$(: $bound)?),*>)? $obj$(<$($T),*>)? {
-            pub(super) fn base_properties() -> Vec<KmsPropertyData<Self>> {
+            fn base_properties() -> Vec<KmsPropertyData<Self>> {
                 vec![$(KmsPropertyData {
                     id: $prop,
                     getter: |$object| $get

@@ -178,7 +178,7 @@ impl<T: GraphicsAdapter> KmsConnector<T> {
     }
 }
 
-pub(crate) fn modeinfo_for_size(width: u32, height: u32) -> drm_mode_modeinfo {
+fn modeinfo_for_size(width: u32, height: u32) -> drm_mode_modeinfo {
     let mut modeinfo = drm_mode_modeinfo {
         // The actual visible display size
         hdisplay: width as u16,

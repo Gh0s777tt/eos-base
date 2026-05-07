@@ -108,7 +108,9 @@ pub trait GraphicsAdapter: Sized + Debug {
         damage: Damage,
     ) -> syscall::Result<()>;
 
-    fn hw_cursor_size(&self) -> Option<(u32, u32)>;
+    // FIXME replace this with an actual plane marked as cursor plane once we
+    // support planes internally.
+    fn has_cursor_plane(&self) -> bool;
     fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Buffer>, dirty_fb: bool);
 }
 
@@ -273,7 +275,7 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
 struct VtState<T: GraphicsAdapter> {
     connector_state: Vec<KmsConnectorState<T>>,
     crtc_state: Vec<KmsCrtcState<T>>,
-    cursor_plane: CursorPlane<T::Buffer>,
+    cursor_plane: Option<CursorPlane<T::Buffer>>,
 }
 
 enum Handle<T: GraphicsAdapter> {
@@ -287,6 +289,7 @@ enum Handle<T: GraphicsAdapter> {
 
 impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     fn get_or_create_vt<'a>(
+        adapter: &T,
         objects: &KmsObjects<T>,
         vts: &'a mut HashMap<usize, VtState<T>>,
         vt: usize,
@@ -300,13 +303,13 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 .crtcs()
                 .map(|crtc| crtc.lock().unwrap().state.clone())
                 .collect(),
-            cursor_plane: CursorPlane {
+            cursor_plane: adapter.has_cursor_plane().then(|| CursorPlane {
                 x: 0,
                 y: 0,
                 hot_x: 0,
                 hot_y: 0,
                 buffer: None,
-            },
+            }),
         })
     }
 
@@ -323,7 +326,8 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
 
         self.active_vt = vt;
 
-        let vt_state = GraphicsSchemeInner::get_or_create_vt(&self.objects, &mut self.vts, vt);
+        let vt_state =
+            GraphicsSchemeInner::get_or_create_vt(&self.adapter, &self.objects, &mut self.vts, vt);
 
         for (connector_idx, connector_state) in vt_state.connector_state.iter().enumerate() {
             let connector_id = self.objects.connector_ids()[connector_idx];
@@ -370,8 +374,8 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 .crtc_id = crtc_id;
         }
 
-        if self.adapter.hw_cursor_size().is_some() {
-            self.adapter.handle_cursor(&vt_state.cursor_plane, true);
+        if let Some(cursor_plane) = &vt_state.cursor_plane {
+            self.adapter.handle_cursor(cursor_plane, true);
         }
     }
 }
@@ -406,7 +410,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 .map_err(|_| Error::new(EINVAL))?;
 
             // Ensure the VT exists such that the rest of the methods can freely access it.
-            Self::get_or_create_vt(&self.objects, &mut self.vts, vt);
+            Self::get_or_create_vt(&self.adapter, &self.objects, &mut self.vts, vt);
 
             Handle::V2 {
                 vt,
@@ -597,7 +601,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
                     let vt_state = self.vts.get_mut(vt).unwrap();
 
-                    let cursor_plane = &mut vt_state.cursor_plane;
+                    let Some(cursor_plane) = &mut vt_state.cursor_plane else {
+                        return Err(Error::new(EINVAL));
+                    };
 
                     let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
                     if update_buffer {
@@ -909,7 +915,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 ipc::MODE_CURSOR2 => ipc::DrmModeCursor2::with(payload, |data| {
                     let vt_state = self.vts.get_mut(vt).unwrap();
 
-                    let cursor_plane = &mut vt_state.cursor_plane;
+                    let Some(cursor_plane) = &mut vt_state.cursor_plane else {
+                        return Err(Error::new(EINVAL));
+                    };
 
                     let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
                     if update_buffer {

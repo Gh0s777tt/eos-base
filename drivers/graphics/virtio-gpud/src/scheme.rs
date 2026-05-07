@@ -246,7 +246,7 @@ impl VirtGpuAdapter<'_> {
 
     fn disable_cursor(&mut self) {
         if self.hidden_cursor.is_none() {
-            let (width, height) = self.hw_cursor_size().unwrap();
+            let (width, height) = (64, 64);
             let (cursor, stride) = self.create_dumb_buffer(width, height);
             unsafe {
                 core::ptr::write_bytes(
@@ -480,8 +480,8 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         })
     }
 
-    fn hw_cursor_size(&self) -> Option<(u32, u32)> {
-        Some((64, 64))
+    fn has_cursor_plane(&self) -> bool {
+        true
     }
 
     fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Buffer>, dirty_fb: bool) {

@@ -18,11 +18,11 @@ use crate::GraphicsAdapter;
 #[derive(Debug)]
 pub struct KmsObjects<T: GraphicsAdapter> {
     next_id: KmsObjectId,
-    pub(crate) connectors: Vec<KmsObjectId>,
-    pub(crate) encoders: Vec<KmsObjectId>,
+    pub(super) connectors: Vec<KmsObjectId>,
+    pub(super) encoders: Vec<KmsObjectId>,
     crtcs: Vec<KmsObjectId>,
     framebuffers: Vec<KmsObjectId>,
-    pub(crate) objects: HashMap<KmsObjectId, KmsObject<T>>,
+    pub(super) objects: HashMap<KmsObjectId, KmsObject<T>>,
     _marker: PhantomData<T>,
 }
 
@@ -41,7 +41,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         objects
     }
 
-    pub(crate) fn add<U: Into<KmsObject<T>>>(&mut self, data: U) -> KmsObjectId {
+    pub(super) fn add<U: Into<KmsObject<T>>>(&mut self, data: U) -> KmsObjectId {
         let id = self.next_id;
         self.objects.insert(id, data.into());
         self.next_id.0 += 1;
@@ -49,7 +49,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         id
     }
 
-    pub(crate) fn get<'a, U: 'a>(&'a self, id: KmsObjectId) -> Result<&'a U>
+    pub(super) fn get<'a, U: 'a>(&'a self, id: KmsObjectId) -> Result<&'a U>
     where
         &'a U: TryFrom<&'a KmsObject<T>>,
     {
@@ -61,7 +61,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         }
     }
 
-    pub fn object_type(&self, id: KmsObjectId) -> Result<u32> {
+    pub(crate) fn object_type(&self, id: KmsObjectId) -> Result<u32> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
         Ok(object.object_type())
     }
@@ -147,7 +147,7 @@ macro_rules! define_object_kinds {
         $variant:ident($data:ty) = $type:ident,
     )*) => {
         #[derive(Debug)]
-        pub(crate) enum KmsObject<$T: GraphicsAdapter> {
+        pub(super) enum KmsObject<$T: GraphicsAdapter> {
             $($variant($data),)*
         }
 

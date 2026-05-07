@@ -138,8 +138,8 @@ impl GraphicsAdapter for FbAdapter {
         Ok(())
     }
 
-    fn hw_cursor_size(&self) -> Option<(u32, u32)> {
-        None
+    fn has_cursor_plane(&self) -> bool {
+        false
     }
 
     fn handle_cursor(&mut self, _cursor: &CursorPlane<Self::Buffer>, _dirty_fb: bool) {
