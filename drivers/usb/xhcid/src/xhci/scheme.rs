@@ -477,7 +477,6 @@ impl From<usb::EndpointDescriptor> for EndpDesc {
     }
 }
 
-
 impl From<usb::SuperSpeedCompanionDescriptor> for SuperSpeedCmp {
     fn from(d: usb::SuperSpeedCompanionDescriptor) -> Self {
         Self {
@@ -1525,60 +1524,74 @@ impl<const N: usize> Xhci<N> {
             let mut unknown_descs = SmallVec::new();
             let mut iface_unknown_descs = SmallVec::<[UnknownDesc; 1]>::new();
             let mut iter = descriptors.into_iter().peekable();
-            
+
             let mut cur_iface = None;
             let mut cur_endpoint = None;
             let mut endpoints = SmallVec::<[EndpDesc; 4]>::new();
 
             while let Some(item) = iter.next() {
                 debug!("Processing descriptor {item:?}");
-                
-                
+
                 match item {
                     AnyDescriptor::Interface(idesc) => {
                         if let Some(cur_idesc) = cur_iface {
-                            if let Some(endp) = cur_endpoint{
+                            if let Some(endp) = cur_endpoint {
                                 if !endpoints.contains(&endp) {
                                     endpoints.push(endp);
                                 }
                             }
                             interface_descs.push(
-                                self.new_if_desc(port_id, slot, cur_idesc, endpoints, iface_unknown_descs, lang_id)
-                                    .await?,
+                                self.new_if_desc(
+                                    port_id,
+                                    slot,
+                                    cur_idesc,
+                                    endpoints,
+                                    iface_unknown_descs,
+                                    lang_id,
+                                )
+                                .await?,
                             );
                         }
                         cur_iface = Some(idesc);
                         endpoints = SmallVec::new();
                         iface_unknown_descs = SmallVec::new();
-                    },
+                    }
                     AnyDescriptor::Endpoint(endpdesc) => {
                         if let Some(desc) = cur_endpoint {
                             endpoints.push(desc);
                         }
                         cur_endpoint = Some(EndpDesc::from(endpdesc));
-                    },
+                    }
                     AnyDescriptor::SuperSpeedCompanion(ssc) => {
                         if let Some(endp) = cur_endpoint.as_mut() {
                             endp.ssc = Some(SuperSpeedCmp::from(ssc.clone()));
                         } else {
                             error!("Found a superspeedcompanion descriptor before encountering any endpoint descriptor.");
                         }
-                    },
+                    }
                     AnyDescriptor::SuperSpeedPlusCompanion(sscp) => {
                         if let Some(endp) = cur_endpoint.as_mut() {
                             endp.sspc = Some(SuperSpeedPlusIsochCmp::from(sscp.clone()));
                         } else {
                             error!("Found a superspeedpluscompanion descriptor before encountering any endpoint descriptor.");
                         }
-                    },
+                    }
                     AnyDescriptor::Unknown(bytes) => {
                         // If we're processing an interface, add the desc to it, otherwise add it to the configuration
                         if cur_iface.is_none() {
-                            unknown_descs.push(UnknownDesc {len: bytes[0], kind: bytes[1], all_bytes: bytes});
+                            unknown_descs.push(UnknownDesc {
+                                len: bytes[0],
+                                kind: bytes[1],
+                                all_bytes: bytes,
+                            });
                         } else {
-                            iface_unknown_descs.push(UnknownDesc {len: bytes[0], kind: bytes[1], all_bytes: bytes});
+                            iface_unknown_descs.push(UnknownDesc {
+                                len: bytes[0],
+                                kind: bytes[1],
+                                all_bytes: bytes,
+                            });
                         }
-                    },
+                    }
                     _ => {
                         error!("Found unexpected descriptor {item:?} while parsing config descriptors, skipping");
                         continue;
@@ -1587,18 +1600,27 @@ impl<const N: usize> Xhci<N> {
             }
 
             // Push the last endpoint
-            if let Some(endp) = cur_endpoint{
+            if let Some(endp) = cur_endpoint {
                 if !endpoints.contains(&endp) {
                     endpoints.push(endp);
                 }
             }
-            
+
             // Push the last interface
             if let Some(idesc) = cur_iface {
-                        let new_if_desc = self.new_if_desc(port_id, slot, idesc, endpoints, iface_unknown_descs, lang_id).await?;
-                        if !interface_descs.contains(&new_if_desc) {
-                            interface_descs.push(new_if_desc);
-                        }
+                let new_if_desc = self
+                    .new_if_desc(
+                        port_id,
+                        slot,
+                        idesc,
+                        endpoints,
+                        iface_unknown_descs,
+                        lang_id,
+                    )
+                    .await?;
+                if !interface_descs.contains(&new_if_desc) {
+                    interface_descs.push(new_if_desc);
+                }
             }
 
             config_descs.push(ConfDesc {
@@ -1615,7 +1637,7 @@ impl<const N: usize> Xhci<N> {
                 attributes: desc.attributes,
                 max_power: desc.max_power,
                 interface_descs,
-                unknown_descs
+                unknown_descs,
             });
         }
 

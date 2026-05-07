@@ -15,8 +15,8 @@ use xhcid_interface::{
 
 use crate::descs::HidDescriptor;
 
-mod reqs;
 mod descs;
+mod reqs;
 
 fn send_key_event(display: &mut ProducerHandle, usage_page: u16, usage: u16, pressed: bool) {
     let scancode = match usage_page {
