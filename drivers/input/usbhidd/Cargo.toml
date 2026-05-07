@@ -13,8 +13,10 @@ anyhow.workspace = true
 bitflags.workspace = true
 log.workspace = true
 orbclient.workspace = true
+plain.workspace = true
 redox_syscall.workspace = true
 rehid = { git = "https://gitlab.redox-os.org/redox-os/rehid.git" }
+smallvec.workspace = true
 xhcid = { path = "../../usb/xhcid" }
 
 common = { path = "../../common" }
