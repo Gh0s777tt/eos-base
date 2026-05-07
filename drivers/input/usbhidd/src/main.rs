@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::{env, thread, time};
 
 use inputd::ProducerHandle;
@@ -13,7 +13,10 @@ use xhcid_interface::{
     XhciClientHandle,
 };
 
+use crate::descs::HidDescriptor;
+
 mod reqs;
+mod descs;
 
 fn send_key_event(display: &mut ProducerHandle, usage_page: u16, usage: u16, pressed: bool) {
     let scancode = match usage_page {
@@ -217,9 +220,9 @@ fn main() -> Result<()> {
                             None
                         }
                     });
-                    let hid_desc = if_desc.hid_descs.iter().find_map(|hid_desc| {
+                    let hid_desc = if_desc.unknown_descs.iter().find_map(|unknown_desc| {
                         //TODO: should we do any filtering?
-                        Some(hid_desc)
+                        HidDescriptor::from_bytes(&unknown_desc.all_bytes).ok()
                     })?;
                     Some((if_desc.clone(), endp_desc_opt, hid_desc))
                 } else {
@@ -246,8 +249,7 @@ fn main() -> Result<()> {
     // This sets all reports to a duration of 4ms
     reqs::set_idle(&handle, 1, 0, interface_num as u16).context("Failed to set idle")?;
 
-    let report_desc_len = hid_desc.desc_len;
-    assert_eq!(hid_desc.desc_ty, REPORT_DESC_TY);
+    let report_desc_len = hid_desc.get_report_desc()?.desc_len;
 
     let mut report_desc_bytes = vec![0u8; report_desc_len as usize];
     handle
