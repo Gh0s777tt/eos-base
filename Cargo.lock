@@ -2423,8 +2423,10 @@ dependencies = [
  "inputd",
  "log",
  "orbclient",
+ "plain",
  "redox_syscall 0.7.5",
  "rehid",
+ "smallvec 1.15.1",
  "xhcid",
 ]
 
