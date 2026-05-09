@@ -1,7 +1,7 @@
 extern crate ransid;
 
 use std::collections::VecDeque;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryFrom;
 use std::{cmp, io, mem, ptr};
 
 use drm::buffer::{Buffer, DrmFourcc};
@@ -51,7 +51,7 @@ impl Damage {
 
 pub struct V2DisplayMap {
     pub display_handle: V2GraphicsHandle,
-    connector: connector::Handle,
+    pub connector: connector::Handle,
     crtc: crtc::Handle,
     fb: framebuffer::Handle,
     pub buffer: CpuBackedBuffer,
@@ -59,8 +59,7 @@ pub struct V2DisplayMap {
 
 impl V2DisplayMap {
     pub fn new(display_handle: V2GraphicsHandle) -> io::Result<Self> {
-        let connector = display_handle.first_display().unwrap();
-        let connector_info = display_handle.get_connector(connector, true).unwrap();
+        let connector_info = display_handle.first_display().unwrap();
 
         let mode = connector_info.modes()[0];
         let (width, height) = mode.size();
@@ -81,11 +80,17 @@ impl V2DisplayMap {
         )?;
         let fb = display_handle.add_framebuffer(buffer.buffer(), 32, 32)?;
 
-        display_handle.set_crtc(crtc, Some(fb), (0, 0), &[connector], Some(mode))?;
+        display_handle.set_crtc(
+            crtc,
+            Some(fb),
+            (0, 0),
+            &[connector_info.handle()],
+            Some(mode),
+        )?;
 
         Ok(Self {
             display_handle,
-            connector,
+            connector: connector_info.handle(),
             crtc,
             fb,
             buffer,

@@ -458,7 +458,6 @@ impl Device {
 
     pub fn init_inner(&mut self, objects: &mut KmsObjects<Self>) {
         // Discover current framebuffers
-        self.alloc_buffers.reset();
         for pipe in self.pipes.iter() {
             for plane in pipe.planes.iter() {
                 if plane.ctl.readf(PLANE_CTL_ENABLE) {

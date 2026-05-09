@@ -33,10 +33,11 @@ impl V2GraphicsHandle {
         Ok(handle)
     }
 
-    pub fn first_display(&self) -> io::Result<connector::Handle> {
+    pub fn first_display(&self) -> io::Result<connector::Info> {
         for &connector in self.resource_handles().unwrap().connectors() {
-            if self.get_connector(connector, true)?.state() == State::Connected {
-                return Ok(connector);
+            let info = self.get_connector(connector, true)?;
+            if info.state() == State::Connected {
+                return Ok(info);
             }
         }
         Err(io::Error::other("no connected display"))

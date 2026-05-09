@@ -146,8 +146,8 @@ impl FbbootlogScheme {
     fn handle_resize(map: &mut V2DisplayMap, text_screen: &mut TextScreen) {
         let mode = match map
             .display_handle
-            .first_display()
-            .and_then(|handle| Ok(map.display_handle.get_connector(handle, true)?.modes()[0]))
+            .get_connector(map.connector, false)
+            .map(|info| info.modes()[0])
         {
             Ok(mode) => mode,
             Err(err) => {
