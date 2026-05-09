@@ -1,5 +1,6 @@
 use console_draw::{Damage, TextScreen, V2DisplayMap};
 use drm::buffer::Buffer;
+use drm::control::Device;
 use graphics_ipc::V2GraphicsHandle;
 use inputd::ConsumerHandle;
 use std::io;
@@ -53,7 +54,7 @@ impl Display {
     pub fn handle_resize(map: &mut V2DisplayMap, text_screen: &mut TextScreen) {
         let mode = match map
             .display_handle
-            .first_display()
+            .get_connector(map.connector, false)
             .map(|info| info.modes()[0])
         {
             Ok(mode) => mode,

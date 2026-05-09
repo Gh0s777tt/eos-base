@@ -51,7 +51,7 @@ impl Damage {
 
 pub struct V2DisplayMap {
     pub display_handle: V2GraphicsHandle,
-    connector: connector::Handle,
+    pub connector: connector::Handle,
     crtc: crtc::Handle,
     fb: framebuffer::Handle,
     pub buffer: CpuBackedBuffer,
