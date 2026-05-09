@@ -74,7 +74,3 @@ impl<T> IncompleteArrayField<T> {
 pub const fn align(val: usize, align: usize) -> usize {
     (val + align) & !align
 }
-
-pub const fn align_down(addr: usize) -> usize {
-    addr & !(syscall::PAGE_SIZE - 1)
-}

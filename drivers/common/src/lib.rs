@@ -67,7 +67,7 @@ pub fn memory_root_fd() -> &'static libredox::Fd {
 /// aarch64 and x86 have very different cache-coherency rules, so this API as written is likely
 /// not sufficient to describe the memory caching behavior in a cross-platform manner. As such,
 /// consider this API unstable.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MemoryType {
     /// A region of memory that implements Write-back caching.
     ///

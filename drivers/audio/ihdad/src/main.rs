@@ -1,3 +1,4 @@
+use common::MemoryType;
 use redox_scheme::scheme::register_sync_scheme;
 use redox_scheme::Socket;
 use scheme_utils::ReadinessBased;
@@ -38,7 +39,10 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
 
     log::info!("IHDA {}", pci_config.func.display());
 
-    let address = unsafe { pcid_handle.map_bar(0) }.ptr.as_ptr() as usize;
+    let address = unsafe { pcid_handle.map_bar(0, MemoryType::Uncacheable) }
+        .ptr
+        .as_ptr()
+        .expose_provenance();
 
     let irq_file = pci_allocate_interrupt_vector(&mut pcid_handle, "ihdad");
 

@@ -6,6 +6,7 @@ use std::ptr::NonNull;
 use std::{env, io};
 use std::{fmt, process};
 
+use common::MemoryType;
 use daemon::Daemon;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -268,6 +269,7 @@ pub enum PcidClientResponse {
 pub struct MappedBar {
     pub ptr: NonNull<u8>,
     pub bar_size: usize,
+    pub memory_type: MemoryType,
 }
 
 /// A handle from a `pcid` client (e.g. `ahcid`) to `pcid`.
@@ -452,22 +454,16 @@ impl PciFunctionHandle {
             }
         }
     }
-    pub unsafe fn map_bar(&mut self, bir: u8) -> &MappedBar {
+    pub unsafe fn map_bar(&mut self, bir: u8, memory_type: MemoryType) -> &MappedBar {
         let mapped_bar = &mut self.mapped_bars[bir as usize];
         if let Some(mapped_bar) = mapped_bar {
+            assert_eq!(mapped_bar.memory_type, memory_type);
             mapped_bar
         } else {
             let (bar, bar_size) = self.config.func.bars[bir as usize].expect_mem();
 
-            let ptr = match unsafe {
-                common::physmap(
-                    bar,
-                    bar_size,
-                    common::Prot::RW,
-                    // FIXME once the kernel supports this use write-through for prefetchable BAR
-                    common::MemoryType::Uncacheable,
-                )
-            } {
+            let ptr = match unsafe { common::physmap(bar, bar_size, common::Prot::RW, memory_type) }
+            {
                 Ok(ptr) => ptr,
                 Err(err) => {
                     log::error!("failed to map BAR at {bar:016X}: {err}");
@@ -478,6 +474,7 @@ impl PciFunctionHandle {
             mapped_bar.insert(MappedBar {
                 ptr: NonNull::new(ptr.cast::<u8>()).expect("Mapping a BAR resulted in a nullptr"),
                 bar_size,
+                memory_type,
             })
         }
     }

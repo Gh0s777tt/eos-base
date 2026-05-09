@@ -1,11 +1,11 @@
 use std::fs::File;
 use std::sync::Arc;
 
+use common::MemoryType;
 use pcid_interface::*;
 
 use crate::spec::*;
 use crate::transport::{Error, StandardTransport, Transport};
-use crate::utils::align_down;
 
 pub struct Device {
     pub transport: Arc<dyn Transport>,
@@ -55,26 +55,8 @@ pub fn probe_device(pcid_handle: &mut PciFunctionHandle) -> Result<Device, Error
             _ => continue,
         }
 
-        let (addr, _) = pci_config.func.bars[capability.bar as usize].expect_mem();
-
-        let address = unsafe {
-            let addr = addr + capability.offset as usize;
-
-            // XXX: physmap() requires the address to be page aligned.
-            let aligned_addr = align_down(addr);
-            let offset = addr - aligned_addr;
-
-            let size = offset + capability.length as usize;
-
-            let addr = common::physmap(
-                aligned_addr,
-                size,
-                common::Prot::RW,
-                common::MemoryType::Uncacheable,
-            )? as usize;
-
-            addr + offset
-        };
+        let mapped_bar = unsafe { pcid_handle.map_bar(capability.bar, MemoryType::Uncacheable) };
+        let address = mapped_bar.ptr.expose_provenance().get() + capability.offset as usize;
 
         match capability.cfg_type {
             CfgType::Common => {

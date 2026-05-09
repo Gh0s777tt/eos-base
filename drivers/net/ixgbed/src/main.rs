@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 
+use common::MemoryType;
 use driver_network::NetworkScheme;
 use event::{user_data, EventQueue};
 use pcid_interface::PciFunctionHandle;
@@ -28,7 +29,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
 
     let mut irq_file = irq.irq_handle("ixgbed");
 
-    let mapped_bar = unsafe { pcid_handle.map_bar(0) };
+    let mapped_bar = unsafe { pcid_handle.map_bar(0, MemoryType::Uncacheable) };
     let address = mapped_bar.ptr.as_ptr();
     let size = mapped_bar.bar_size;
 

@@ -30,6 +30,7 @@ extern crate bitflags;
 use std::fs::File;
 use std::sync::Arc;
 
+use common::MemoryType;
 use pcid_interface::irq_helpers::read_bsp_apic_id;
 #[cfg(target_arch = "x86_64")]
 use pcid_interface::irq_helpers::{
@@ -136,7 +137,10 @@ fn daemon_with_context_size<const N: usize>(
 
     log::debug!("XHCI PCI CONFIG: {:?}", pci_config);
 
-    let address = unsafe { pcid_handle.map_bar(0) }.ptr.as_ptr() as usize;
+    let address = unsafe { pcid_handle.map_bar(0, MemoryType::Uncacheable) }
+        .ptr
+        .as_ptr()
+        .expose_provenance();
 
     let (irq_file, interrupt_method) = (None, InterruptMethod::Polling); //get_int_method(&mut pcid_handle);
                                                                          //TODO: Fix interrupts.
@@ -171,7 +175,10 @@ fn main() {
 }
 
 fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
-    let address = unsafe { pcid_handle.map_bar(0) }.ptr.as_ptr() as usize;
+    let address = unsafe { pcid_handle.map_bar(0, MemoryType::Uncacheable) }
+        .ptr
+        .as_ptr()
+        .expose_provenance();
     let cap = unsafe { &mut *(address as *mut xhci::CapabilityRegs) };
     if cap.csz() {
         daemon_with_context_size::<{ xhci::CONTEXT_64 }>(daemon, pcid_handle)

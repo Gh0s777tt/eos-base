@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 
+use common::MemoryType;
 use driver_network::NetworkScheme;
 use event::{user_data, EventQueue};
 use pcid_interface::irq_helpers::pci_allocate_interrupt_vector;
@@ -27,7 +28,10 @@ fn map_bar(pcid_handle: &mut PciFunctionHandle) -> *mut u8 {
     for &barnum in &[2, 1] {
         match config.func.bars[usize::from(barnum)] {
             pcid_interface::PciBar::Memory32 { .. } | pcid_interface::PciBar::Memory64 { .. } => unsafe {
-                return pcid_handle.map_bar(barnum).ptr.as_ptr();
+                return pcid_handle
+                    .map_bar(barnum, MemoryType::Uncacheable)
+                    .ptr
+                    .as_ptr();
             },
             other => log::warn!("BAR {} is {:?} instead of memory BAR", barnum, other),
         }
