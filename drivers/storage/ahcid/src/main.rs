@@ -5,6 +5,7 @@ use std::os::fd::AsRawFd;
 use std::usize;
 
 use common::io::Io;
+use common::MemoryType;
 use driver_block::{DiskScheme, ExecutorTrait, FuturesExecutor};
 use event::{EventFlags, RawEventQueue};
 use pcid_interface::PciFunctionHandle;
@@ -38,7 +39,10 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
 
     info!("AHCI {}", pci_config.func.display());
 
-    let address = unsafe { pcid_handle.map_bar(5) }.ptr.as_ptr() as usize;
+    let address = unsafe { pcid_handle.map_bar(5, MemoryType::Uncacheable) }
+        .ptr
+        .as_ptr()
+        .expose_provenance();
     {
         let (hba_mem, disks) = ahci::disks(address as usize, &name);
 

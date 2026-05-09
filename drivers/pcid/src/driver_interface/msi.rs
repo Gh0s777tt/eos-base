@@ -5,6 +5,7 @@ use crate::driver_interface::PciBar;
 use crate::PciFunctionHandle;
 
 use common::io::{Io, Mmio};
+use common::MemoryType;
 use serde::{Deserialize, Serialize};
 
 /// The address and data to use for MSI and MSI-X.
@@ -39,7 +40,7 @@ impl MsixInfo {
 
         let virt_table_base = unsafe {
             pcid_handle
-                .map_bar(self.table_bar)
+                .map_bar(self.table_bar, MemoryType::Uncacheable)
                 .ptr
                 .as_ptr()
                 .byte_add(self.table_offset as usize)

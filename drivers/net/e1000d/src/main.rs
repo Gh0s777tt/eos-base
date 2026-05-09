@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 
+use common::MemoryType;
 use driver_network::NetworkScheme;
 use event::{user_data, EventQueue};
 use pcid_interface::PciFunctionHandle;
@@ -34,7 +35,10 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
 
     let mut irq_file = irq.irq_handle("e1000d");
 
-    let address = unsafe { pcid_handle.map_bar(0) }.ptr.as_ptr() as usize;
+    let address = unsafe { pcid_handle.map_bar(0, MemoryType::Uncacheable) }
+        .ptr
+        .as_ptr()
+        .expose_provenance();
 
     let mut scheme = NetworkScheme::new(
         move || unsafe {

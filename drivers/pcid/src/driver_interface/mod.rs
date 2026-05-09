@@ -1,12 +1,15 @@
 use std::fs::File;
 use std::io::prelude::*;
-use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::path::Path;
-use std::ptr::NonNull;
+use std::ptr::{self, NonNull};
 use std::{env, io};
 use std::{fmt, process};
 
+use common::MemoryType;
 use daemon::Daemon;
+use libredox::call::MmapArgs;
+use libredox::flag::{MAP_SHARED, PROT_READ, PROT_WRITE};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub use bar::PciBar;
@@ -268,6 +271,7 @@ pub enum PcidClientResponse {
 pub struct MappedBar {
     pub ptr: NonNull<u8>,
     pub bar_size: usize,
+    pub memory_type: MemoryType,
 }
 
 /// A handle from a `pcid` client (e.g. `ahcid`) to `pcid`.
@@ -452,21 +456,23 @@ impl PciFunctionHandle {
             }
         }
     }
-    pub unsafe fn map_bar(&mut self, bir: u8) -> &MappedBar {
+    pub unsafe fn map_bar(&mut self, bir: u8, memory_type: MemoryType) -> &MappedBar {
         let mapped_bar = &mut self.mapped_bars[bir as usize];
         if let Some(mapped_bar) = mapped_bar {
+            assert_eq!(mapped_bar.memory_type, memory_type);
             mapped_bar
         } else {
             let (bar, bar_size) = self.config.func.bars[bir as usize].expect_mem();
 
             let ptr = match unsafe {
-                common::physmap(
-                    bar,
-                    bar_size,
-                    common::Prot::RW,
-                    // FIXME once the kernel supports this use write-through for prefetchable BAR
-                    common::MemoryType::Uncacheable,
-                )
+                libredox::call::mmap(MmapArgs {
+                    addr: ptr::null_mut(),
+                    length: bar_size,
+                    prot: PROT_READ | PROT_WRITE,
+                    flags: MAP_SHARED,
+                    fd: self.channel.as_raw_fd() as usize,
+                    offset: u64::from(bir) << (64 - 3) | (memory_type as u64) << (64 - 3 - 2) | 0,
+                })
             } {
                 Ok(ptr) => ptr,
                 Err(err) => {
@@ -478,6 +484,7 @@ impl PciFunctionHandle {
             mapped_bar.insert(MappedBar {
                 ptr: NonNull::new(ptr.cast::<u8>()).expect("Mapping a BAR resulted in a nullptr"),
                 bar_size,
+                memory_type,
             })
         }
     }

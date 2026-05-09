@@ -120,15 +120,26 @@ pub struct Interrupter {
 
 #[derive(Debug)]
 pub struct MmioRegion {
-    phys: usize,
     virt: usize,
     size: usize,
 }
 
 impl MmioRegion {
-    fn new(phys: usize, size: usize, memory_type: common::MemoryType) -> Result<Self> {
+    unsafe fn new(phys: usize, size: usize, memory_type: common::MemoryType) -> Result<Self> {
         let virt = unsafe { common::physmap(phys, size, common::Prot::RW, memory_type)? as usize };
-        Ok(Self { phys, virt, size })
+        Ok(Self { virt, size })
+    }
+
+    unsafe fn new_pci_bar(
+        pcid_handle: &mut PciFunctionHandle,
+        bir: u8,
+        memory_type: common::MemoryType,
+    ) -> Result<Self> {
+        let mapped_bar = unsafe { pcid_handle.map_bar(bir, memory_type) };
+        Ok(Self {
+            virt: mapped_bar.ptr.expose_provenance().get(),
+            size: mapped_bar.bar_size,
+        })
     }
 
     unsafe fn mmio(&self, offset: usize) -> Result<MmioPtr<u32>> {
@@ -249,18 +260,13 @@ impl Device {
         };
 
         let gttmm = {
-            let (phys, size) = func.bars[0].expect_mem();
-            Arc::new(MmioRegion::new(
-                phys,
-                size,
-                common::MemoryType::Uncacheable,
-            )?)
+            Arc::new(unsafe {
+                MmioRegion::new_pci_bar(pcid_handle, 0, common::MemoryType::Uncacheable)
+            }?)
         };
         log::info!("GTTMM {:X?}", gttmm);
-        let gm = {
-            let (phys, size) = func.bars[2].expect_mem();
-            MmioRegion::new(phys, size, common::MemoryType::WriteCombining)?
-        };
+        let gm =
+            unsafe { MmioRegion::new_pci_bar(pcid_handle, 2, common::MemoryType::WriteCombining) }?;
         log::info!("GM {:X?}", gm);
         /* IOBAR not used, not present on all generations
         let iobar = func.bars[4].expect_port();
@@ -273,11 +279,13 @@ impl Device {
             log::info!("BIOS {:X?}", bios_base);
             // This is the default BIOS size
             let bios_size = 8 * 1024;
-            match MmioRegion::new(
-                bios_base as usize,
-                bios_size,
-                common::MemoryType::Uncacheable,
-            ) {
+            match unsafe {
+                MmioRegion::new(
+                    bios_base as usize,
+                    bios_size,
+                    common::MemoryType::Uncacheable,
+                )
+            } {
                 Ok(region) => match Bios::new(region) {
                     Ok(bios) => Some(bios),
                     Err(err) => {

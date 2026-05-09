@@ -1,5 +1,6 @@
 //#![deny(warnings)]
 
+use common::MemoryType;
 use event::{user_data, EventQueue};
 use std::fs::File;
 use std::io::{Read, Write};
@@ -235,7 +236,9 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
 
     let mut irq_file = irq.irq_handle("vboxd");
 
-    let address = unsafe { pcid_handle.map_bar(1) }.ptr.as_ptr();
+    let address = unsafe { pcid_handle.map_bar(1, MemoryType::Uncacheable) }
+        .ptr
+        .as_ptr();
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
         let mut port = common::io::Pio::<u32>::new(bar0 as u16);

@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::usize;
 
+use common::MemoryType;
 use driver_block::{Disk, DiskScheme};
 use pcid_interface::{irq_helpers, PciFunctionHandle};
 
@@ -75,7 +76,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
 
     log::debug!("NVME PCI CONFIG: {:?}", pci_config);
 
-    let address = unsafe { pcid_handle.map_bar(0).ptr };
+    let address = unsafe { pcid_handle.map_bar(0, MemoryType::Uncacheable).ptr };
 
     let interrupt_vector = irq_helpers::pci_allocate_interrupt_vector(&mut pcid_handle, "nvmed");
     let iv = interrupt_vector.vector();

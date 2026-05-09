@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 
+use common::MemoryType;
 use pci_types::{ConfigRegionAccess, PciAddress};
+use pcid_interface::PciBar;
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult};
 use scheme_utils::HandleMap;
@@ -8,7 +10,7 @@ use syscall::dirent::{DirEntry, DirentBuf, DirentKind};
 use syscall::error::{Error, Result, EACCES, EBADF, EINVAL, EIO, EISDIR, ENOENT, ENOTDIR};
 use syscall::flag::{MODE_CHR, MODE_DIR, O_DIRECTORY, O_STAT};
 use syscall::schemev2::NewFdFlags;
-use syscall::ENOLCK;
+use syscall::{MapFlags, ENOLCK};
 
 use crate::cfg_access::Pcie;
 
@@ -303,6 +305,53 @@ impl SchemeSync for PciScheme {
 
             _ => Err(Error::new(EBADF)),
         }
+    }
+
+    fn mmap_prep(
+        &mut self,
+        id: usize,
+        offset: u64,
+        _size: usize,
+        _flags: MapFlags,
+        _ctx: &CallerCtx,
+    ) -> syscall::Result<usize> {
+        let handle = self.handles.get(id)?;
+
+        if handle.stat {
+            return Err(Error::new(EBADF));
+        }
+
+        let Handle::Channel { addr, st: _ } = handle.inner else {
+            return Err(Error::new(EBADF));
+        };
+
+        let bir = (offset >> (64 - 3)) as u8;
+        // FIXME check consistent mapping type between mmap calls
+        let memory_type = match (offset >> (64 - 3 - 2)) & 0b11 {
+            // Make sure this stays in sync with the discriminants of MemoryType
+            0b00 => MemoryType::Writeback,
+            0b01 => MemoryType::Uncacheable,
+            0b10 => MemoryType::WriteCombining,
+            0b11 => MemoryType::Writeback,
+            _ => unreachable!(),
+        };
+
+        let (bar, bar_size) = {
+            match self.tree[&addr].inner.bars[bir as usize] {
+                PciBar::Memory32 { addr, size } => (addr as usize, size as usize),
+                PciBar::Memory64 { addr, size } => (
+                    addr.try_into()
+                        .expect("conversion from 64bit BAR to usize failed"),
+                    size.try_into()
+                        .expect("conversion from 64bit BAR size to usize failed"),
+                ),
+                PciBar::Port(_) | PciBar::None => return Err(Error::new(EINVAL)),
+            }
+        };
+
+        let ptr = unsafe { common::physmap(bar, bar_size, common::Prot::RW, memory_type) }?;
+
+        Ok(unsafe { ptr.add((offset << 5 >> 5) as usize) }.expose_provenance())
     }
 
     fn on_close(&mut self, id: usize) {
