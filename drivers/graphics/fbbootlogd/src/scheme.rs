@@ -3,7 +3,6 @@ use std::collections::VecDeque;
 
 use console_draw::{Damage, TextScreen, V2DisplayMap};
 use drm::buffer::Buffer;
-use drm::control::Device;
 use graphics_ipc::V2GraphicsHandle;
 use inputd::ConsumerHandle;
 use orbclient::{Event, EventOption};
@@ -147,7 +146,7 @@ impl FbbootlogScheme {
         let mode = match map
             .display_handle
             .first_display()
-            .and_then(|handle| Ok(map.display_handle.get_connector(handle, true)?.modes()[0]))
+            .map(|info| info.modes()[0])
         {
             Ok(mode) => mode,
             Err(err) => {
