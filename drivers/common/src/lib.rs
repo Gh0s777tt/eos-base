@@ -68,15 +68,16 @@ pub fn memory_root_fd() -> &'static libredox::Fd {
 /// not sufficient to describe the memory caching behavior in a cross-platform manner. As such,
 /// consider this API unstable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)] // Make sure the discriminants match mmap_prep in pcid/src/scheme.rs
 pub enum MemoryType {
     /// A region of memory that implements Write-back caching.
     ///
     /// In write-back caching, the processor will first store data in its local cache, and then
     /// flush it to the actual storage location at regular intervals, or as applications access
     /// the data.
-    Writeback,
+    Writeback = 0b00,
     /// A region of memory that does not implement caching. Writes to these regions are immediate.
-    Uncacheable,
+    Uncacheable = 0b01,
     /// A region of memory that implements write combining.
     ///
     /// Write combining memory regions store all writes in a temporary buffer called a Write
@@ -84,10 +85,10 @@ pub enum MemoryType {
     /// released to the memory location in an unspecified order. Write-Combine memory does not
     /// guarantee that the order at which you write to it is the order at which those writes are
     /// committed to memory.
-    WriteCombining,
+    WriteCombining = 0b10,
     /// Memory stored in an intermediate Write Combine Buffer and released later
     /// Memory-Mapped I/O. This is an aarch64-specific term.
-    DeviceMemory,
+    DeviceMemory = 0b11,
 }
 impl Default for MemoryType {
     fn default() -> Self {

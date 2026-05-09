@@ -1,13 +1,15 @@
 use std::fs::File;
 use std::io::prelude::*;
-use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::path::Path;
-use std::ptr::NonNull;
+use std::ptr::{self, NonNull};
 use std::{env, io};
 use std::{fmt, process};
 
 use common::MemoryType;
 use daemon::Daemon;
+use libredox::call::MmapArgs;
+use libredox::flag::{MAP_SHARED, PROT_READ, PROT_WRITE};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub use bar::PciBar;
@@ -462,8 +464,16 @@ impl PciFunctionHandle {
         } else {
             let (bar, bar_size) = self.config.func.bars[bir as usize].expect_mem();
 
-            let ptr = match unsafe { common::physmap(bar, bar_size, common::Prot::RW, memory_type) }
-            {
+            let ptr = match unsafe {
+                libredox::call::mmap(MmapArgs {
+                    addr: ptr::null_mut(),
+                    length: bar_size,
+                    prot: PROT_READ | PROT_WRITE,
+                    flags: MAP_SHARED,
+                    fd: self.channel.as_raw_fd() as usize,
+                    offset: u64::from(bir) << (64 - 3) | (memory_type as u64) << (64 - 3 - 2) | 0,
+                })
+            } {
                 Ok(ptr) => ptr,
                 Err(err) => {
                     log::error!("failed to map BAR at {bar:016X}: {err}");
