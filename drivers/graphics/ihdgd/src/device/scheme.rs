@@ -6,7 +6,8 @@ use driver_graphics::kms::objects::{
 };
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
 use drm_sys::{
-    DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFER_SHADOW, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT,
+    DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFERRED_DEPTH, DRM_CAP_DUMB_PREFER_SHADOW,
+    DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT,
 };
 use syscall::error::EINVAL;
 
@@ -50,6 +51,7 @@ impl GraphicsAdapter for Device {
     fn get_cap(&self, cap: u32) -> syscall::Result<u64> {
         match cap {
             DRM_CAP_DUMB_BUFFER => Ok(1),
+            DRM_CAP_DUMB_PREFERRED_DEPTH => Ok(24),
             DRM_CAP_DUMB_PREFER_SHADOW => Ok(1),
             _ => Err(syscall::Error::new(EINVAL)),
         }
