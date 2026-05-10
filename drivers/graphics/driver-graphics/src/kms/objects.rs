@@ -11,7 +11,7 @@ use syscall::{Error, Result, EINVAL};
 
 use crate::kms::connector::{KmsConnector, KmsEncoder};
 use crate::kms::properties::{
-    define_object_props, init_standard_props, KmsBlob, KmsProperty, KmsPropertyData,
+    define_object_props, init_standard_props, KmsBlob, KmsProperty, KmsPropertyData, ACTIVE,
 };
 use crate::GraphicsAdapter;
 
@@ -221,7 +221,11 @@ impl<T: GraphicsAdapter> Clone for KmsCrtcState<T> {
     }
 }
 
-define_object_props!(object, KmsCrtc<T: GraphicsAdapter> {});
+define_object_props!(object, KmsCrtc<T: GraphicsAdapter> {
+    ACTIVE {
+        get => u64::from(object.state.mode.is_some()),
+    }
+});
 
 #[derive(Debug)]
 pub struct KmsFramebuffer<T: GraphicsAdapter> {
