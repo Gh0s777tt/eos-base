@@ -9,7 +9,7 @@ use drm_sys::{
 use syscall::Result;
 
 use crate::kms::objects::{KmsObjectId, KmsObjects};
-use crate::kms::properties::{define_object_props, KmsPropertyData, CRTC_ID, DPMS, EDID};
+use crate::kms::properties::{define_object_props, KmsPropertyData, CRTC_ID, DPMS, EDID, TILE};
 use crate::GraphicsAdapter;
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
@@ -124,6 +124,13 @@ define_object_props!(object, KmsConnector<T: GraphicsAdapter> {
     }
     DPMS {
         get => object.state.dpms as u64,
+    }
+    TILE {
+        get => {
+            // FIXME set this property once we support DP MST
+            let _ = object;
+            0
+        },
     }
     CRTC_ID {
         get => u64::from(object.state.crtc_id.0),

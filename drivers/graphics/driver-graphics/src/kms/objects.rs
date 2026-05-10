@@ -11,7 +11,7 @@ use syscall::{Error, Result, EINVAL};
 
 use crate::kms::connector::{KmsConnector, KmsEncoder};
 use crate::kms::properties::{
-    define_object_props, init_standard_props, KmsBlob, KmsProperty, KmsPropertyData,
+    define_object_props, init_standard_props, KmsBlob, KmsProperty, KmsPropertyData, ACTIVE,
 };
 use crate::GraphicsAdapter;
 
@@ -41,20 +41,17 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         objects
     }
 
-    pub(super) fn add<U: Into<KmsObject<T>>>(&mut self, data: U) -> KmsObjectId {
+    pub(super) fn add<U: KmsObjectKind<T>>(&mut self, data: U) -> KmsObjectId {
         let id = self.next_id;
-        self.objects.insert(id, data.into());
+        self.objects.insert(id, data.into_object());
         self.next_id.0 += 1;
 
         id
     }
 
-    pub(super) fn get<'a, U: 'a>(&'a self, id: KmsObjectId) -> Result<&'a U>
-    where
-        &'a U: TryFrom<&'a KmsObject<T>>,
-    {
+    pub(super) fn get<U: KmsObjectKind<T>>(&self, id: KmsObjectId) -> Result<&U> {
         let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
-        if let Ok(object) = object.try_into() {
+        if let Some(object) = U::try_from_object(object) {
             Ok(object)
         } else {
             Err(Error::new(EINVAL))
@@ -142,6 +139,11 @@ impl From<KmsObjectId> for u64 {
     }
 }
 
+pub(super) trait KmsObjectKind<T: GraphicsAdapter> {
+    fn into_object(self) -> KmsObject<T>;
+    fn try_from_object(object: &KmsObject<T>) -> Option<&Self>;
+}
+
 macro_rules! define_object_kinds {
     (<$T:ident> $(
         $variant:ident($data:ty) = $type:ident,
@@ -160,19 +162,15 @@ macro_rules! define_object_kinds {
         }
 
         $(
-            impl<$T: GraphicsAdapter> From<$data> for KmsObject<$T> {
-                fn from(value: $data) -> Self {
-                    Self::$variant(value)
+            impl<$T: GraphicsAdapter> KmsObjectKind<$T> for $data {
+                fn into_object(self) -> KmsObject<$T> {
+                    KmsObject::$variant(self)
                 }
-            }
 
-            impl<'a, $T: GraphicsAdapter> TryFrom<&'a KmsObject<$T>> for &'a $data {
-                type Error = ();
-
-                fn try_from(value: &'a KmsObject<T>) -> Result<Self, Self::Error> {
-                    match value {
-                        KmsObject::$variant(data) => Ok(data),
-                        _ => Err(()),
+                fn try_from_object(object: &KmsObject<$T>) -> Option<&$data> {
+                    match object {
+                        KmsObject::$variant(data) => Some(data),
+                        _ => None,
                     }
                 }
             }
@@ -223,7 +221,11 @@ impl<T: GraphicsAdapter> Clone for KmsCrtcState<T> {
     }
 }
 
-define_object_props!(object, KmsCrtc<T: GraphicsAdapter> {});
+define_object_props!(object, KmsCrtc<T: GraphicsAdapter> {
+    ACTIVE {
+        get => u64::from(object.state.mode.is_some()),
+    }
+});
 
 #[derive(Debug)]
 pub struct KmsFramebuffer<T: GraphicsAdapter> {
