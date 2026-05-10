@@ -55,25 +55,19 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         match object {
             KmsObject::Crtc(crtc) => {
                 let crtc = crtc.lock().unwrap();
-                let props = &crtc.properties;
-                Ok((
-                    props.iter().map(|prop| prop.id.0).collect::<Vec<_>>(),
-                    props
-                        .iter()
-                        .map(|prop| (prop.getter)(&crtc))
-                        .collect::<Vec<_>>(),
-                ))
+                Ok(crtc
+                    .properties
+                    .iter()
+                    .map(|prop| (prop.id.0, (prop.getter)(&crtc)))
+                    .unzip())
             }
             KmsObject::Connector(connector) => {
                 let connector = connector.lock().unwrap();
-                let props = &connector.properties;
-                Ok((
-                    props.iter().map(|prop| prop.id.0).collect::<Vec<_>>(),
-                    props
-                        .iter()
-                        .map(|prop| (prop.getter)(&connector))
-                        .collect::<Vec<_>>(),
-                ))
+                Ok(connector
+                    .properties
+                    .iter()
+                    .map(|prop| (prop.id.0, (prop.getter)(&connector)))
+                    .unzip())
             }
             KmsObject::Encoder(_)
             | KmsObject::Property(_)
