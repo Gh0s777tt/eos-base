@@ -193,6 +193,7 @@ define_properties! {
         Suspend = u64::from(DRM_MODE_DPMS_SUSPEND),
         Off = u64::from(DRM_MODE_DPMS_OFF),
     } [],
+    TILE: blob [immutable],
 
     // CRTC
     ACTIVE: range { 0,1 } [atomic],
