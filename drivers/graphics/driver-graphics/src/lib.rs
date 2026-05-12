@@ -20,7 +20,7 @@ use redox_scheme::scheme::{register_scheme_inner, SchemeState, SchemeSync};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
 use scheme_utils::{FpathWriter, HandleMap};
 use syscall::schemev2::NewFdFlags;
-use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EINVAL, ENOENT, EOPNOTSUPP};
+use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EINVAL, ENOENT, ENXIO, EOPNOTSUPP};
 
 use crate::kms::connector::{KmsConnectorDriver, KmsConnectorState};
 use crate::kms::objects::{self, KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects};
@@ -602,7 +602,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let vt_state = self.vts.get_mut(vt).unwrap();
 
                     let Some(cursor_plane) = &mut vt_state.cursor_plane else {
-                        return Err(Error::new(EINVAL));
+                        return Err(Error::new(ENXIO));
                     };
 
                     let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
@@ -612,7 +612,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         } else if let Some(buffer) = buffers.get(&data.handle()) {
                             Some(buffer.clone())
                         } else {
-                            return Err(Error::new(EINVAL));
+                            return Err(Error::new(ENOENT));
                         };
                     }
 
@@ -852,7 +852,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let buffer_id = data.handle();
 
                     if !buffers.contains_key(&buffer_id) {
-                        return Err(Error::new(EINVAL));
+                        return Err(Error::new(ENOENT));
                     }
 
                     // FIXME use a better scheme for creating map offsets
@@ -916,7 +916,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let vt_state = self.vts.get_mut(vt).unwrap();
 
                     let Some(cursor_plane) = &mut vt_state.cursor_plane else {
-                        return Err(Error::new(EINVAL));
+                        return Err(Error::new(ENXIO));
                     };
 
                     let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
@@ -926,7 +926,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         } else if let Some(buffer) = buffers.get(&data.handle()) {
                             Some(buffer.clone())
                         } else {
-                            return Err(Error::new(EINVAL));
+                            return Err(Error::new(ENOENT));
                         };
                         cursor_plane.hot_x = data.hot_x();
                         cursor_plane.hot_y = data.hot_y();

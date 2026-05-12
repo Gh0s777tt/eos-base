@@ -7,7 +7,7 @@ use drm_sys::{
     drm_mode_modeinfo, DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
     DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PROPERTY,
 };
-use syscall::{Error, Result, EINVAL};
+use syscall::{Error, Result, ENOENT};
 
 use crate::kms::connector::{KmsConnector, KmsEncoder};
 use crate::kms::properties::{
@@ -50,16 +50,16 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 
     pub(super) fn get<U: KmsObjectKind<T>>(&self, id: KmsObjectId) -> Result<&U> {
-        let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
+        let object = self.objects.get(&id).ok_or(Error::new(ENOENT))?;
         if let Some(object) = U::try_from_object(object) {
             Ok(object)
         } else {
-            Err(Error::new(EINVAL))
+            Err(Error::new(ENOENT))
         }
     }
 
     pub(crate) fn object_type(&self, id: KmsObjectId) -> Result<u32> {
-        let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
+        let object = self.objects.get(&id).ok_or(Error::new(ENOENT))?;
         Ok(object.object_type())
     }
 
@@ -107,10 +107,10 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
         let Some(object) = self.objects.get(&id) else {
-            return Err(Error::new(EINVAL));
+            return Err(Error::new(ENOENT));
         };
         let KmsObject::Framebuffer(_) = object else {
-            return Err(Error::new(EINVAL));
+            return Err(Error::new(ENOENT));
         };
         self.objects.remove(&id).unwrap();
 

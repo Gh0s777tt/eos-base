@@ -7,7 +7,7 @@ use drm_sys::{
     DRM_MODE_OBJECT_CRTC, DRM_MODE_OBJECT_FB, DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY,
     DRM_PLANE_TYPE_PRIMARY, DRM_PROP_NAME_LEN,
 };
-use syscall::{Error, Result, EINVAL};
+use syscall::{Error, Result, ENOENT};
 
 use crate::kms::objects::{KmsObject, KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
@@ -51,7 +51,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 
     pub fn get_object_properties_data(&self, id: KmsObjectId) -> Result<(Vec<u32>, Vec<u64>)> {
-        let object = self.objects.get(&id).ok_or(Error::new(EINVAL))?;
+        let object = self.objects.get(&id).ok_or(Error::new(ENOENT))?;
         match object {
             KmsObject::Crtc(crtc) => {
                 let crtc = crtc.lock().unwrap();
