@@ -5,4 +5,5 @@ requires_weak = [
     "00_ipcd.service",
     "00_ptyd.service",
     "00_pcid-spawner.service",
+    "00_fbcond.service"
 ]
