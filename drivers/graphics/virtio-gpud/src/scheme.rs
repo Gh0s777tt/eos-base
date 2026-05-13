@@ -395,12 +395,8 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             };
 
             if self.has_edid {
-                connector.update_from_edid(&display.edid);
-
                 drop(connector);
-
-                let blob = objects.add_blob(display.edid.clone());
-                objects.get_connector(id).unwrap().lock().unwrap().edid = blob;
+                objects.set_connector_edid(id, display.edid.clone());
             } else {
                 connector.update_from_size(display.width, display.height);
             }
