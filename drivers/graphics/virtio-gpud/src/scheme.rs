@@ -281,53 +281,47 @@ impl<'a> VirtGpuAdapter<'a> {
         ))
     }
 
-    fn update_cursor(
+    async fn update_cursor(
         &mut self,
-        cursor: &VirtGpuFramebuffer,
+        cursor: &VirtGpuFramebuffer<'_>,
         x: i32,
         y: i32,
         hot_x: i32,
         hot_y: i32,
     ) {
         //Transfering cursor resource to host
-        futures::executor::block_on(async {
-            let transfer_request = Dma::new(XferToHost2d::new(
-                cursor.id,
-                GpuRect {
-                    x: 0,
-                    y: 0,
-                    width: 64,
-                    height: 64,
-                },
-                0,
-            ))
-            .unwrap();
-            let header = self.send_request_fenced(transfer_request).await.unwrap();
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
-        });
+        let transfer_request = Dma::new(XferToHost2d::new(
+            cursor.id,
+            GpuRect {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 64,
+            },
+            0,
+        ))
+        .unwrap();
+        let header = self.send_request_fenced(transfer_request).await.unwrap();
+        assert_eq!(header.ty, CommandTy::RespOkNodata);
 
         //Update the cursor position
-        futures::executor::block_on(async {
-            self.send_request_cursor(
-                Dma::new(UpdateCursor::update_cursor(x, y, hot_x, hot_y, cursor.id)).unwrap(),
-            )
+        self.send_request_cursor(
+            Dma::new(UpdateCursor::update_cursor(x, y, hot_x, hot_y, cursor.id)).unwrap(),
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn move_cursor(&mut self, x: i32, y: i32) {
+        self.send_request_cursor(Dma::new(MoveCursor::move_cursor(x, y)).unwrap())
             .await
             .unwrap();
-        });
     }
 
-    fn move_cursor(&mut self, x: i32, y: i32) {
-        futures::executor::block_on(async {
-            self.send_request_cursor(Dma::new(MoveCursor::move_cursor(x, y)).unwrap())
-                .await
-                .unwrap();
-        });
-    }
-
-    fn disable_cursor(&mut self) {
+    async fn disable_cursor(&mut self) {
         if self.hidden_cursor.is_none() {
             let (width, height) = (64, 64);
-            let (cursor, stride) = self.create_dumb_buffer(width, height);
+            let (cursor, stride) = self.create_dumb_buffer_inner(width, height).await.unwrap();
             unsafe {
                 core::ptr::write_bytes(
                     cursor.sgl.as_ptr() as *mut u8,
@@ -339,7 +333,7 @@ impl<'a> VirtGpuAdapter<'a> {
         }
         let hidden_cursor = self.hidden_cursor.as_ref().unwrap().clone();
 
-        self.update_cursor(&hidden_cursor, 0, 0, 0, 0);
+        self.update_cursor(&hidden_cursor, 0, 0, 0, 0).await;
     }
 }
 
@@ -510,17 +504,20 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     }
 
     fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Buffer>, dirty_fb: bool) {
-        if let Some(buffer) = &cursor.buffer {
-            if dirty_fb {
-                self.update_cursor(buffer, cursor.x, cursor.y, cursor.hot_x, cursor.hot_y);
+        futures::executor::block_on(async {
+            if let Some(buffer) = &cursor.buffer {
+                if dirty_fb {
+                    self.update_cursor(buffer, cursor.x, cursor.y, cursor.hot_x, cursor.hot_y)
+                        .await;
+                } else {
+                    self.move_cursor(cursor.x, cursor.y).await;
+                }
             } else {
-                self.move_cursor(cursor.x, cursor.y);
+                if dirty_fb {
+                    self.disable_cursor().await;
+                }
             }
-        } else {
-            if dirty_fb {
-                self.disable_cursor();
-            }
-        }
+        });
     }
 }
 
