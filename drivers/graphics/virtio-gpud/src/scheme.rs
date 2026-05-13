@@ -172,6 +172,12 @@ impl VirtGpuAdapter<'_> {
         Ok(header)
     }
 
+    async fn send_request_cursor<T>(&self, request: Dma<T>) -> Result<(), Error> {
+        let command = ChainBuilder::new().chain(Buffer::new(&request)).build();
+        self.cursor_queue.send(command).await;
+        Ok(())
+    }
+
     async fn get_display_info(&self) -> Result<Dma<GetDisplayInfo>, Error> {
         let header = Dma::new(ControlHeader::with_ty(CommandTy::GetDisplayInfo))?;
 
@@ -228,19 +234,20 @@ impl VirtGpuAdapter<'_> {
         });
 
         //Update the cursor position
-        let request = Dma::new(UpdateCursor::update_cursor(x, y, hot_x, hot_y, cursor.id)).unwrap();
         futures::executor::block_on(async {
-            let command = ChainBuilder::new().chain(Buffer::new(&request)).build();
-            self.cursor_queue.send(command).await;
+            self.send_request_cursor(
+                Dma::new(UpdateCursor::update_cursor(x, y, hot_x, hot_y, cursor.id)).unwrap(),
+            )
+            .await
+            .unwrap();
         });
     }
 
     fn move_cursor(&mut self, x: i32, y: i32) {
-        let request = Dma::new(MoveCursor::move_cursor(x, y)).unwrap();
-
         futures::executor::block_on(async {
-            let command = ChainBuilder::new().chain(Buffer::new(&request)).build();
-            self.cursor_queue.send(command).await;
+            self.send_request_cursor(Dma::new(MoveCursor::move_cursor(x, y)).unwrap())
+                .await
+                .unwrap();
         });
     }
 
