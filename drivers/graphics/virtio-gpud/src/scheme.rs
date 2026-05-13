@@ -105,7 +105,7 @@ impl<'a> fmt::Debug for VirtGpuAdapter<'a> {
     }
 }
 
-impl VirtGpuAdapter<'_> {
+impl<'a> VirtGpuAdapter<'a> {
     pub async fn update_displays(&mut self) -> Result<(), Error> {
         let display_info = self.get_display_info().await?;
         let raw_displays = &display_info.display_info[..self.config.num_scanouts() as usize];
@@ -206,6 +206,79 @@ impl VirtGpuAdapter<'_> {
         assert!(response.header.ty == CommandTy::RespOkEdid);
 
         Ok(response)
+    }
+
+    async fn resource_create_2d(&mut self, width: u32, height: u32) -> Result<ResourceId, Error> {
+        let res_id = ResourceId::alloc();
+
+        let request = Dma::new(ResourceCreate2d::new(
+            res_id,
+            ResourceFormat::Bgrx,
+            width,
+            height,
+        ))?;
+        let header = self.send_request(request).await?;
+        assert_eq!(header.ty, CommandTy::RespOkNodata);
+        Ok(res_id)
+    }
+
+    async fn resource_attach_backing(
+        &mut self,
+        res_id: ResourceId,
+        sgl: &sgl::Sgl,
+    ) -> Result<(), Error> {
+        let mut mem_entries = unsafe { Dma::zeroed_slice(sgl.chunks().len())?.assume_init() };
+        for (entry, chunk) in mem_entries.iter_mut().zip(sgl.chunks().iter()) {
+            *entry = MemEntry {
+                address: chunk.phys as u64,
+                length: chunk.length.next_multiple_of(PAGE_SIZE) as u32,
+                padding: 0,
+            };
+        }
+
+        let attach_request = Dma::new(AttachBacking::new(res_id, mem_entries.len() as u32))?;
+        let header = Dma::new(ControlHeader::default())?;
+        let command = ChainBuilder::new()
+            .chain(Buffer::new(&attach_request))
+            .chain(Buffer::new_unsized(&mem_entries))
+            .chain(Buffer::new(&header).flags(DescriptorFlags::WRITE_ONLY))
+            .build();
+
+        self.control_queue.send(command).await;
+        assert_eq!(header.ty, CommandTy::RespOkNodata);
+        Ok(())
+    }
+
+    async fn create_dumb_buffer_inner(
+        &mut self,
+        width: u32,
+        height: u32,
+    ) -> Result<(VirtGpuFramebuffer<'a>, u32), Error> {
+        let bpp = 32;
+        let fb_size = width as usize * height as usize * bpp / 8;
+        let sgl = sgl::Sgl::new(fb_size)?;
+
+        unsafe {
+            core::ptr::write_bytes(sgl.as_ptr() as *mut u8, 255, fb_size);
+        }
+
+        // Create a host resource using `VIRTIO_GPU_CMD_RESOURCE_CREATE_2D`.
+        let res_id = self.resource_create_2d(width, height).await?;
+
+        // Use the allocated framebuffer from the guest ram, and attach it as backing
+        // storage to the resource just created, using `VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING`.
+        self.resource_attach_backing(res_id, &sgl).await?;
+
+        Ok((
+            VirtGpuFramebuffer {
+                queue: self.control_queue.clone(),
+                id: res_id,
+                sgl,
+                width,
+                height,
+            },
+            width * 4,
+        ))
     }
 
     fn update_cursor(
@@ -342,63 +415,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> (Self::Buffer, u32) {
         futures::executor::block_on(async {
-            let bpp = 32;
-            let fb_size = width as usize * height as usize * bpp / 8;
-            let sgl = sgl::Sgl::new(fb_size).unwrap();
-
-            unsafe {
-                core::ptr::write_bytes(sgl.as_ptr() as *mut u8, 255, fb_size);
-            }
-
-            let res_id = ResourceId::alloc();
-
-            // Create a host resource using `VIRTIO_GPU_CMD_RESOURCE_CREATE_2D`.
-            let request = Dma::new(ResourceCreate2d::new(
-                res_id,
-                ResourceFormat::Bgrx,
-                width,
-                height,
-            ))
-            .unwrap();
-
-            let header = self.send_request(request).await.unwrap();
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
-
-            // Use the allocated framebuffer from the guest ram, and attach it as backing
-            // storage to the resource just created, using `VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING`.
-
-            let mut mem_entries =
-                unsafe { Dma::zeroed_slice(sgl.chunks().len()).unwrap().assume_init() };
-            for (entry, chunk) in mem_entries.iter_mut().zip(sgl.chunks().iter()) {
-                *entry = MemEntry {
-                    address: chunk.phys as u64,
-                    length: chunk.length.next_multiple_of(PAGE_SIZE) as u32,
-                    padding: 0,
-                };
-            }
-
-            let attach_request =
-                Dma::new(AttachBacking::new(res_id, mem_entries.len() as u32)).unwrap();
-            let header = Dma::new(ControlHeader::default()).unwrap();
-            let command = ChainBuilder::new()
-                .chain(Buffer::new(&attach_request))
-                .chain(Buffer::new_unsized(&mem_entries))
-                .chain(Buffer::new(&header).flags(DescriptorFlags::WRITE_ONLY))
-                .build();
-
-            self.control_queue.send(command).await;
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
-
-            (
-                VirtGpuFramebuffer {
-                    queue: self.control_queue.clone(),
-                    id: res_id,
-                    sgl,
-                    width,
-                    height,
-                },
-                width * 4,
-            )
+            self.create_dumb_buffer_inner(width, height).await.unwrap()
         })
     }
 
