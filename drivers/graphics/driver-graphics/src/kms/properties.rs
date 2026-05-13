@@ -80,6 +80,10 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         self.add(KmsBlob { data })
     }
 
+    pub fn remove_blob(&mut self, id: KmsObjectId) -> Result<()> {
+        self.remove::<KmsBlob>(id)
+    }
+
     pub fn get_blob(&self, id: KmsObjectId) -> Result<&[u8]> {
         Ok(&self.get::<KmsBlob>(id)?.data)
     }

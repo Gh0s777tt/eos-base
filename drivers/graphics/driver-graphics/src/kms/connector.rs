@@ -68,6 +68,23 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         self.get(id)
     }
 
+    pub fn set_connector_edid(&mut self, id: KmsObjectId, edid: Vec<u8>) {
+        let mut connector = self.get_connector(id).unwrap().lock().unwrap();
+        connector.update_from_edid(&edid);
+        let old_edid = connector.edid;
+        drop(connector);
+
+        if old_edid != KmsObjectId::INVALID {
+            if self.get_blob(old_edid).unwrap() == edid {
+                return; // EDID is unchanged; nothing to do
+            }
+            self.remove_blob(old_edid).unwrap();
+        }
+
+        let blob = self.add_blob(edid);
+        self.get_connector(id).unwrap().lock().unwrap().edid = blob;
+    }
+
     pub fn encoder_ids(&self) -> &[KmsObjectId] {
         &self.encoders
     }
@@ -142,7 +159,7 @@ impl<T: GraphicsAdapter> KmsConnector<T> {
         self.modes = vec![modeinfo_for_size(width, height)];
     }
 
-    pub fn update_from_edid(&mut self, edid: &[u8]) {
+    fn update_from_edid(&mut self, edid: &[u8]) {
         let edid = edid::parse(edid).unwrap().1;
 
         if let Some(first_detailed_timing) =

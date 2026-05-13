@@ -105,7 +105,7 @@ impl<'a> fmt::Debug for VirtGpuAdapter<'a> {
     }
 }
 
-impl VirtGpuAdapter<'_> {
+impl<'a> VirtGpuAdapter<'a> {
     pub async fn update_displays(&mut self) -> Result<(), Error> {
         let display_info = self.get_display_info().await?;
         let raw_displays = &display_info.display_info[..self.config.num_scanouts() as usize];
@@ -172,6 +172,12 @@ impl VirtGpuAdapter<'_> {
         Ok(header)
     }
 
+    async fn send_request_cursor<T>(&self, request: Dma<T>) -> Result<(), Error> {
+        let command = ChainBuilder::new().chain(Buffer::new(&request)).build();
+        self.cursor_queue.send(command).await;
+        Ok(())
+    }
+
     async fn get_display_info(&self) -> Result<Dma<GetDisplayInfo>, Error> {
         let header = Dma::new(ControlHeader::with_ty(CommandTy::GetDisplayInfo))?;
 
@@ -202,52 +208,120 @@ impl VirtGpuAdapter<'_> {
         Ok(response)
     }
 
-    fn update_cursor(
+    async fn resource_create_2d(&mut self, width: u32, height: u32) -> Result<ResourceId, Error> {
+        let res_id = ResourceId::alloc();
+
+        let request = Dma::new(ResourceCreate2d::new(
+            res_id,
+            ResourceFormat::Bgrx,
+            width,
+            height,
+        ))?;
+        let header = self.send_request(request).await?;
+        assert_eq!(header.ty, CommandTy::RespOkNodata);
+        Ok(res_id)
+    }
+
+    async fn resource_attach_backing(
         &mut self,
-        cursor: &VirtGpuFramebuffer,
+        res_id: ResourceId,
+        sgl: &sgl::Sgl,
+    ) -> Result<(), Error> {
+        let mut mem_entries = unsafe { Dma::zeroed_slice(sgl.chunks().len())?.assume_init() };
+        for (entry, chunk) in mem_entries.iter_mut().zip(sgl.chunks().iter()) {
+            *entry = MemEntry {
+                address: chunk.phys as u64,
+                length: chunk.length.next_multiple_of(PAGE_SIZE) as u32,
+                padding: 0,
+            };
+        }
+
+        let attach_request = Dma::new(AttachBacking::new(res_id, mem_entries.len() as u32))?;
+        let header = Dma::new(ControlHeader::default())?;
+        let command = ChainBuilder::new()
+            .chain(Buffer::new(&attach_request))
+            .chain(Buffer::new_unsized(&mem_entries))
+            .chain(Buffer::new(&header).flags(DescriptorFlags::WRITE_ONLY))
+            .build();
+
+        self.control_queue.send(command).await;
+        assert_eq!(header.ty, CommandTy::RespOkNodata);
+        Ok(())
+    }
+
+    async fn create_dumb_buffer_inner(
+        &mut self,
+        width: u32,
+        height: u32,
+    ) -> Result<(VirtGpuFramebuffer<'a>, u32), Error> {
+        let bpp = 32;
+        let fb_size = width as usize * height as usize * bpp / 8;
+        let sgl = sgl::Sgl::new(fb_size)?;
+
+        unsafe {
+            core::ptr::write_bytes(sgl.as_ptr() as *mut u8, 255, fb_size);
+        }
+
+        // Create a host resource using `VIRTIO_GPU_CMD_RESOURCE_CREATE_2D`.
+        let res_id = self.resource_create_2d(width, height).await?;
+
+        // Use the allocated framebuffer from the guest ram, and attach it as backing
+        // storage to the resource just created, using `VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING`.
+        self.resource_attach_backing(res_id, &sgl).await?;
+
+        Ok((
+            VirtGpuFramebuffer {
+                queue: self.control_queue.clone(),
+                id: res_id,
+                sgl,
+                width,
+                height,
+            },
+            width * 4,
+        ))
+    }
+
+    async fn update_cursor(
+        &mut self,
+        cursor: &VirtGpuFramebuffer<'_>,
         x: i32,
         y: i32,
         hot_x: i32,
         hot_y: i32,
     ) {
         //Transfering cursor resource to host
-        futures::executor::block_on(async {
-            let transfer_request = Dma::new(XferToHost2d::new(
-                cursor.id,
-                GpuRect {
-                    x: 0,
-                    y: 0,
-                    width: 64,
-                    height: 64,
-                },
-                0,
-            ))
-            .unwrap();
-            let header = self.send_request_fenced(transfer_request).await.unwrap();
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
-        });
+        let transfer_request = Dma::new(XferToHost2d::new(
+            cursor.id,
+            GpuRect {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 64,
+            },
+            0,
+        ))
+        .unwrap();
+        let header = self.send_request_fenced(transfer_request).await.unwrap();
+        assert_eq!(header.ty, CommandTy::RespOkNodata);
 
         //Update the cursor position
-        let request = Dma::new(UpdateCursor::update_cursor(x, y, hot_x, hot_y, cursor.id)).unwrap();
-        futures::executor::block_on(async {
-            let command = ChainBuilder::new().chain(Buffer::new(&request)).build();
-            self.cursor_queue.send(command).await;
-        });
+        self.send_request_cursor(
+            Dma::new(UpdateCursor::update_cursor(x, y, hot_x, hot_y, cursor.id)).unwrap(),
+        )
+        .await
+        .unwrap();
     }
 
-    fn move_cursor(&mut self, x: i32, y: i32) {
-        let request = Dma::new(MoveCursor::move_cursor(x, y)).unwrap();
-
-        futures::executor::block_on(async {
-            let command = ChainBuilder::new().chain(Buffer::new(&request)).build();
-            self.cursor_queue.send(command).await;
-        });
+    async fn move_cursor(&mut self, x: i32, y: i32) {
+        self.send_request_cursor(Dma::new(MoveCursor::move_cursor(x, y)).unwrap())
+            .await
+            .unwrap();
     }
 
-    fn disable_cursor(&mut self) {
+    async fn disable_cursor(&mut self) {
         if self.hidden_cursor.is_none() {
             let (width, height) = (64, 64);
-            let (cursor, stride) = self.create_dumb_buffer(width, height);
+            let (cursor, stride) = self.create_dumb_buffer_inner(width, height).await.unwrap();
             unsafe {
                 core::ptr::write_bytes(
                     cursor.sgl.as_ptr() as *mut u8,
@@ -259,7 +333,7 @@ impl VirtGpuAdapter<'_> {
         }
         let hidden_cursor = self.hidden_cursor.as_ref().unwrap().clone();
 
-        self.update_cursor(&hidden_cursor, 0, 0, 0, 0);
+        self.update_cursor(&hidden_cursor, 0, 0, 0, 0).await;
     }
 }
 
@@ -321,12 +395,8 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             };
 
             if self.has_edid {
-                connector.update_from_edid(&display.edid);
-
                 drop(connector);
-
-                let blob = objects.add_blob(display.edid.clone());
-                objects.get_connector(id).unwrap().lock().unwrap().edid = blob;
+                objects.set_connector_edid(id, display.edid.clone());
             } else {
                 connector.update_from_size(display.width, display.height);
             }
@@ -335,63 +405,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
     fn create_dumb_buffer(&mut self, width: u32, height: u32) -> (Self::Buffer, u32) {
         futures::executor::block_on(async {
-            let bpp = 32;
-            let fb_size = width as usize * height as usize * bpp / 8;
-            let sgl = sgl::Sgl::new(fb_size).unwrap();
-
-            unsafe {
-                core::ptr::write_bytes(sgl.as_ptr() as *mut u8, 255, fb_size);
-            }
-
-            let res_id = ResourceId::alloc();
-
-            // Create a host resource using `VIRTIO_GPU_CMD_RESOURCE_CREATE_2D`.
-            let request = Dma::new(ResourceCreate2d::new(
-                res_id,
-                ResourceFormat::Bgrx,
-                width,
-                height,
-            ))
-            .unwrap();
-
-            let header = self.send_request(request).await.unwrap();
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
-
-            // Use the allocated framebuffer from the guest ram, and attach it as backing
-            // storage to the resource just created, using `VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING`.
-
-            let mut mem_entries =
-                unsafe { Dma::zeroed_slice(sgl.chunks().len()).unwrap().assume_init() };
-            for (entry, chunk) in mem_entries.iter_mut().zip(sgl.chunks().iter()) {
-                *entry = MemEntry {
-                    address: chunk.phys as u64,
-                    length: chunk.length.next_multiple_of(PAGE_SIZE) as u32,
-                    padding: 0,
-                };
-            }
-
-            let attach_request =
-                Dma::new(AttachBacking::new(res_id, mem_entries.len() as u32)).unwrap();
-            let header = Dma::new(ControlHeader::default()).unwrap();
-            let command = ChainBuilder::new()
-                .chain(Buffer::new(&attach_request))
-                .chain(Buffer::new_unsized(&mem_entries))
-                .chain(Buffer::new(&header).flags(DescriptorFlags::WRITE_ONLY))
-                .build();
-
-            self.control_queue.send(command).await;
-            assert_eq!(header.ty, CommandTy::RespOkNodata);
-
-            (
-                VirtGpuFramebuffer {
-                    queue: self.control_queue.clone(),
-                    id: res_id,
-                    sgl,
-                    width,
-                    height,
-                },
-                width * 4,
-            )
+            self.create_dumb_buffer_inner(width, height).await.unwrap()
         })
     }
 
@@ -486,17 +500,20 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     }
 
     fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Buffer>, dirty_fb: bool) {
-        if let Some(buffer) = &cursor.buffer {
-            if dirty_fb {
-                self.update_cursor(buffer, cursor.x, cursor.y, cursor.hot_x, cursor.hot_y);
+        futures::executor::block_on(async {
+            if let Some(buffer) = &cursor.buffer {
+                if dirty_fb {
+                    self.update_cursor(buffer, cursor.x, cursor.y, cursor.hot_x, cursor.hot_y)
+                        .await;
+                } else {
+                    self.move_cursor(cursor.x, cursor.y).await;
+                }
             } else {
-                self.move_cursor(cursor.x, cursor.y);
+                if dirty_fb {
+                    self.disable_cursor().await;
+                }
             }
-        } else {
-            if dirty_fb {
-                self.disable_cursor();
-            }
-        }
+        });
     }
 }
 
