@@ -81,15 +81,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 
     pub fn remove_blob(&mut self, id: KmsObjectId) -> Result<()> {
-        let Some(object) = self.objects.get(&id) else {
-            return Err(Error::new(ENOENT));
-        };
-        let KmsObject::Blob(_) = object else {
-            return Err(Error::new(ENOENT));
-        };
-        self.objects.remove(&id).unwrap();
-
-        Ok(())
+        self.remove::<KmsBlob>(id)
     }
 
     pub fn get_blob(&self, id: KmsObjectId) -> Result<&[u8]> {

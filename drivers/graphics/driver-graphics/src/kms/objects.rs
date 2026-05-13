@@ -58,6 +58,18 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         }
     }
 
+    pub(super) fn remove<U: KmsObjectKind<T>>(&mut self, id: KmsObjectId) -> Result<()> {
+        let Some(object) = self.objects.get(&id) else {
+            return Err(Error::new(ENOENT));
+        };
+        let Some(_) = U::try_from_object(object) else {
+            return Err(Error::new(ENOENT));
+        };
+        self.objects.remove(&id).unwrap();
+
+        Ok(())
+    }
+
     pub(crate) fn object_type(&self, id: KmsObjectId) -> Result<u32> {
         let object = self.objects.get(&id).ok_or(Error::new(ENOENT))?;
         Ok(object.object_type())
@@ -106,15 +118,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 
     pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
-        let Some(object) = self.objects.get(&id) else {
-            return Err(Error::new(ENOENT));
-        };
-        let KmsObject::Framebuffer(_) = object else {
-            return Err(Error::new(ENOENT));
-        };
-        self.objects.remove(&id).unwrap();
-
-        Ok(())
+        self.remove::<KmsFramebuffer<T>>(id)
     }
 
     pub fn fb_ids(&self) -> &[KmsObjectId] {
