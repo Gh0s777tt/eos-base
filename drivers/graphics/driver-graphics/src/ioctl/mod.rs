@@ -4,19 +4,14 @@ use std::mem;
 use std::sync::Arc;
 
 use drm_fourcc::DrmFourcc;
-use drm_sys::{
-    drm_mode_property_enum, DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB,
-    DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE,
-    DRM_MODE_PROP_SIGNED_RANGE,
-};
 use syscall::{Error, EINVAL, ENOENT};
 
 use crate::kms::objects::{KmsObjectId, KmsObjects, KmsRect};
-use crate::kms::properties::KmsPropertyKind;
 use crate::{Buffer, Damage, DrmHandle, GraphicsAdapter, VtState, MAP_FAKE_OFFSET_MULTIPLIER};
 
 mod cursor;
 mod framebuffer;
+mod property;
 
 pub(crate) fn call_ioctl<T: GraphicsAdapter>(
     adapter: &mut T,
@@ -229,78 +224,12 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
             data.set_prop_values_ptr(&prop_vals);
             Ok(0)
         }),
-        ipc::MODE_GET_PROPERTY => ipc::DrmModeGetProperty::with(payload, |mut data| {
-            let property = objects.get_property(KmsObjectId(data.prop_id()))?;
-            data.set_name(property.name.0);
-            let mut flags = 0;
-            if property.immutable {
-                flags |= DRM_MODE_PROP_IMMUTABLE;
-            }
-            if property.atomic {
-                flags |= DRM_MODE_PROP_ATOMIC;
-            }
-            match &property.kind {
-                &KmsPropertyKind::Range(start, end) => {
-                    data.set_flags(flags | DRM_MODE_PROP_RANGE);
-                    data.set_values_ptr(&[start, end]);
-                    data.set_enum_blob_ptr(&[]);
-                }
-                KmsPropertyKind::Enum(variants) => {
-                    data.set_flags(flags | DRM_MODE_PROP_ENUM);
-                    data.set_values_ptr(
-                        &variants.iter().map(|&(_, value)| value).collect::<Vec<_>>(),
-                    );
-                    data.set_enum_blob_ptr(
-                        &variants
-                            .iter()
-                            .map(|&(name, value)| drm_mode_property_enum {
-                                name: name.0,
-                                value,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-                KmsPropertyKind::Blob => {
-                    data.set_flags(flags | DRM_MODE_PROP_BLOB);
-                    data.set_values_ptr(&[]);
-                    data.set_enum_blob_ptr(&[]);
-                }
-                KmsPropertyKind::Bitmask(bitmask_flags) => {
-                    data.set_flags(flags | DRM_MODE_PROP_BITMASK);
-                    data.set_values_ptr(
-                        &bitmask_flags
-                            .iter()
-                            .map(|&(_, value)| value)
-                            .collect::<Vec<_>>(),
-                    );
-                    data.set_enum_blob_ptr(
-                        &bitmask_flags
-                            .iter()
-                            .map(|&(name, value)| drm_mode_property_enum {
-                                name: name.0,
-                                value,
-                            })
-                            .collect::<Vec<_>>(),
-                    );
-                }
-                KmsPropertyKind::Object { type_ } => {
-                    data.set_flags(flags | DRM_MODE_PROP_OBJECT);
-                    data.set_values_ptr(&[u64::from(*type_)]);
-                    data.set_enum_blob_ptr(&[]);
-                }
-                &KmsPropertyKind::SignedRange(start, end) => {
-                    data.set_flags(flags | DRM_MODE_PROP_SIGNED_RANGE);
-                    data.set_values_ptr(&[start as u64, end as u64]);
-                    data.set_enum_blob_ptr(&[]);
-                }
-            }
-            Ok(0)
+        ipc::MODE_GET_PROPERTY => ipc::DrmModeGetProperty::with(payload, |data| {
+            property::mode_get_property(objects, data)
         }),
-        ipc::MODE_GET_PROP_BLOB => ipc::DrmModeGetBlob::with(payload, |mut data| {
-            let blob = objects.get_blob(KmsObjectId(data.blob_id()))?;
-            data.set_data(&blob);
-            Ok(0)
-        }),
+        ipc::MODE_GET_PROP_BLOB => {
+            ipc::DrmModeGetBlob::with(payload, |data| property::mode_get_prop_blob(objects, data))
+        }
         ipc::MODE_GET_FB => ipc::DrmModeFbCmd::with(payload, |data| {
             framebuffer::mode_get_fb(objects, handle, data)
         }),
@@ -427,13 +356,8 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
         ipc::MODE_ADD_FB2 => ipc::DrmModeFbCmd2::with(payload, |data| {
             framebuffer::mode_add_fb2(adapter, objects, handle, data)
         }),
-        ipc::MODE_OBJ_GET_PROPERTIES => ipc::DrmModeObjGetProperties::with(payload, |mut data| {
-            let (props, prop_vals) =
-                objects.get_object_properties_data(KmsObjectId(data.obj_id()))?;
-            data.set_props_ptr(&props);
-            data.set_prop_values_ptr(&prop_vals);
-            data.set_obj_type(objects.object_type(KmsObjectId(data.obj_id()))?);
-            Ok(0)
+        ipc::MODE_OBJ_GET_PROPERTIES => ipc::DrmModeObjGetProperties::with(payload, |data| {
+            property::mode_obj_get_properties(objects, data)
         }),
         ipc::MODE_CURSOR2 => ipc::DrmModeCursor2::with(payload, |data| {
             cursor::mode_cursor2(adapter, vts, handle, data)
