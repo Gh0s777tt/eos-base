@@ -293,13 +293,15 @@ struct VtState<T: GraphicsAdapter> {
 }
 
 enum Handle<T: GraphicsAdapter> {
-    V2 {
-        vt: usize,
-        unique: Option<String>,
-        next_id: u32,
-        buffers: HashMap<u32, Arc<T::Buffer>>,
-    },
+    V2(DrmHandle<T>),
     SchemeRoot,
+}
+
+struct DrmHandle<T: GraphicsAdapter> {
+    vt: usize,
+    unique: Option<String>,
+    next_id: u32,
+    buffers: HashMap<u32, Arc<T::Buffer>>,
 }
 
 impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
@@ -440,12 +442,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             // Ensure the VT exists such that the rest of the methods can freely access it.
             Self::get_or_create_vt(&self.adapter, &self.objects, &mut self.vts, vt);
 
-            Handle::V2 {
+            Handle::V2(DrmHandle {
                 vt,
                 unique: None,
                 next_id: 0,
                 buffers: HashMap::new(),
-            }
+            })
         } else {
             return Err(Error::new(EINVAL));
         };
@@ -464,12 +466,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
         FpathWriter::with(buf, &self.scheme_name, |w| {
             match self.handles.get(id)? {
-                Handle::V2 {
+                Handle::V2(DrmHandle {
                     vt,
                     unique: _,
                     next_id: _,
                     buffers: _,
-                } => write!(w, "v2/{vt}").unwrap(),
+                }) => write!(w, "v2/{vt}").unwrap(),
                 Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
             };
             Ok(())
@@ -487,12 +489,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
         match self.handles.get_mut(id)? {
             Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
-            Handle::V2 {
-                vt,
-                unique,
-                next_id,
-                buffers,
-            } => match metadata[0] {
+            Handle::V2(handle) => match metadata[0] {
                 ipc::VERSION => ipc::DrmVersion::with(payload, |mut data| {
                     data.set_version_major(1);
                     data.set_version_minor(4);
@@ -505,7 +502,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::GET_UNIQUE => ipc::DrmUnique::with(payload, |mut data| {
-                    if let Some(unique) = unique {
+                    if let Some(unique) = &handle.unique {
                         data.set_unique(unsafe {
                             mem::transmute::<&[u8], &[c_char]>(unique.as_bytes())
                         });
@@ -527,7 +524,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_drm_dd_major(1);
                     data.set_drm_dd_minor(4);
 
-                    *unique = Some(self.adapter.get_unique());
+                    handle.unique = Some(self.adapter.get_unique());
 
                     Ok(0)
                 }),
@@ -643,7 +640,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let mut new_plane_state = plane.lock().unwrap().state.clone();
                     new_plane_state.fb_id = fb_id;
                     new_plane_state.crtc_id = Some(crtc_id);
-                    if *vt == self.active_vt {
+                    if handle.vt == self.active_vt {
                         self.adapter
                             .set_crtc(&self.objects, crtc, new_crtc_state.clone())?;
                         self.adapter.set_plane(
@@ -668,14 +665,14 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     }
                     crtc.lock().unwrap().state = new_crtc_state.clone();
                     plane.lock().unwrap().state = new_plane_state.clone();
-                    self.vts.get_mut(vt).unwrap().crtc_state
+                    self.vts.get_mut(&handle.vt).unwrap().crtc_state
                         [crtc.lock().unwrap().crtc_index as usize] = new_crtc_state;
-                    self.vts.get_mut(vt).unwrap().plane_state
+                    self.vts.get_mut(&handle.vt).unwrap().plane_state
                         [plane.lock().unwrap().plane_index as usize] = new_plane_state;
                     Ok(0)
                 }),
                 ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
-                    let vt_state = self.vts.get_mut(vt).unwrap();
+                    let vt_state = self.vts.get_mut(&handle.vt).unwrap();
 
                     let Some(cursor_plane) = &mut vt_state.cursor_plane else {
                         return Err(Error::new(ENXIO));
@@ -685,7 +682,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     if update_buffer {
                         cursor_plane.buffer = if data.handle() == 0 {
                             None
-                        } else if let Some(buffer) = buffers.get(&data.handle()) {
+                        } else if let Some(buffer) = handle.buffers.get(&data.handle()) {
                             Some(buffer.clone())
                         } else {
                             return Err(Error::new(ENOENT));
@@ -815,19 +812,22 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         _ => todo!(),
                     };
 
-                    *next_id += 1;
-                    buffers.insert(*next_id, fb.buffer.clone());
+                    handle.next_id += 1;
+                    handle.buffers.insert(handle.next_id, fb.buffer.clone());
 
                     data.set_width(fb.width);
                     data.set_height(fb.height);
                     data.set_pitch(fb.pitch);
                     data.set_bpp(bpp);
                     data.set_depth(depth);
-                    data.set_handle(*next_id);
+                    data.set_handle(handle.next_id);
                     Ok(0)
                 }),
                 ipc::MODE_ADD_FB => ipc::DrmModeFbCmd::with(payload, |mut data| {
-                    let buffer = buffers.get(&data.handle()).ok_or(Error::new(EINVAL))?;
+                    let buffer = handle
+                        .buffers
+                        .get(&data.handle())
+                        .ok_or(Error::new(EINVAL))?;
 
                     if data.bpp() != 32 {
                         return Err(Error::new(EINVAL));
@@ -907,7 +907,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             height: fb.height,
                         });
 
-                    if *vt == self.active_vt {
+                    if handle.vt == self.active_vt {
                         for plane in self.objects.planes() {
                             let state = plane.lock().unwrap().state.clone();
                             if state.fb_id == Some(KmsObjectId(data.fb_id())) {
@@ -930,9 +930,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_pitch(pitch);
                     data.set_size(buffer.size() as u64);
 
-                    *next_id += 1;
-                    buffers.insert(*next_id, Arc::new(buffer));
-                    data.set_handle(*next_id as u32);
+                    handle.next_id += 1;
+                    handle.buffers.insert(handle.next_id, Arc::new(buffer));
+                    data.set_handle(handle.next_id as u32);
                     Ok(0)
                 }),
                 ipc::MODE_MAP_DUMB => ipc::DrmModeMapDumb::with(payload, |mut data| {
@@ -942,19 +942,19 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     let buffer_id = data.handle();
 
-                    if !buffers.contains_key(&buffer_id) {
+                    if !handle.buffers.contains_key(&buffer_id) {
                         return Err(Error::new(ENOENT));
                     }
 
                     // FIXME use a better scheme for creating map offsets
-                    assert!(buffers[&buffer_id].size() < MAP_FAKE_OFFSET_MULTIPLIER);
+                    assert!(handle.buffers[&buffer_id].size() < MAP_FAKE_OFFSET_MULTIPLIER);
 
                     data.set_offset((buffer_id as usize * MAP_FAKE_OFFSET_MULTIPLIER) as u64);
 
                     Ok(0)
                 }),
                 ipc::MODE_DESTROY_DUMB => ipc::DrmModeDestroyDumb::with(payload, |data| {
-                    if buffers.remove(&data.handle()).is_none() {
+                    if handle.buffers.remove(&data.handle()).is_none() {
                         return Err(Error::new(ENOENT));
                     }
                     Ok(0)
@@ -1003,7 +1003,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         height: data.crtc_h(),
                     };
 
-                    if *vt == self.active_vt {
+                    if handle.vt == self.active_vt {
                         self.adapter.set_plane(
                             &self.objects,
                             plane,
@@ -1016,7 +1016,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                             },
                         )?;
                     }
-                    self.vts.get_mut(vt).unwrap().plane_state
+                    self.vts.get_mut(&handle.vt).unwrap().plane_state
                         [plane.lock().unwrap().plane_index as usize] = new_state;
                     Ok(0)
                 }),
@@ -1036,7 +1036,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 ipc::MODE_ADD_FB2 => ipc::DrmModeFbCmd2::with(payload, |mut data| {
                     // FIXME handle multi-plane framebuffers
 
-                    let buffer = buffers.get(&data.handles()[0]).ok_or(Error::new(EINVAL))?;
+                    let buffer = handle
+                        .buffers
+                        .get(&data.handles()[0])
+                        .ok_or(Error::new(EINVAL))?;
 
                     let fb = self.adapter.create_framebuffer(buffer);
 
@@ -1073,7 +1076,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     })
                 }
                 ipc::MODE_CURSOR2 => ipc::DrmModeCursor2::with(payload, |data| {
-                    let vt_state = self.vts.get_mut(vt).unwrap();
+                    let vt_state = self.vts.get_mut(&handle.vt).unwrap();
 
                     let Some(cursor_plane) = &mut vt_state.cursor_plane else {
                         return Err(Error::new(ENXIO));
@@ -1083,7 +1086,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     if update_buffer {
                         cursor_plane.buffer = if data.handle() == 0 {
                             None
-                        } else if let Some(buffer) = buffers.get(&data.handle()) {
+                        } else if let Some(buffer) = handle.buffers.get(&data.handle()) {
                             Some(buffer.clone())
                         } else {
                             return Err(Error::new(ENOENT));
@@ -1104,13 +1107,13 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 ipc::MODE_GET_FB2 => ipc::DrmModeFbCmd2::with(payload, |mut data| {
                     let fb = self.objects.get_framebuffer(KmsObjectId(data.fb_id()))?;
 
-                    *next_id += 1;
-                    buffers.insert(*next_id, fb.buffer.clone());
+                    handle.next_id += 1;
+                    handle.buffers.insert(handle.next_id, fb.buffer.clone());
 
                     data.set_width(fb.width);
                     data.set_height(fb.height);
                     data.set_pixel_format(fb.pixel_format as u32);
-                    data.set_handles([*next_id, 0, 0, 0]);
+                    data.set_handles([handle.next_id, 0, 0, 0]);
                     data.set_pitches([fb.pitch, 0, 0, 0]);
                     data.set_offsets([0; 4]);
                     data.set_modifier([0; 4]);
@@ -1131,12 +1134,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     ) -> syscall::Result<usize> {
         // log::trace!("KSMSG MMAP {} {:?} {} {}", id, _flags, _offset, _size);
         let (framebuffer, offset) = match self.handles.get(id)? {
-            Handle::V2 {
+            Handle::V2(DrmHandle {
                 vt: _,
                 unique: _,
                 next_id: _,
                 buffers,
-            } => (
+            }) => (
                 buffers
                     .get(&((offset as usize / MAP_FAKE_OFFSET_MULTIPLIER) as u32))
                     .ok_or(Error::new(EINVAL))
