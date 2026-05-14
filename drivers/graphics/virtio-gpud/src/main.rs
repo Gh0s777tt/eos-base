@@ -534,6 +534,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> anyhow:
         EventQueue::new().expect("virtio-gpud: failed to create event queue");
 
     let mut scheme = scheme::GpuScheme::new(
+        format!("pci:{}", pcid_handle.config().func.addr),
         config,
         control_queue.clone(),
         cursor_queue.clone(),

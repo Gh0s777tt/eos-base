@@ -1,6 +1,7 @@
 #![feature(macro_metavar_expr)]
 
 use std::collections::HashMap;
+use std::ffi::c_char;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, Write};
@@ -90,6 +91,7 @@ pub trait GraphicsAdapter: Sized + Debug {
 
     fn init(&mut self, objects: &mut KmsObjects<Self>);
 
+    fn get_unique(&self) -> String;
     fn get_cap(&self, cap: u32) -> Result<u64>;
     fn set_client_cap(&self, cap: u32, value: u64) -> Result<()>;
 
@@ -281,6 +283,7 @@ struct VtState<T: GraphicsAdapter> {
 enum Handle<T: GraphicsAdapter> {
     V2 {
         vt: usize,
+        unique: Option<String>,
         next_id: u32,
         buffers: HashMap<u32, Arc<T::Buffer>>,
     },
@@ -414,6 +417,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
             Handle::V2 {
                 vt,
+                unique: None,
                 next_id: 0,
                 buffers: HashMap::new(),
             }
@@ -432,6 +436,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             match self.handles.get(id)? {
                 Handle::V2 {
                     vt,
+                    unique: _,
                     next_id: _,
                     buffers: _,
                 } => write!(w, "v2/{vt}").unwrap(),
@@ -462,6 +467,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
             Handle::V2 {
                 vt,
+                unique,
                 next_id,
                 buffers,
             } => match metadata[0] {
@@ -476,12 +482,39 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     Ok(0)
                 }),
+                ipc::GET_UNIQUE => ipc::DrmUnique::with(payload, |mut data| {
+                    if let Some(unique) = unique {
+                        data.set_unique(unsafe {
+                            mem::transmute::<&[u8], &[c_char]>(unique.as_bytes())
+                        });
+                    } else {
+                        data.set_unique_len(0);
+                    }
+                    Ok(0)
+                }),
+                ipc::SET_VERSION => ipc::DrmSetVersion::with(payload, |mut data| {
+                    // We only support version 1.4 currently
+                    if data.drm_di_major() != 0 || data.drm_di_minor() != 4 {
+                        return Err(Error::new(EINVAL));
+                    }
+                    if data.drm_dd_major() != 0 || data.drm_dd_minor() != 4 {
+                        return Err(Error::new(EINVAL));
+                    }
+                    data.set_drm_di_major(1);
+                    data.set_drm_di_minor(4);
+                    data.set_drm_dd_major(1);
+                    data.set_drm_dd_minor(4);
+
+                    *unique = Some(self.adapter.get_unique());
+
+                    Ok(0)
+                }),
                 ipc::GET_CAP => ipc::DrmGetCap::with(payload, |mut data| {
                     data.set_value(
                         self.adapter.get_cap(
                             data.capability()
                                 .try_into()
-                                .map_err(|_| syscall::Error::new(EINVAL))?,
+                                .map_err(|_| Error::new(EINVAL))?,
                         )?,
                     );
                     Ok(0)
@@ -490,7 +523,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     self.adapter.set_client_cap(
                         data.capability()
                             .try_into()
-                            .map_err(|_| syscall::Error::new(EINVAL))?,
+                            .map_err(|_| Error::new(EINVAL))?,
                         data.value(),
                     )?;
                     Ok(0)
@@ -973,6 +1006,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         let (framebuffer, offset) = match self.handles.get(id)? {
             Handle::V2 {
                 vt: _,
+                unique: _,
                 next_id: _,
                 buffers,
             } => (

@@ -168,6 +168,7 @@ enum VideoInput {
 }
 
 pub struct Device {
+    unique: String,
     kind: DeviceKind,
     alloc_buffers: RangeAllocator<u32>,
     bios: Option<Bios>,
@@ -426,6 +427,7 @@ impl Device {
         //TODO: get number of available buffers
         let buffers = 1024;
         Ok(Self {
+            unique: format!("pci:{}", pcid_handle.config().func.addr),
             kind,
             alloc_buffers: RangeAllocator::new(0..buffers),
             bios,

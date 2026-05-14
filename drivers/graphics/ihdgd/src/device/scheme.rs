@@ -48,6 +48,10 @@ impl GraphicsAdapter for Device {
         self.init_inner(objects);
     }
 
+    fn get_unique(&self) -> String {
+        self.unique.clone()
+    }
+
     fn get_cap(&self, cap: u32) -> syscall::Result<u64> {
         match cap {
             DRM_CAP_DUMB_BUFFER => Ok(1),

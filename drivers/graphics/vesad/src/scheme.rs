@@ -59,6 +59,10 @@ impl GraphicsAdapter for FbAdapter {
         }
     }
 
+    fn get_unique(&self) -> String {
+        format!("vesad:{:x}", self.framebuffers[0].phys)
+    }
+
     fn get_cap(&self, cap: u32) -> syscall::Result<u64> {
         match cap {
             DRM_CAP_DUMB_BUFFER => Ok(1),
