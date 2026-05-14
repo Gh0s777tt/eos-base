@@ -149,7 +149,7 @@ impl GraphicsAdapter for FbAdapter {
             if let Some(buffer) = buffer {
                 buffer.buffer.sync(framebuffer, damage)
             } else {
-                let onscreen_ptr = framebuffer.onscreen as *mut u32;
+                let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
                 for row in 0..framebuffer.height {
                     unsafe {
                         ptr::write_bytes(

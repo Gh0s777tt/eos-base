@@ -450,7 +450,6 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
             let crtc = objects.get_crtc(crtc_id).unwrap().lock().unwrap();
             let mut plane = plane.lock().unwrap();
 
-            // fb_id now in plane state
             let framebuffer = new_plane_state
                 .fb_id
                 .map(|fb_id| objects.get_framebuffer(fb_id))
@@ -494,6 +493,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
                 let header = self.send_request(req).await.unwrap();
                 assert_eq!(header.ty, CommandTy::RespOkNodata);
 
+                // FIXME once we support resizing we also need to check that the current and target size match
                 if self.displays[display_id as usize].active_resource != Some(framebuffer.buffer.id)
                 {
                     let scanout_request = Dma::new(SetScanout::new(
