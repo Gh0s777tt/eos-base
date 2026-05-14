@@ -929,6 +929,23 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_plane_id_ptr(&ids);
                     Ok(0)
                 }),
+                ipc::MODE_GET_PLANE => ipc::DrmModeGetPlane::with(payload, |mut data| {
+                    let i = id_index(data.plane_id());
+                    let crtc_id = self.objects.crtc_ids()[i as usize];
+                    let crtc = self.objects.get_crtc(crtc_id).unwrap();
+                    data.set_crtc_id(crtc_id.0);
+                    data.set_fb_id(
+                        crtc.lock()
+                            .unwrap()
+                            .state
+                            .fb_id
+                            .unwrap_or(KmsObjectId::INVALID)
+                            .0,
+                    );
+                    data.set_possible_crtcs(1 << i);
+                    data.set_format_type_ptr(&[DrmFourcc::Argb8888 as u32]);
+                    Ok(0)
+                }),
                 ipc::MODE_ADD_FB2 => ipc::DrmModeFbCmd2::with(payload, |mut data| {
                     // FIXME handle multi-plane framebuffers
 
@@ -948,23 +965,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     data.set_fb_id(id.0);
 
-                    Ok(0)
-                }),
-                ipc::MODE_GET_PLANE => ipc::DrmModeGetPlane::with(payload, |mut data| {
-                    let i = id_index(data.plane_id());
-                    let crtc_id = self.objects.crtc_ids()[i as usize];
-                    let crtc = self.objects.get_crtc(crtc_id).unwrap();
-                    data.set_crtc_id(crtc_id.0);
-                    data.set_fb_id(
-                        crtc.lock()
-                            .unwrap()
-                            .state
-                            .fb_id
-                            .unwrap_or(KmsObjectId::INVALID)
-                            .0,
-                    );
-                    data.set_possible_crtcs(1 << i);
-                    data.set_format_type_ptr(&[DrmFourcc::Argb8888 as u32]);
                     Ok(0)
                 }),
                 ipc::MODE_OBJ_GET_PROPERTIES => {
