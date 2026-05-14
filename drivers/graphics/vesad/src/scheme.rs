@@ -4,7 +4,9 @@ use std::ptr::{self, NonNull};
 use std::sync::Mutex;
 
 use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
-use driver_graphics::kms::objects::{KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{
+    KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneState,
+};
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
 use drm_sys::{
     DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFERRED_DEPTH, DRM_CAP_DUMB_PREFER_SHADOW,
@@ -31,6 +33,7 @@ impl KmsConnectorDriver for Connector {
 impl GraphicsAdapter for FbAdapter {
     type Connector = Connector;
     type Crtc = ();
+    type Plane = ();
 
     type Buffer = GraphicScreen;
     type Framebuffer = ();
@@ -45,7 +48,7 @@ impl GraphicsAdapter for FbAdapter {
 
     fn init(&mut self, objects: &mut KmsObjects<Self>) {
         for (framebuffer_id, framebuffer) in self.framebuffers.iter().enumerate() {
-            let crtc = objects.add_crtc((), ());
+            let (crtc, _primary_plane_id) = objects.add_crtc((), (), (), ());
 
             objects.add_connector(
                 Connector {
@@ -103,17 +106,34 @@ impl GraphicsAdapter for FbAdapter {
 
     fn set_crtc(
         &mut self,
-        objects: &KmsObjects<Self>,
+        _objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self>>,
         state: KmsCrtcState<Self>,
-        damage: Damage,
     ) -> syscall::Result<()> {
         let mut crtc = crtc.lock().unwrap();
-        let buffer = state
+        crtc.state = state;
+        Ok(())
+    }
+
+    fn set_plane(
+        &mut self,
+        objects: &KmsObjects<Self>,
+        plane: &Mutex<KmsPlane<Self>>,
+        new_plane_state: KmsPlaneState<Self>,
+        damage: Damage,
+    ) -> syscall::Result<()> {
+        let Some(crtc_id) = new_plane_state.crtc_id else {
+            return Ok(());
+        };
+        let crtc = objects.get_crtc(crtc_id).unwrap().lock().unwrap();
+        let mut plane = plane.lock().unwrap();
+
+        let buffer = new_plane_state
             .fb_id
             .map(|fb_id| objects.get_framebuffer(fb_id))
             .transpose()?;
-        crtc.state = state;
+
+        plane.state = new_plane_state;
 
         for connector in objects.connectors() {
             let connector = connector.lock().unwrap();

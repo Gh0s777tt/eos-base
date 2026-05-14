@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
-use driver_graphics::kms::objects::{KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{
+    KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneState,
+};
 use driver_graphics::{Buffer as DrmBuffer, CursorPlane, Damage, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{
     DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFERRED_DEPTH,
@@ -341,6 +343,7 @@ impl<'a> VirtGpuAdapter<'a> {
 impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     type Connector = VirtGpuConnector;
     type Crtc = ();
+    type Plane = ();
 
     type Buffer = VirtGpuFramebuffer<'a>;
     type Framebuffer = ();
@@ -359,7 +362,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         });
 
         for display_id in 0..self.config.num_scanouts.get() {
-            let crtc = objects.add_crtc((), ());
+            let (crtc, _primary_plane_id) = objects.add_crtc((), (), (), ());
 
             objects.add_connector(VirtGpuConnector { display_id }, (), &[crtc]);
         }
@@ -424,18 +427,35 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
     fn set_crtc(
         &mut self,
-        objects: &KmsObjects<Self>,
+        _objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self>>,
         state: KmsCrtcState<Self>,
+    ) -> syscall::Result<()> {
+        let mut crtc = crtc.lock().unwrap();
+        crtc.state = state;
+        Ok(())
+    }
+
+    fn set_plane(
+        &mut self,
+        objects: &KmsObjects<Self>,
+        plane: &Mutex<KmsPlane<Self>>,
+        new_plane_state: KmsPlaneState<Self>,
         damage: Damage,
     ) -> syscall::Result<()> {
         futures::executor::block_on(async {
-            let mut crtc = crtc.lock().unwrap();
-            let framebuffer = state
+            let Some(crtc_id) = new_plane_state.crtc_id else {
+                return Ok(());
+            };
+            let crtc = objects.get_crtc(crtc_id).unwrap().lock().unwrap();
+            let mut plane = plane.lock().unwrap();
+
+            let framebuffer = new_plane_state
                 .fb_id
                 .map(|fb_id| objects.get_framebuffer(fb_id))
                 .transpose()?;
-            crtc.state = state;
+
+            plane.state = new_plane_state;
 
             for connector in objects.connectors() {
                 let connector = connector.lock().unwrap();

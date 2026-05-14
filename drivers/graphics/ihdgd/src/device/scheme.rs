@@ -2,7 +2,8 @@ use std::sync::Mutex;
 
 use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{
-    KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects,
+    KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneDriver,
+    KmsPlaneState,
 };
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
 use drm_sys::{
@@ -19,7 +20,17 @@ pub struct Crtc {
     pub pipe_idx: usize,
 }
 
+#[derive(Debug)]
+pub struct Plane {
+    pub pipe_idx: usize,
+    pub plane_idx: usize,
+}
+
 impl KmsCrtcDriver for Crtc {
+    type State = ();
+}
+
+impl KmsPlaneDriver for Plane {
     type State = ();
 }
 
@@ -32,6 +43,7 @@ impl Buffer for GpuBuffer {
 impl GraphicsAdapter for Device {
     type Connector = ();
     type Crtc = Crtc;
+    type Plane = Plane;
 
     type Buffer = GpuBuffer;
     type Framebuffer = ();
@@ -89,20 +101,36 @@ impl GraphicsAdapter for Device {
 
     fn set_crtc(
         &mut self,
-        objects: &KmsObjects<Self>,
+        _objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self>>,
         state: KmsCrtcState<Self>,
-        _damage: Damage,
     ) -> syscall::Result<()> {
         let mut crtc = crtc.lock().unwrap();
-        let fb = state
+        crtc.state = state;
+        Ok(())
+    }
+
+    fn set_plane(
+        &mut self,
+        objects: &KmsObjects<Self>,
+        plane: &Mutex<KmsPlane<Self>>,
+        new_plane_state: KmsPlaneState<Self>,
+        _damage: Damage,
+    ) -> syscall::Result<()> {
+        let mut plane = plane.lock().unwrap();
+
+        let buffer = new_plane_state
             .fb_id
             .map(|fb_id| objects.get_framebuffer(fb_id))
             .transpose()?;
-        crtc.state = state;
 
-        if let Some(primary_plane) = self.pipes[crtc.driver_data.pipe_idx].planes.first_mut() {
-            primary_plane.set_framebuffer(fb);
+        plane.state = new_plane_state;
+
+        if let Some(plane_hw) = self.pipes[plane.driver_data.pipe_idx]
+            .planes
+            .get_mut(plane.driver_data.plane_idx)
+        {
+            plane_hw.set_framebuffer(buffer);
         }
 
         Ok(())
