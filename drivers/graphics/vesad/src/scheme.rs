@@ -4,7 +4,9 @@ use std::ptr::{self, NonNull};
 use std::sync::Mutex;
 
 use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
-use driver_graphics::kms::objects::{KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{
+    KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneState,
+};
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
 use drm_sys::{
     DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFERRED_DEPTH, DRM_CAP_DUMB_PREFER_SHADOW,
@@ -34,6 +36,8 @@ impl GraphicsAdapter for FbAdapter {
 
     type Buffer = GraphicScreen;
     type Framebuffer = ();
+
+    type Plane = ();
 
     fn name(&self) -> &'static [u8] {
         b"vesad"
@@ -109,11 +113,27 @@ impl GraphicsAdapter for FbAdapter {
         damage: Damage,
     ) -> syscall::Result<()> {
         let mut crtc = crtc.lock().unwrap();
-        let buffer = state
+        crtc.state = state;
+        Ok(())
+    }
+
+    fn set_plane(
+        &mut self,
+        objects: &KmsObjects<Self>,
+        crtc: &Mutex<KmsCrtc<Self>>,
+        plane: &Mutex<KmsPlane<Self>>,
+        new_plane_state: KmsPlaneState<Self>,
+        damage: Damage,
+    ) -> syscall::Result<()> {
+        let mut crtc = crtc.lock().unwrap();
+        let mut plane = plane.lock().unwrap();
+
+        let buffer = new_plane_state
             .fb_id
             .map(|fb_id| objects.get_framebuffer(fb_id))
             .transpose()?;
-        crtc.state = state;
+
+        plane.state = new_plane_state;
 
         for connector in objects.connectors() {
             let connector = connector.lock().unwrap();
@@ -128,7 +148,7 @@ impl GraphicsAdapter for FbAdapter {
             if let Some(buffer) = buffer {
                 buffer.buffer.sync(framebuffer, damage)
             } else {
-                let onscreen_ptr = framebuffer.onscreen as *mut u32; // FIXME use as_mut_ptr once stable
+                let onscreen_ptr = framebuffer.onscreen as *mut u32;
                 for row in 0..framebuffer.height {
                     unsafe {
                         ptr::write_bytes(

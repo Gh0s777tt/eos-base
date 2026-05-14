@@ -24,7 +24,10 @@ use syscall::schemev2::NewFdFlags;
 use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EINVAL, ENOENT, ENXIO, EOPNOTSUPP};
 
 use crate::kms::connector::{KmsConnectorDriver, KmsConnectorState};
-use crate::kms::objects::{self, KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects};
+use crate::kms::objects::{
+    self, KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneDriver,
+    KmsPlaneState, KmsPlaneType, KmsRect,
+};
 use crate::kms::properties::KmsPropertyKind;
 
 pub mod kms;
@@ -83,6 +86,8 @@ pub trait GraphicsAdapter: Sized + Debug {
     type Connector: KmsConnectorDriver;
     type Crtc: KmsCrtcDriver;
 
+    type Plane: KmsPlaneDriver;
+
     type Buffer: Buffer;
     type Framebuffer: Framebuffer;
 
@@ -107,6 +112,15 @@ pub trait GraphicsAdapter: Sized + Debug {
         objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self>>,
         new_state: KmsCrtcState<Self>,
+        damage: Damage,
+    ) -> syscall::Result<()>;
+
+    fn set_plane(
+        &mut self,
+        objects: &KmsObjects<Self>,
+        crtc: &Mutex<KmsCrtc<Self>>,
+        plane: &Mutex<KmsPlane<Self>>,
+        new_plane_state: KmsPlaneState<Self>,
         damage: Damage,
     ) -> syscall::Result<()>;
 
@@ -590,7 +604,8 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_SET_CRTC => ipc::DrmModeCrtc::with(payload, |data| {
-                    let crtc = self.objects.get_crtc(KmsObjectId(data.crtc_id()))?;
+                    let crtc_id = KmsObjectId(data.crtc_id());
+                    let crtc = self.objects.get_crtc(crtc_id)?;
                     let connector_ids: Vec<KmsObjectId> = data
                         .set_connectors_ptr()
                         .iter()
@@ -607,14 +622,44 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     } else {
                         None
                     };
-                    let mut new_state = crtc.lock().unwrap().state.clone();
-                    new_state.fb_id = fb_id;
-                    new_state.mode = mode;
+
+                    let primary_plane_id = self
+                        .objects
+                        .plane_ids()
+                        .iter()
+                        .copied()
+                        .find(|&pid| {
+                            let plane = self.objects.get_plane(pid).unwrap().lock().unwrap();
+                            plane.plane_type == KmsPlaneType::Primary
+                                && (plane.state.crtc_id == Some(crtc_id)
+                                    || plane.possible_crtcs
+                                        & (1 << crtc.lock().unwrap().crtc_index)
+                                        != 0)
+                        })
+                        .ok_or(Error::new(EINVAL))?;
+                    let plane = self.objects.get_plane(primary_plane_id)?;
+                    let mut new_crtc_state = crtc.lock().unwrap().state.clone();
+                    new_crtc_state.mode = mode;
+                    let mut new_plane_state = plane.lock().unwrap().state.clone();
+                    new_plane_state.fb_id = fb_id;
+                    new_plane_state.crtc_id = Some(crtc_id);
                     if *vt == self.active_vt {
                         self.adapter.set_crtc(
                             &self.objects,
                             crtc,
-                            new_state.clone(),
+                            new_crtc_state.clone(),
+                            Damage {
+                                x: 0,
+                                y: 0,
+                                width: 0,
+                                height: 0,
+                            },
+                        )?;
+                        self.adapter.set_plane(
+                            &self.objects,
+                            crtc,
+                            plane,
+                            new_plane_state.clone(),
                             Damage {
                                 x: data.x(),
                                 y: data.y(),
@@ -622,18 +667,19 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                                 height: mode.map_or(0, |m| m.vdisplay as u32),
                             },
                         )?;
-
                         for connector in connector_ids {
                             self.objects
                                 .get_connector(connector)?
                                 .lock()
                                 .unwrap()
                                 .state
-                                .crtc_id = KmsObjectId(data.crtc_id());
+                                .crtc_id = crtc_id
                         }
                     }
+                    crtc.lock().unwrap().state = new_crtc_state.clone();
+                    plane.lock().unwrap().state = new_plane_state.clone();
                     self.vts.get_mut(vt).unwrap().crtc_state
-                        [crtc.lock().unwrap().crtc_index as usize] = new_state;
+                        [crtc.lock().unwrap().crtc_index as usize] = new_crtc_state;
                     Ok(0)
                 }),
                 ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
@@ -927,6 +973,60 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         ids.push(plane_id(i));
                     }
                     data.set_plane_id_ptr(&ids);
+                    Ok(0)
+                }),
+                ipc::MODE_SET_PLANE => ipc::DrmModeSetPlane::with(payload, |data| {
+                    let plane_id = KmsObjectId(data.plane_id());
+                    let plane_mutex = self.objects.get_plane(plane_id)?;
+
+                    let crtc_id = KmsObjectId(data.crtc_id());
+                    let crtc = self.objects.get_crtc(crtc_id)?;
+                    let crtc_index = crtc.lock().unwrap().crtc_index;
+
+                    let new_state;
+                    {
+                        let mut plane = plane_mutex.lock().unwrap();
+                        if plane.possible_crtcs & (1 << crtc_index) == 0 {
+                            return Err(Error::new(EINVAL));
+                        }
+                        let fb_id = if data.fb_id() != 0 {
+                            KmsObjectId(data.fb_id())
+                        } else {
+                            KmsObjectId::INVALID
+                        };
+                        let mut state = plane.state.clone();
+                        state.fb_id = Some(fb_id);
+                        state.crtc_id = Some(crtc_id);
+                        state.src_rect = KmsRect {
+                            x: data.src_x(),
+                            y: data.src_y(),
+                            width: data.src_w(),
+                            height: data.src_h(),
+                        };
+                        state.crtc_rect = KmsRect {
+                            x: data.crtc_x() as i32,
+                            y: data.crtc_y() as i32,
+                            width: data.crtc_w(),
+                            height: data.crtc_h(),
+                        };
+                        plane.state = state.clone();
+                        new_state = state;
+                    }
+
+                    if *vt == self.active_vt {
+                        self.adapter.set_plane(
+                            &self.objects,
+                            crtc,
+                            plane_mutex,
+                            new_state,
+                            Damage {
+                                x: 0,
+                                y: 0,
+                                width: 0,
+                                height: 0,
+                            },
+                        )?;
+                    }
                     Ok(0)
                 }),
                 ipc::MODE_GET_PLANE => ipc::DrmModeGetPlane::with(payload, |mut data| {

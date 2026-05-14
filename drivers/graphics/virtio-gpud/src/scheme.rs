@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
-use driver_graphics::kms::objects::{KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects};
+use driver_graphics::kms::objects::{
+    KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneState,
+};
 use driver_graphics::{Buffer as DrmBuffer, CursorPlane, Damage, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{
     DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFERRED_DEPTH,
@@ -345,6 +347,8 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     type Buffer = VirtGpuFramebuffer<'a>;
     type Framebuffer = ();
 
+    type Plane = ();
+
     fn name(&self) -> &'static [u8] {
         b"virtio-gpud"
     }
@@ -429,13 +433,30 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         state: KmsCrtcState<Self>,
         damage: Damage,
     ) -> syscall::Result<()> {
+        let mut crtc = crtc.lock().unwrap();
+        crtc.state = state;
+        Ok(())
+    }
+
+    fn set_plane(
+        &mut self,
+        objects: &KmsObjects<Self>,
+        crtc: &Mutex<KmsCrtc<Self>>,
+        plane: &Mutex<KmsPlane<Self>>,
+        new_plane_state: KmsPlaneState<Self>,
+        damage: Damage,
+    ) -> syscall::Result<()> {
         futures::executor::block_on(async {
-            let mut crtc = crtc.lock().unwrap();
-            let framebuffer = state
+            let crtc = crtc.lock().unwrap();
+            let mut plane = plane.lock().unwrap();
+
+            // fb_id now in plane state
+            let framebuffer = new_plane_state
                 .fb_id
                 .map(|fb_id| objects.get_framebuffer(fb_id))
                 .transpose()?;
-            crtc.state = state;
+
+            plane.state = new_plane_state;
 
             for connector in objects.connectors() {
                 let connector = connector.lock().unwrap();
@@ -473,7 +494,6 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
                 let header = self.send_request(req).await.unwrap();
                 assert_eq!(header.ty, CommandTy::RespOkNodata);
 
-                // FIXME once we support resizing we also need to check that the current and target size match
                 if self.displays[display_id as usize].active_resource != Some(framebuffer.buffer.id)
                 {
                     let scanout_request = Dma::new(SetScanout::new(

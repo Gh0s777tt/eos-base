@@ -1,8 +1,8 @@
 use std::sync::Mutex;
 
-use driver_graphics::kms::connector::KmsConnectorStatus;
+use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
 use driver_graphics::kms::objects::{
-    KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects,
+    KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneState,
 };
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
 use drm_sys::{
@@ -19,7 +19,16 @@ pub struct Crtc {
     pub pipe_idx: usize,
 }
 
+#[derive(Debug)]
+pub struct Connector {
+    pub fb_id: Option<KmsObjectId>,
+}
+
 impl KmsCrtcDriver for Crtc {
+    type State = ();
+}
+
+impl KmsConnectorDriver for Connector {
     type State = ();
 }
 
@@ -30,11 +39,13 @@ impl Buffer for GpuBuffer {
 }
 
 impl GraphicsAdapter for Device {
-    type Connector = ();
+    type Connector = Connector;
     type Crtc = Crtc;
 
     type Buffer = GpuBuffer;
     type Framebuffer = ();
+
+    type Plane = ();
 
     fn name(&self) -> &'static [u8] {
         b"ihdgd"
@@ -95,14 +106,31 @@ impl GraphicsAdapter for Device {
         _damage: Damage,
     ) -> syscall::Result<()> {
         let mut crtc = crtc.lock().unwrap();
-        let fb = state
+        crtc.state = state;
+        Ok(())
+    }
+
+    fn set_plane(
+        &mut self,
+        objects: &KmsObjects<Self>,
+        crtc: &Mutex<KmsCrtc<Self>>,
+        plane: &Mutex<KmsPlane<Self>>,
+        new_plane_state: KmsPlaneState<Self>,
+        damage: Damage,
+    ) -> syscall::Result<()> {
+        let crtc = crtc.lock().unwrap();
+        let mut plane = plane.lock().unwrap();
+
+        let buffer = new_plane_state
             .fb_id
             .map(|fb_id| objects.get_framebuffer(fb_id))
             .transpose()?;
-        crtc.state = state;
 
-        if let Some(primary_plane) = self.pipes[crtc.driver_data.pipe_idx].planes.first_mut() {
-            primary_plane.set_framebuffer(fb);
+        plane.state = new_plane_state;
+
+        let pipe_idx = crtc.driver_data.pipe_idx;
+        if let Some(plane_hw) = self.pipes[pipe_idx].planes.first_mut() {
+            plane_hw.set_framebuffer(buffer);
         }
 
         Ok(())

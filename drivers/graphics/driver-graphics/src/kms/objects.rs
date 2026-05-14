@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use drm_fourcc::DrmFourcc;
 use drm_sys::{
     drm_mode_modeinfo, DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
-    DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PROPERTY,
+    DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PLANE, DRM_MODE_OBJECT_PROPERTY,
 };
 use syscall::{Error, Result, ENOENT};
 
@@ -23,6 +23,7 @@ pub struct KmsObjects<T: GraphicsAdapter> {
     pub(super) encoders: Vec<KmsObjectId>,
     crtcs: Vec<KmsObjectId>,
     framebuffers: Vec<KmsObjectId>,
+    planes: Vec<KmsObjectId>,
     pub(super) objects: HashMap<KmsObjectId, KmsObject<T>>,
     _marker: PhantomData<T>,
 }
@@ -35,6 +36,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             encoders: vec![],
             crtcs: vec![],
             framebuffers: vec![],
+            planes: vec![],
             objects: HashMap::new(),
             _marker: PhantomData,
         };
@@ -129,6 +131,52 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     pub fn get_framebuffer(&self, id: KmsObjectId) -> Result<&KmsFramebuffer<T>> {
         self.get(id)
     }
+
+    pub fn add_plane(
+        &mut self,
+        crtcs: &[KmsObjectId],
+        plane_type: KmsPlaneType,
+        driver_data: T::Plane,
+        driver_data_state: <T::Plane as KmsPlaneDriver>::State,
+    ) -> KmsObjectId {
+        let mut possible_crtcs = 0u32;
+        for &crtc in crtcs {
+            possible_crtcs |= 1 << self.get_crtc(crtc).unwrap().lock().unwrap().crtc_index
+        }
+        let id = self.add(Mutex::new(KmsPlane {
+            possible_crtcs,
+            plane_type,
+            state: KmsPlaneState {
+                fb_id: None,
+                crtc_id: None,
+                src_rect: KmsRect {
+                    x: 0u32,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                },
+                crtc_rect: KmsRect {
+                    x: 0i32,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                },
+                driver_data: driver_data_state,
+            },
+            driver_data,
+        }));
+        self.planes.push(id);
+
+        id
+    }
+
+    pub fn plane_ids(&self) -> &[KmsObjectId] {
+        &self.planes
+    }
+
+    pub fn get_plane(&self, id: KmsObjectId) -> Result<&Mutex<KmsPlane<T>>> {
+        self.get(id)
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -188,6 +236,7 @@ define_object_kinds! { <T>
     Connector(Mutex<KmsConnector<T>>) = DRM_MODE_OBJECT_CONNECTOR,
     Encoder(KmsEncoder) = DRM_MODE_OBJECT_ENCODER,
     Property(KmsProperty) = DRM_MODE_OBJECT_PROPERTY,
+    Plane(Mutex<KmsPlane<T>>) = DRM_MODE_OBJECT_PLANE,
     Framebuffer(KmsFramebuffer<T>) = DRM_MODE_OBJECT_FB,
     Blob(KmsBlob) = DRM_MODE_OBJECT_BLOB,
 }
@@ -240,4 +289,56 @@ pub struct KmsFramebuffer<T: GraphicsAdapter> {
     pub pitch: u32,
     pub buffer: Arc<T::Buffer>,
     pub driver_data: T::Framebuffer,
+}
+
+pub trait KmsPlaneDriver: Debug {
+    type State: Clone + Debug;
+}
+
+impl KmsPlaneDriver for () {
+    type State = ();
+}
+
+#[derive(Debug)]
+pub struct KmsPlane<T: GraphicsAdapter> {
+    pub possible_crtcs: u32,
+    pub plane_type: KmsPlaneType,
+    pub state: KmsPlaneState<T>,
+    pub driver_data: T::Plane,
+}
+
+#[derive(Debug)]
+pub struct KmsPlaneState<T: GraphicsAdapter> {
+    pub fb_id: Option<KmsObjectId>,
+    pub crtc_id: Option<KmsObjectId>,
+    pub src_rect: KmsRect<u32>,
+    pub crtc_rect: KmsRect<i32>,
+    pub driver_data: <T::Plane as KmsPlaneDriver>::State,
+}
+
+impl<T: GraphicsAdapter> Clone for KmsPlaneState<T> {
+    fn clone(&self) -> Self {
+        Self {
+            fb_id: self.fb_id.clone(),
+            crtc_id: self.crtc_id.clone(),
+            src_rect: self.src_rect.clone(),
+            crtc_rect: self.crtc_rect.clone(),
+            driver_data: self.driver_data.clone(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum KmsPlaneType {
+    Primary,
+    Overlay,
+    Cursor,
+}
+
+#[derive(Debug, Clone)]
+pub struct KmsRect<T> {
+    pub x: T,
+    pub y: T,
+    pub width: u32,
+    pub height: u32,
 }

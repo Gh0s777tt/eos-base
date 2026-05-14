@@ -70,6 +70,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
                     .unzip())
             }
             KmsObject::Encoder(_)
+            | KmsObject::Plane(_)
             | KmsObject::Property(_)
             | KmsObject::Framebuffer(_)
             | KmsObject::Blob(_) => Ok((vec![], vec![])),
