@@ -474,14 +474,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
     ) -> Result<usize> {
         use redox_ioctl::drm as ipc;
 
-        fn id_index(id: u32) -> u32 {
-            id & 0xFF
-        }
-
-        fn plane_id(i: u32) -> u32 {
-            id_index(i) | (1 << 13)
-        }
-
         match self.handles.get_mut(id)? {
             Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
             Handle::V2 {
@@ -954,11 +946,12 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_GET_PLANE_RES => ipc::DrmModeGetPlaneRes::with(payload, |mut data| {
-                    let count = self.objects.crtc_ids().len();
-                    let mut ids = Vec::with_capacity(count);
-                    for i in 0..(count as u32) {
-                        ids.push(plane_id(i));
-                    }
+                    let ids = self
+                        .objects
+                        .plane_ids()
+                        .iter()
+                        .map(|id| id.0)
+                        .collect::<Vec<_>>();
                     data.set_plane_id_ptr(&ids);
                     Ok(0)
                 }),
@@ -1017,19 +1010,15 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     Ok(0)
                 }),
                 ipc::MODE_GET_PLANE => ipc::DrmModeGetPlane::with(payload, |mut data| {
-                    let i = id_index(data.plane_id());
-                    let crtc_id = self.objects.crtc_ids()[i as usize];
-                    let crtc = self.objects.get_crtc(crtc_id).unwrap();
-                    data.set_crtc_id(crtc_id.0);
-                    data.set_fb_id(
-                        crtc.lock()
-                            .unwrap()
-                            .state
-                            .fb_id
-                            .unwrap_or(KmsObjectId::INVALID)
-                            .0,
-                    );
-                    data.set_possible_crtcs(1 << i);
+                    let plane = self
+                        .objects
+                        .get_plane(KmsObjectId(data.plane_id()))
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    data.set_crtc_id(plane.state.crtc_id.map_or(0, |id| id.0));
+                    data.set_fb_id(plane.state.fb_id.unwrap_or(KmsObjectId::INVALID).0);
+                    data.set_possible_crtcs(plane.possible_crtcs);
                     data.set_format_type_ptr(&[DrmFourcc::Argb8888 as u32]);
                     Ok(0)
                 }),
