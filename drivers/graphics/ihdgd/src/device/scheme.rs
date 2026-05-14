@@ -41,11 +41,10 @@ impl Buffer for GpuBuffer {
 impl GraphicsAdapter for Device {
     type Connector = Connector;
     type Crtc = Crtc;
+    type Plane = ();
 
     type Buffer = GpuBuffer;
     type Framebuffer = ();
-
-    type Plane = ();
 
     fn name(&self) -> &'static [u8] {
         b"ihdgd"

@@ -33,11 +33,11 @@ impl KmsConnectorDriver for Connector {
 impl GraphicsAdapter for FbAdapter {
     type Connector = Connector;
     type Crtc = ();
+    type Plane = ();
 
     type Buffer = GraphicScreen;
     type Framebuffer = ();
 
-    type Plane = ();
 
     fn name(&self) -> &'static [u8] {
         b"vesad"

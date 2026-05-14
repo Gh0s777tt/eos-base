@@ -22,8 +22,8 @@ pub struct KmsObjects<T: GraphicsAdapter> {
     pub(super) connectors: Vec<KmsObjectId>,
     pub(super) encoders: Vec<KmsObjectId>,
     crtcs: Vec<KmsObjectId>,
-    framebuffers: Vec<KmsObjectId>,
     planes: Vec<KmsObjectId>,
+    framebuffers: Vec<KmsObjectId>,
     pub(super) objects: HashMap<KmsObjectId, KmsObject<T>>,
     _marker: PhantomData<T>,
 }
@@ -35,8 +35,8 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             connectors: vec![],
             encoders: vec![],
             crtcs: vec![],
-            framebuffers: vec![],
             planes: vec![],
+            framebuffers: vec![],
             objects: HashMap::new(),
             _marker: PhantomData,
         };
@@ -125,24 +125,6 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         self.get(id)
     }
 
-    pub fn add_framebuffer(&mut self, fb: KmsFramebuffer<T>) -> KmsObjectId {
-        let id = self.add(fb);
-        self.framebuffers.push(id);
-        id
-    }
-
-    pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
-        self.remove::<KmsFramebuffer<T>>(id)
-    }
-
-    pub fn fb_ids(&self) -> &[KmsObjectId] {
-        &self.framebuffers
-    }
-
-    pub fn get_framebuffer(&self, id: KmsObjectId) -> Result<&KmsFramebuffer<T>> {
-        self.get(id)
-    }
-
     pub fn add_plane(
         &mut self,
         crtcs: &[KmsObjectId],
@@ -194,6 +176,24 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
     }
 
     pub fn get_plane(&self, id: KmsObjectId) -> Result<&Mutex<KmsPlane<T>>> {
+        self.get(id)
+    }
+
+    pub fn add_framebuffer(&mut self, fb: KmsFramebuffer<T>) -> KmsObjectId {
+        let id = self.add(fb);
+        self.framebuffers.push(id);
+        id
+    }
+
+    pub fn remove_framebuffer(&mut self, id: KmsObjectId) -> Result<()> {
+        self.remove::<KmsFramebuffer<T>>(id)
+    }
+
+    pub fn fb_ids(&self) -> &[KmsObjectId] {
+        &self.framebuffers
+    }
+
+    pub fn get_framebuffer(&self, id: KmsObjectId) -> Result<&KmsFramebuffer<T>> {
         self.get(id)
     }
 }
@@ -299,16 +299,6 @@ define_object_props!(object, KmsCrtc<T: GraphicsAdapter> {
     }
 });
 
-#[derive(Debug)]
-pub struct KmsFramebuffer<T: GraphicsAdapter> {
-    pub width: u32,
-    pub height: u32,
-    pub pixel_format: DrmFourcc,
-    pub pitch: u32,
-    pub buffer: Arc<T::Buffer>,
-    pub driver_data: T::Framebuffer,
-}
-
 pub trait KmsPlaneDriver: Debug {
     type State: Clone + Debug;
 }
@@ -360,4 +350,14 @@ pub struct KmsRect<T> {
     pub y: T,
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Debug)]
+pub struct KmsFramebuffer<T: GraphicsAdapter> {
+    pub width: u32,
+    pub height: u32,
+    pub pixel_format: DrmFourcc,
+    pub pitch: u32,
+    pub buffer: Arc<T::Buffer>,
+    pub driver_data: T::Framebuffer,
 }

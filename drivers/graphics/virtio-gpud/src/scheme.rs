@@ -343,11 +343,10 @@ impl<'a> VirtGpuAdapter<'a> {
 impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     type Connector = VirtGpuConnector;
     type Crtc = ();
+    type Plane = ();
 
     type Buffer = VirtGpuFramebuffer<'a>;
     type Framebuffer = ();
-
-    type Plane = ();
 
     fn name(&self) -> &'static [u8] {
         b"virtio-gpud"
