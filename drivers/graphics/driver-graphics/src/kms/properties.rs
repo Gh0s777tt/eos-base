@@ -69,8 +69,15 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
                     .map(|prop| (prop.id.0, (prop.getter)(&connector)))
                     .unzip())
             }
+            KmsObject::Plane(plane) => {
+                let plane = plane.lock().unwrap();
+                Ok(plane
+                    .properties
+                    .iter()
+                    .map(|prop| (prop.id.0, (prop.getter)(&plane)))
+                    .unzip())
+            }
             KmsObject::Encoder(_)
-            | KmsObject::Plane(_)
             | KmsObject::Property(_)
             | KmsObject::Framebuffer(_)
             | KmsObject::Blob(_) => Ok((vec![], vec![])),

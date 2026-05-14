@@ -7,12 +7,14 @@ use drm_fourcc::DrmFourcc;
 use drm_sys::{
     drm_mode_modeinfo, DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
     DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PLANE, DRM_MODE_OBJECT_PROPERTY,
+    DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY,
 };
 use syscall::{Error, Result, ENOENT};
 
 use crate::kms::connector::{KmsConnector, KmsEncoder};
 use crate::kms::properties::{
-    define_object_props, init_standard_props, KmsBlob, KmsProperty, KmsPropertyData, ACTIVE,
+    define_object_props, init_standard_props, type_, KmsBlob, KmsProperty, KmsPropertyData, ACTIVE,
+    CRTC_H, CRTC_ID, CRTC_W, CRTC_X, CRTC_Y, FB_ID, SRC_H, SRC_W, SRC_X, SRC_Y,
 };
 use crate::GraphicsAdapter;
 
@@ -141,6 +143,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             plane_index,
             possible_crtcs,
             plane_type,
+            properties: KmsPlane::base_properties(),
             state: KmsPlaneState {
                 fb_id: None,
                 crtc_id: None,
@@ -312,6 +315,7 @@ pub struct KmsPlane<T: GraphicsAdapter> {
     pub plane_index: u32,
     pub possible_crtcs: u32,
     pub plane_type: KmsPlaneType,
+    pub properties: Vec<KmsPropertyData<Self>>,
     pub state: KmsPlaneState<T>,
     pub driver_data: T::Plane,
 }
@@ -337,11 +341,48 @@ impl<T: GraphicsAdapter> Clone for KmsPlaneState<T> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+define_object_props!(object, KmsPlane<T: GraphicsAdapter> {
+    type_ {
+        get => object.plane_type as u64,
+    }
+    FB_ID {
+        get => u64::from(object.state.fb_id.map_or(0, |id| id.0)),
+    }
+    CRTC_ID {
+        get => u64::from(object.state.crtc_id.map_or(0, |id| id.0)),
+    }
+    CRTC_X {
+        get => u64::from(object.state.crtc_rect.x.cast_unsigned()),
+    }
+    CRTC_Y {
+        get => u64::from(object.state.crtc_rect.y.cast_unsigned()),
+    }
+    CRTC_W {
+        get => u64::from(object.state.crtc_rect.width),
+    }
+    CRTC_H {
+        get => u64::from(object.state.crtc_rect.height),
+    }
+    SRC_X {
+        get => u64::from(object.state.src_rect.x),
+    }
+    SRC_Y {
+        get => u64::from(object.state.src_rect.y),
+    }
+    SRC_W {
+        get => u64::from(object.state.src_rect.width),
+    }
+    SRC_H {
+        get => u64::from(object.state.src_rect.height),
+    }
+});
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[repr(u32)]
 pub enum KmsPlaneType {
-    Primary,
-    Overlay,
-    Cursor,
+    Primary = DRM_PLANE_TYPE_PRIMARY,
+    Overlay = DRM_PLANE_TYPE_OVERLAY,
+    Cursor = DRM_PLANE_TYPE_CURSOR,
 }
 
 #[derive(Debug, Clone)]
