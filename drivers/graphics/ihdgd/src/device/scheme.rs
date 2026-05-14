@@ -1,8 +1,9 @@
 use std::sync::Mutex;
 
-use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
+use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{
-    KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneState,
+    KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneDriver,
+    KmsPlaneState,
 };
 use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
 use drm_sys::{
@@ -20,15 +21,16 @@ pub struct Crtc {
 }
 
 #[derive(Debug)]
-pub struct Connector {
-    pub fb_id: Option<KmsObjectId>,
+pub struct Plane {
+    pub pipe_idx: usize,
+    pub plane_idx: usize,
 }
 
 impl KmsCrtcDriver for Crtc {
     type State = ();
 }
 
-impl KmsConnectorDriver for Connector {
+impl KmsPlaneDriver for Plane {
     type State = ();
 }
 
@@ -39,9 +41,9 @@ impl Buffer for GpuBuffer {
 }
 
 impl GraphicsAdapter for Device {
-    type Connector = Connector;
+    type Connector = ();
     type Crtc = Crtc;
-    type Plane = ();
+    type Plane = Plane;
 
     type Buffer = GpuBuffer;
     type Framebuffer = ();
@@ -115,10 +117,6 @@ impl GraphicsAdapter for Device {
         new_plane_state: KmsPlaneState<Self>,
         _damage: Damage,
     ) -> syscall::Result<()> {
-        let Some(crtc_id) = new_plane_state.crtc_id else {
-            return Ok(());
-        };
-        let crtc = objects.get_crtc(crtc_id).unwrap().lock().unwrap();
         let mut plane = plane.lock().unwrap();
 
         let buffer = new_plane_state
@@ -128,8 +126,10 @@ impl GraphicsAdapter for Device {
 
         plane.state = new_plane_state;
 
-        let pipe_idx = crtc.driver_data.pipe_idx;
-        if let Some(plane_hw) = self.pipes[pipe_idx].planes.first_mut() {
+        if let Some(plane_hw) = self.pipes[plane.driver_data.pipe_idx]
+            .planes
+            .get_mut(plane.driver_data.plane_idx)
+        {
             plane_hw.set_framebuffer(buffer);
         }
 

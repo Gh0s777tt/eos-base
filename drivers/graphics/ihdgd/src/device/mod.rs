@@ -449,13 +449,21 @@ impl Device {
     }
 
     fn add_kms_pipe(objects: &mut KmsObjects<Self>, pipe_idx: usize, fb: KmsFramebuffer<Self>) {
-        let (crtc_id, primary_plane_id) = objects.add_crtc(Crtc { pipe_idx }, (), (), ());
+        let (crtc_id, primary_plane_id) = objects.add_crtc(
+            Crtc { pipe_idx },
+            (),
+            scheme::Plane {
+                pipe_idx,
+                plane_idx: 0,
+            },
+            (),
+        );
 
         let (width, height) = (fb.width, fb.height);
 
         let fb_id = objects.add_framebuffer(fb);
 
-        let connector_id = objects.add_connector(Connector { fb_id: Some(fb_id) }, (), &[crtc_id]);
+        let connector_id = objects.add_connector((), (), &[crtc_id]);
         let mut connector = objects.get_connector(connector_id).unwrap().lock().unwrap();
         connector.connection = KmsConnectorStatus::Connected;
         connector.update_from_size(width, height);
