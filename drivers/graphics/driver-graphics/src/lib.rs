@@ -1059,13 +1059,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 }),
                 ipc::MODE_OBJ_GET_PROPERTIES => {
                     ipc::DrmModeObjGetProperties::with(payload, |mut data| {
-                        // FIXME remove once all drm objects are materialized in self.objects
-                        if data.obj_id() >= 1 << 11 {
-                            data.set_props_ptr(&[]);
-                            data.set_prop_values_ptr(&[]);
-                            return Ok(0);
-                        }
-
                         let (props, prop_vals) = self
                             .objects
                             .get_object_properties_data(KmsObjectId(data.obj_id()))?;
