@@ -363,7 +363,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         });
 
         for display_id in 0..self.config.num_scanouts.get() {
-            let crtc = objects.add_crtc((), ());
+            let crtc = objects.add_crtc((), (), (), ());
 
             objects.add_connector(VirtGpuConnector { display_id }, (), &[crtc]);
         }

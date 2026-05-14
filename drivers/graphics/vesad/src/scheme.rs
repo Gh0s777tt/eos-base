@@ -49,7 +49,7 @@ impl GraphicsAdapter for FbAdapter {
 
     fn init(&mut self, objects: &mut KmsObjects<Self>) {
         for (framebuffer_id, framebuffer) in self.framebuffers.iter().enumerate() {
-            let crtc = objects.add_crtc((), ());
+            let crtc = objects.add_crtc((), (), (), ());
 
             objects.add_connector(
                 Connector {

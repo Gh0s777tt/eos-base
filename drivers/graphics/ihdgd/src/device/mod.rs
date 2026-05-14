@@ -449,7 +449,7 @@ impl Device {
     }
 
     fn add_kms_pipe(objects: &mut KmsObjects<Self>, pipe_idx: usize, fb: KmsFramebuffer<Self>) {
-        let crtc_id = objects.add_crtc(Crtc { pipe_idx }, ());
+        let crtc_id = objects.add_crtc(Crtc { pipe_idx }, (), (), ());
 
         let (width, height) = (fb.width, fb.height);
 

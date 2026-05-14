@@ -26,7 +26,7 @@ use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EINVAL, ENOENT, ENXIO, EO
 use crate::kms::connector::{KmsConnectorDriver, KmsConnectorState};
 use crate::kms::objects::{
     self, KmsCrtc, KmsCrtcDriver, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneDriver,
-    KmsPlaneState, KmsPlaneType, KmsRect,
+    KmsPlaneState, KmsRect,
 };
 use crate::kms::properties::KmsPropertyKind;
 
@@ -623,20 +623,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         None
                     };
 
-                    let primary_plane_id = self
-                        .objects
-                        .plane_ids()
-                        .iter()
-                        .copied()
-                        .find(|&pid| {
-                            let plane = self.objects.get_plane(pid).unwrap().lock().unwrap();
-                            plane.plane_type == KmsPlaneType::Primary
-                                && (plane.state.crtc_id == Some(crtc_id)
-                                    || plane.possible_crtcs
-                                        & (1 << crtc.lock().unwrap().crtc_index)
-                                        != 0)
-                        })
-                        .ok_or(Error::new(EINVAL))?;
+                    let primary_plane_id = crtc.lock().unwrap().primary_plane;
                     let plane = self.objects.get_plane(primary_plane_id)?;
                     let mut new_crtc_state = crtc.lock().unwrap().state.clone();
                     new_crtc_state.mode = mode;

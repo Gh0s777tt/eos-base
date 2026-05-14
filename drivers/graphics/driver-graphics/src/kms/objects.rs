@@ -82,12 +82,22 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         &mut self,
         driver_data: T::Crtc,
         driver_data_state: <T::Crtc as KmsCrtcDriver>::State,
+        plane_data: T::Plane,
+        plane_data_state: <T::Plane as KmsPlaneDriver>::State,
     ) -> KmsObjectId {
+        let primary_plane = self.add_plane(
+            &[],
+            KmsPlaneType::Primary,
+            plane_data,
+            plane_data_state,
+        );
+
         let crtc_index = self.crtcs.len() as u32;
         let id = self.add(Mutex::new(KmsCrtc {
             crtc_index,
             gamma_size: 0,
             properties: KmsCrtc::base_properties(),
+            primary_plane,
             state: KmsCrtcState {
                 fb_id: None,
                 mode: None,
@@ -96,6 +106,8 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             driver_data,
         }));
         self.crtcs.push(id);
+
+        self.get_plane(primary_plane).unwrap().lock().unwrap().possible_crtcs = 1 << crtc_index;
 
         id
     }
@@ -254,6 +266,7 @@ pub struct KmsCrtc<T: GraphicsAdapter> {
     pub crtc_index: u32,
     pub gamma_size: u32,
     pub properties: Vec<KmsPropertyData<Self>>,
+    pub primary_plane: KmsObjectId,
     pub state: KmsCrtcState<T>,
     pub driver_data: T::Crtc,
 }
