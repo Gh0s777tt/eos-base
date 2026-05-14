@@ -84,13 +84,9 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         driver_data_state: <T::Crtc as KmsCrtcDriver>::State,
         plane_data: T::Plane,
         plane_data_state: <T::Plane as KmsPlaneDriver>::State,
-    ) -> KmsObjectId {
-        let primary_plane = self.add_plane(
-            &[],
-            KmsPlaneType::Primary,
-            plane_data,
-            plane_data_state,
-        );
+    ) -> (KmsObjectId, KmsObjectId) {
+        let primary_plane =
+            self.add_plane(&[], KmsPlaneType::Primary, plane_data, plane_data_state);
 
         let crtc_index = self.crtcs.len() as u32;
         let id = self.add(Mutex::new(KmsCrtc {
@@ -99,7 +95,6 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             properties: KmsCrtc::base_properties(),
             primary_plane,
             state: KmsCrtcState {
-                fb_id: None,
                 mode: None,
                 driver_data: driver_data_state,
             },
@@ -107,9 +102,13 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         }));
         self.crtcs.push(id);
 
-        self.get_plane(primary_plane).unwrap().lock().unwrap().possible_crtcs = 1 << crtc_index;
+        self.get_plane(primary_plane)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .possible_crtcs = 1 << crtc_index;
 
-        id
+        (id, primary_plane)
     }
 
     pub fn crtc_ids(&self) -> &[KmsObjectId] {
@@ -155,7 +154,9 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         for &crtc in crtcs {
             possible_crtcs |= 1 << self.get_crtc(crtc).unwrap().lock().unwrap().crtc_index
         }
+        let plane_index = self.planes.len() as u32;
         let id = self.add(Mutex::new(KmsPlane {
+            plane_index,
             possible_crtcs,
             plane_type,
             state: KmsPlaneState {
@@ -184,6 +185,12 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
 
     pub fn plane_ids(&self) -> &[KmsObjectId] {
         &self.planes
+    }
+
+    pub fn planes(&self) -> impl Iterator<Item = &Mutex<KmsPlane<T>>> + use<'_, T> {
+        self.planes
+            .iter()
+            .map(|&id| self.get::<Mutex<KmsPlane<T>>>(id).unwrap())
     }
 
     pub fn get_plane(&self, id: KmsObjectId) -> Result<&Mutex<KmsPlane<T>>> {
@@ -273,7 +280,6 @@ pub struct KmsCrtc<T: GraphicsAdapter> {
 
 #[derive(Debug)]
 pub struct KmsCrtcState<T: GraphicsAdapter> {
-    pub fb_id: Option<KmsObjectId>,
     pub mode: Option<drm_mode_modeinfo>,
     pub driver_data: <T::Crtc as KmsCrtcDriver>::State,
 }
@@ -281,7 +287,6 @@ pub struct KmsCrtcState<T: GraphicsAdapter> {
 impl<T: GraphicsAdapter> Clone for KmsCrtcState<T> {
     fn clone(&self) -> Self {
         Self {
-            fb_id: self.fb_id.clone(),
             mode: self.mode.clone(),
             driver_data: self.driver_data.clone(),
         }
@@ -314,6 +319,7 @@ impl KmsPlaneDriver for () {
 
 #[derive(Debug)]
 pub struct KmsPlane<T: GraphicsAdapter> {
+    pub plane_index: u32,
     pub possible_crtcs: u32,
     pub plane_type: KmsPlaneType,
     pub state: KmsPlaneState<T>,

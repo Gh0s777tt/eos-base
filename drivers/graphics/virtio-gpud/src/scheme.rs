@@ -363,7 +363,7 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         });
 
         for display_id in 0..self.config.num_scanouts.get() {
-            let crtc = objects.add_crtc((), (), (), ());
+            let (crtc, _primary_plane_id) = objects.add_crtc((), (), (), ());
 
             objects.add_connector(VirtGpuConnector { display_id }, (), &[crtc]);
         }
@@ -428,10 +428,9 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
     fn set_crtc(
         &mut self,
-        objects: &KmsObjects<Self>,
+        _objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self>>,
         state: KmsCrtcState<Self>,
-        damage: Damage,
     ) -> syscall::Result<()> {
         let mut crtc = crtc.lock().unwrap();
         crtc.state = state;
@@ -441,13 +440,15 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     fn set_plane(
         &mut self,
         objects: &KmsObjects<Self>,
-        crtc: &Mutex<KmsCrtc<Self>>,
         plane: &Mutex<KmsPlane<Self>>,
         new_plane_state: KmsPlaneState<Self>,
         damage: Damage,
     ) -> syscall::Result<()> {
         futures::executor::block_on(async {
-            let crtc = crtc.lock().unwrap();
+            let Some(crtc_id) = new_plane_state.crtc_id else {
+                return Ok(());
+            };
+            let crtc = objects.get_crtc(crtc_id).unwrap().lock().unwrap();
             let mut plane = plane.lock().unwrap();
 
             // fb_id now in plane state

@@ -112,13 +112,11 @@ pub trait GraphicsAdapter: Sized + Debug {
         objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self>>,
         new_state: KmsCrtcState<Self>,
-        damage: Damage,
     ) -> syscall::Result<()>;
 
     fn set_plane(
         &mut self,
         objects: &KmsObjects<Self>,
-        crtc: &Mutex<KmsCrtc<Self>>,
         plane: &Mutex<KmsPlane<Self>>,
         new_plane_state: KmsPlaneState<Self>,
         damage: Damage,
@@ -291,6 +289,7 @@ struct GraphicsSchemeInner<T: GraphicsAdapter> {
 struct VtState<T: GraphicsAdapter> {
     connector_state: Vec<KmsConnectorState<T>>,
     crtc_state: Vec<KmsCrtcState<T>>,
+    plane_state: Vec<KmsPlaneState<T>>,
     cursor_plane: Option<CursorPlane<T::Buffer>>,
 }
 
@@ -319,6 +318,10 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
             crtc_state: objects
                 .crtcs()
                 .map(|crtc| crtc.lock().unwrap().state.clone())
+                .collect(),
+            plane_state: objects
+                .planes()
+                .map(|plane| plane.lock().unwrap().state.clone())
                 .collect(),
             cursor_plane: adapter.has_cursor_plane().then(|| CursorPlane {
                 x: 0,
@@ -362,24 +365,8 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
             let crtc = self.objects.get_crtc(crtc_id).unwrap();
             let connector_id = self.objects.connector_ids()[crtc_idx];
 
-            let fb = crtc_state.fb_id.map(|fb_id| {
-                self.objects
-                    .get_framebuffer(fb_id)
-                    .expect("removed framebuffers should be unset")
-            });
-
             self.adapter
-                .set_crtc(
-                    &self.objects,
-                    crtc,
-                    crtc_state.clone(),
-                    Damage {
-                        x: 0,
-                        y: 0,
-                        width: fb.map_or(0, |fb| fb.width),
-                        height: fb.map_or(0, |fb| fb.height),
-                    },
-                )
+                .set_crtc(&self.objects, crtc, crtc_state.clone())
                 .unwrap();
 
             self.objects
@@ -389,6 +376,31 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 .unwrap()
                 .state
                 .crtc_id = crtc_id;
+        }
+
+        for (plane_idx, plane_state) in vt_state.plane_state.iter().enumerate() {
+            let plane_id = self.objects.plane_ids()[plane_idx];
+            let plane = self.objects.get_plane(plane_id).unwrap();
+
+            let fb = plane_state.fb_id.map(|fb_id| {
+                self.objects
+                    .get_framebuffer(fb_id)
+                    .expect("removed framebuffers should be unset")
+            });
+
+            self.adapter
+                .set_plane(
+                    &self.objects,
+                    plane,
+                    plane_state.clone(),
+                    Damage {
+                        x: 0,
+                        y: 0,
+                        width: fb.map_or(0, |fb| fb.width),
+                        height: fb.map_or(0, |fb| fb.height),
+                    },
+                )
+                .unwrap();
         }
 
         if let Some(cursor_plane) = &vt_state.cursor_plane {
@@ -581,7 +593,17 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         .lock()
                         .unwrap();
                     // Don't touch set_connectors, that is only used by MODE_SET_CRTC
-                    data.set_fb_id(crtc.state.fb_id.unwrap_or(KmsObjectId::INVALID).0);
+                    data.set_fb_id(
+                        self.objects
+                            .get_plane(crtc.primary_plane)
+                            .unwrap()
+                            .lock()
+                            .unwrap()
+                            .state
+                            .fb_id
+                            .unwrap_or(KmsObjectId::INVALID)
+                            .0,
+                    );
                     // FIXME fill x and y with the data from the primary plane
                     data.set_x(0);
                     data.set_y(0);
@@ -623,20 +645,10 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     new_plane_state.fb_id = fb_id;
                     new_plane_state.crtc_id = Some(crtc_id);
                     if *vt == self.active_vt {
-                        self.adapter.set_crtc(
-                            &self.objects,
-                            crtc,
-                            new_crtc_state.clone(),
-                            Damage {
-                                x: 0,
-                                y: 0,
-                                width: 0,
-                                height: 0,
-                            },
-                        )?;
+                        self.adapter
+                            .set_crtc(&self.objects, crtc, new_crtc_state.clone())?;
                         self.adapter.set_plane(
                             &self.objects,
-                            crtc,
                             plane,
                             new_plane_state.clone(),
                             Damage {
@@ -659,6 +671,8 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     plane.lock().unwrap().state = new_plane_state.clone();
                     self.vts.get_mut(vt).unwrap().crtc_state
                         [crtc.lock().unwrap().crtc_index as usize] = new_crtc_state;
+                    self.vts.get_mut(vt).unwrap().plane_state
+                        [plane.lock().unwrap().plane_index as usize] = new_plane_state;
                     Ok(0)
                 }),
                 ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
@@ -846,21 +860,21 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     // Disable planes that use this framebuffer.
                     for (vt, vt_data) in &mut self.vts {
-                        for (crtc_idx, crtc_state) in vt_data.crtc_state.iter_mut().enumerate() {
-                            if crtc_state.fb_id != Some(fb_id) {
+                        for (plane_idx, plane_state) in vt_data.plane_state.iter_mut().enumerate() {
+                            if plane_state.fb_id != Some(fb_id) {
                                 continue;
                             }
-                            crtc_state.fb_id = None;
+                            plane_state.fb_id = None;
 
                             if *vt != self.active_vt {
                                 continue;
                             }
-                            let crtc = self.objects.crtcs().nth(crtc_idx).unwrap();
+                            let plane = self.objects.planes().nth(plane_idx).unwrap();
                             self.adapter
-                                .set_crtc(
+                                .set_plane(
                                     &self.objects,
-                                    crtc,
-                                    crtc_state.clone(),
+                                    plane,
+                                    plane_state.clone(),
                                     Damage {
                                         x: 0,
                                         y: 0,
@@ -895,10 +909,11 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                         });
 
                     if *vt == self.active_vt {
-                        for crtc in self.objects.crtcs() {
-                            let state = crtc.lock().unwrap().state.clone();
+                        for plane in self.objects.planes() {
+                            let state = plane.lock().unwrap().state.clone();
                             if state.fb_id == Some(KmsObjectId(data.fb_id())) {
-                                self.adapter.set_crtc(&self.objects, crtc, state, damage)?;
+                                self.adapter
+                                    .set_plane(&self.objects, plane, state, damage)?;
                             }
                         }
                     }
@@ -960,8 +975,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     let plane_mutex = self.objects.get_plane(plane_id)?;
 
                     let crtc_id = KmsObjectId(data.crtc_id());
-                    let crtc = self.objects.get_crtc(crtc_id)?;
-                    let crtc_index = crtc.lock().unwrap().crtc_index;
+                    let crtc_index = self.objects.get_crtc(crtc_id)?.lock().unwrap().crtc_index;
 
                     let new_state;
                     {
@@ -996,7 +1010,6 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     if *vt == self.active_vt {
                         self.adapter.set_plane(
                             &self.objects,
-                            crtc,
                             plane_mutex,
                             new_state,
                             Damage {

@@ -100,10 +100,9 @@ impl GraphicsAdapter for Device {
 
     fn set_crtc(
         &mut self,
-        objects: &KmsObjects<Self>,
+        _objects: &KmsObjects<Self>,
         crtc: &Mutex<KmsCrtc<Self>>,
         state: KmsCrtcState<Self>,
-        _damage: Damage,
     ) -> syscall::Result<()> {
         let mut crtc = crtc.lock().unwrap();
         crtc.state = state;
@@ -113,12 +112,14 @@ impl GraphicsAdapter for Device {
     fn set_plane(
         &mut self,
         objects: &KmsObjects<Self>,
-        crtc: &Mutex<KmsCrtc<Self>>,
         plane: &Mutex<KmsPlane<Self>>,
         new_plane_state: KmsPlaneState<Self>,
-        damage: Damage,
+        _damage: Damage,
     ) -> syscall::Result<()> {
-        let crtc = crtc.lock().unwrap();
+        let Some(crtc_id) = new_plane_state.crtc_id else {
+            return Ok(());
+        };
+        let crtc = objects.get_crtc(crtc_id).unwrap().lock().unwrap();
         let mut plane = plane.lock().unwrap();
 
         let buffer = new_plane_state
