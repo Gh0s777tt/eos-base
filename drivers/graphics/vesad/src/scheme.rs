@@ -38,7 +38,6 @@ impl GraphicsAdapter for FbAdapter {
     type Buffer = GraphicScreen;
     type Framebuffer = ();
 
-
     fn name(&self) -> &'static [u8] {
         b"vesad"
     }
