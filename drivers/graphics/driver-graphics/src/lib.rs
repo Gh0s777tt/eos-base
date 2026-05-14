@@ -431,6 +431,11 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         })
     }
 
+    fn fstat(&mut self, _id: usize, stat: &mut syscall::Stat, _ctx: &CallerCtx) -> Result<()> {
+        stat.st_dev = 226 /*DRM_MAJOR*/ << 8;
+        Ok(())
+    }
+
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
         FpathWriter::with(buf, &self.scheme_name, |w| {
             match self.handles.get(id)? {
