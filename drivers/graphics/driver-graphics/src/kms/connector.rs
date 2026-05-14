@@ -3,14 +3,14 @@ use std::fmt::Debug;
 use std::sync::Mutex;
 
 use drm_sys::{
-    drm_mode_modeinfo, DRM_MODE_CONNECTOR_Unknown, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON,
-    DRM_MODE_DPMS_STANDBY, DRM_MODE_DPMS_SUSPEND, DRM_MODE_TYPE_PREFERRED,
+    DRM_MODE_CONNECTOR_Unknown, DRM_MODE_DPMS_OFF, DRM_MODE_DPMS_ON, DRM_MODE_DPMS_STANDBY,
+    DRM_MODE_DPMS_SUSPEND, DRM_MODE_TYPE_PREFERRED, drm_mode_modeinfo,
 };
 use syscall::Result;
 
-use crate::kms::objects::{KmsObjectId, KmsObjects};
-use crate::kms::properties::{define_object_props, KmsPropertyData, CRTC_ID, DPMS, EDID, TILE};
 use crate::GraphicsAdapter;
+use crate::kms::objects::{KmsObjectId, KmsObjects};
+use crate::kms::properties::{CRTC_ID, DPMS, EDID, KmsPropertyData, TILE, define_object_props};
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
     pub fn add_connector(

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use drm_sys::{DRM_MODE_CURSOR_BO, DRM_MODE_CURSOR_MOVE};
-use syscall::{Error, ENOENT, ENXIO};
+use syscall::{ENOENT, ENXIO, Error};
 
 use crate::{DrmHandle, GraphicsAdapter, VtState};
 

@@ -7,6 +7,7 @@ use driver_graphics::kms::objects::{KmsFramebuffer, KmsObjects};
 use drm_fourcc::DrmFourcc;
 use pcid_interface::{PciFunction, PciFunctionHandle};
 use range_alloc::RangeAllocator;
+use std::sync::atomic::AtomicBool;
 use std::{collections::VecDeque, fmt, mem, sync::Arc};
 use syscall::error::{Error, Result, EIO, ENODEV, ERANGE};
 
@@ -776,6 +777,7 @@ impl Device {
                         GpuBuffer::alloc_dumb(&self.gm, &mut self.ggtt, width, height)?;
 
                     let fb = KmsFramebuffer {
+                        closed: AtomicBool::new(true),
                         width,
                         height,
                         pixel_format: DrmFourcc::Argb8888,

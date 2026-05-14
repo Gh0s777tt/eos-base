@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use drm_fourcc::DrmFourcc;
-use syscall::{Error, EINVAL};
+use syscall::{EINVAL, Error};
 
 use crate::kms::objects::{KmsFramebuffer, KmsObjectId, KmsObjects};
 use crate::{Damage, DrmHandle, GraphicsAdapter, VtState};
@@ -11,7 +12,7 @@ pub(super) fn mode_get_fb<T: GraphicsAdapter>(
     handle: &mut DrmHandle<T>,
     mut data: redox_ioctl::drm::DrmModeFbCmd<'_>,
 ) -> Result<usize, Error> {
-    let fb = objects.get_framebuffer(KmsObjectId(data.fb_id()))?;
+    let fb = objects.get_framebuffer_maybe_closed(KmsObjectId(data.fb_id()))?;
 
     let (bpp, depth) = match fb.pixel_format {
         DrmFourcc::Xrgb8888 => (32, 24),
@@ -54,6 +55,7 @@ pub(super) fn mode_add_fb<T: GraphicsAdapter>(
     let fb = adapter.create_framebuffer(buffer);
 
     let id = objects.add_framebuffer(KmsFramebuffer {
+        closed: AtomicBool::new(false),
         width: data.width(),
         height: data.height(),
         pixel_format,
@@ -162,6 +164,7 @@ pub(super) fn mode_add_fb2<T: GraphicsAdapter>(
     let fb = adapter.create_framebuffer(buffer);
 
     let id = objects.add_framebuffer(KmsFramebuffer {
+        closed: AtomicBool::new(false),
         width: data.width(),
         height: data.height(),
         pixel_format: DrmFourcc::try_from(data.pixel_format()).map_err(|_| Error::new(EINVAL))?,
@@ -180,7 +183,7 @@ pub(super) fn mode_get_fb2<T: GraphicsAdapter>(
     handle: &mut DrmHandle<T>,
     mut data: redox_ioctl::drm::DrmModeFbCmd2<'_>,
 ) -> Result<usize, Error> {
-    let fb = objects.get_framebuffer(KmsObjectId(data.fb_id()))?;
+    let fb = objects.get_framebuffer_maybe_closed(KmsObjectId(data.fb_id()))?;
 
     handle.next_id += 1;
     handle.buffers.insert(handle.next_id, fb.buffer.clone());
@@ -192,5 +195,21 @@ pub(super) fn mode_get_fb2<T: GraphicsAdapter>(
     data.set_pitches([fb.pitch, 0, 0, 0]);
     data.set_offsets([0; 4]);
     data.set_modifier([0; 4]);
+    Ok(0)
+}
+
+pub(super) fn mode_close_fb<T: GraphicsAdapter>(
+    objects: &mut KmsObjects<T>,
+    vts: &mut HashMap<usize, VtState<T>>,
+    data: redox_ioctl::drm::DrmModeClosefb<'_>,
+) -> Result<usize, Error> {
+    let fb_id = KmsObjectId(data.fb_id());
+    let fb = objects.get_framebuffer(fb_id)?;
+    fb.closed.store(true, Ordering::SeqCst);
+
+    if !VtState::fb_has_any_use(vts, fb_id) {
+        objects.remove_framebuffer(fb_id).unwrap();
+    }
+
     Ok(0)
 }

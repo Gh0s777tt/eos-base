@@ -10,11 +10,11 @@ use std::sync::{Arc, Mutex};
 
 use inputd::{DisplayHandle, VtEventKind};
 use libredox::Fd;
-use redox_scheme::scheme::{register_scheme_inner, SchemeState, SchemeSync};
+use redox_scheme::scheme::{SchemeState, SchemeSync, register_scheme_inner};
 use redox_scheme::{CallerCtx, OpenResult, RequestKind, SignalBehavior, Socket};
 use scheme_utils::{FpathWriter, HandleMap};
 use syscall::schemev2::NewFdFlags;
-use syscall::{Error, MapFlags, Result, EACCES, EAGAIN, EINVAL, ENOENT, EOPNOTSUPP};
+use syscall::{EACCES, EAGAIN, EINVAL, ENOENT, EOPNOTSUPP, Error, MapFlags, Result};
 
 use crate::kms::connector::{KmsConnectorDriver, KmsConnectorState};
 use crate::kms::objects::{
@@ -284,6 +284,21 @@ struct VtState<T: GraphicsAdapter> {
     cursor_plane: Option<CursorPlane<T::Buffer>>,
 }
 
+impl<T: GraphicsAdapter> VtState<T> {
+    fn fb_has_any_use(vts: &HashMap<usize, Self>, fb_id: KmsObjectId) -> bool {
+        let mut has_any_use = false;
+        for vt_data in vts.values() {
+            for plane_state in vt_data.plane_state.iter() {
+                if plane_state.fb_id == Some(fb_id) {
+                    has_any_use = true;
+                    break;
+                }
+            }
+        }
+        has_any_use
+    }
+}
+
 enum Handle<T: GraphicsAdapter> {
     V2(DrmHandle<T>),
     SchemeRoot,
@@ -377,7 +392,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
 
             let fb = plane_state.fb_id.map(|fb_id| {
                 self.objects
-                    .get_framebuffer(fb_id)
+                    .get_framebuffer_maybe_closed(fb_id)
                     .expect("removed framebuffers should be unset")
             });
 

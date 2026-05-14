@@ -1,13 +1,13 @@
 use drm_sys::{
-    drm_mode_property_enum, DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB,
-    DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE,
-    DRM_MODE_PROP_SIGNED_RANGE,
+    DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM,
+    DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE,
+    drm_mode_property_enum,
 };
 use syscall::Error;
 
+use crate::GraphicsAdapter;
 use crate::kms::objects::{KmsObjectId, KmsObjects};
 use crate::kms::properties::KmsPropertyKind;
-use crate::GraphicsAdapter;
 
 pub(super) fn mode_get_property<T: GraphicsAdapter>(
     objects: &mut KmsObjects<T>,

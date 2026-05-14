@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use common::io::{Io, MmioPtr};
@@ -93,6 +94,7 @@ impl Plane {
         let buffer = unsafe { GpuBuffer::new(gm, surf, stride * height, true) };
 
         KmsFramebuffer {
+            closed: AtomicBool::new(true),
             width,
             height,
             pixel_format: DrmFourcc::Argb8888,
