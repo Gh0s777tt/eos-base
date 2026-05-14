@@ -5,16 +5,17 @@ use std::sync::Arc;
 
 use drm_fourcc::DrmFourcc;
 use drm_sys::{
-    drm_mode_property_enum, DRM_MODE_CURSOR_BO, DRM_MODE_CURSOR_MOVE, DRM_MODE_PROP_ATOMIC,
-    DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB, DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE,
-    DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE, DRM_MODE_PROP_SIGNED_RANGE,
+    drm_mode_property_enum, DRM_MODE_PROP_ATOMIC, DRM_MODE_PROP_BITMASK, DRM_MODE_PROP_BLOB,
+    DRM_MODE_PROP_ENUM, DRM_MODE_PROP_IMMUTABLE, DRM_MODE_PROP_OBJECT, DRM_MODE_PROP_RANGE,
+    DRM_MODE_PROP_SIGNED_RANGE,
 };
-use syscall::{Error, EINVAL, ENOENT, ENXIO};
+use syscall::{Error, EINVAL, ENOENT};
 
 use crate::kms::objects::{KmsObjectId, KmsObjects, KmsRect};
 use crate::kms::properties::KmsPropertyKind;
 use crate::{Buffer, Damage, DrmHandle, GraphicsAdapter, VtState, MAP_FAKE_OFFSET_MULTIPLIER};
 
+mod cursor;
 mod framebuffer;
 
 pub(crate) fn call_ioctl<T: GraphicsAdapter>(
@@ -196,31 +197,7 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
             Ok(0)
         }),
         ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
-            let vt_state = vts.get_mut(&handle.vt).unwrap();
-
-            let Some(cursor_plane) = &mut vt_state.cursor_plane else {
-                return Err(Error::new(ENXIO));
-            };
-
-            let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
-            if update_buffer {
-                cursor_plane.buffer = if data.handle() == 0 {
-                    None
-                } else if let Some(buffer) = handle.buffers.get(&data.handle()) {
-                    Some(buffer.clone())
-                } else {
-                    return Err(Error::new(ENOENT));
-                };
-            }
-
-            if data.flags() & DRM_MODE_CURSOR_MOVE != 0 {
-                cursor_plane.x = data.x();
-                cursor_plane.y = data.y();
-            }
-
-            adapter.handle_cursor(cursor_plane, update_buffer);
-
-            Ok(0)
+            cursor::mode_cursor(adapter, vts, handle, data)
         }),
         ipc::MODE_GET_ENCODER => ipc::DrmModeGetEncoder::with(payload, |mut data| {
             let encoder = objects.get_encoder(KmsObjectId(data.encoder_id()))?;
@@ -459,33 +436,7 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
             Ok(0)
         }),
         ipc::MODE_CURSOR2 => ipc::DrmModeCursor2::with(payload, |data| {
-            let vt_state = vts.get_mut(&handle.vt).unwrap();
-
-            let Some(cursor_plane) = &mut vt_state.cursor_plane else {
-                return Err(Error::new(ENXIO));
-            };
-
-            let update_buffer = data.flags() & DRM_MODE_CURSOR_BO != 0;
-            if update_buffer {
-                cursor_plane.buffer = if data.handle() == 0 {
-                    None
-                } else if let Some(buffer) = handle.buffers.get(&data.handle()) {
-                    Some(buffer.clone())
-                } else {
-                    return Err(Error::new(ENOENT));
-                };
-                cursor_plane.hot_x = data.hot_x();
-                cursor_plane.hot_y = data.hot_y();
-            }
-
-            if data.flags() & DRM_MODE_CURSOR_MOVE != 0 {
-                cursor_plane.x = data.x();
-                cursor_plane.y = data.y();
-            }
-
-            adapter.handle_cursor(cursor_plane, update_buffer);
-
-            Ok(0)
+            cursor::mode_cursor2(adapter, vts, handle, data)
         }),
         ipc::MODE_GET_FB2 => ipc::DrmModeFbCmd2::with(payload, |data| {
             framebuffer::mode_get_fb2(objects, handle, data)
