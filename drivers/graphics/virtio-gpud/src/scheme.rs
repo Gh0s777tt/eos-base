@@ -88,6 +88,7 @@ pub struct Display {
 }
 
 pub struct VirtGpuAdapter<'a> {
+    unique: String,
     pub config: &'a mut GpuConfig,
     control_queue: Arc<Queue<'a>>,
     cursor_queue: Arc<Queue<'a>>,
@@ -364,6 +365,10 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         }
     }
 
+    fn get_unique(&self) -> String {
+        self.unique.clone()
+    }
+
     fn get_cap(&self, cap: u32) -> syscall::Result<u64> {
         match cap {
             DRM_CAP_DUMB_BUFFER => Ok(1),
@@ -521,6 +526,7 @@ pub struct GpuScheme {}
 
 impl<'a> GpuScheme {
     pub fn new(
+        unique: String,
         config: &'a mut GpuConfig,
         control_queue: Arc<Queue<'a>>,
         cursor_queue: Arc<Queue<'a>>,
@@ -528,6 +534,7 @@ impl<'a> GpuScheme {
         has_edid: bool,
     ) -> Result<GraphicsScheme<VirtGpuAdapter<'a>>, Error> {
         let adapter = VirtGpuAdapter {
+            unique,
             config,
             control_queue,
             cursor_queue,

@@ -4,6 +4,7 @@ use common::{
 };
 use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{KmsFramebuffer, KmsObjects};
+use drm_fourcc::DrmFourcc;
 use pcid_interface::{PciFunction, PciFunctionHandle};
 use range_alloc::RangeAllocator;
 use std::{collections::VecDeque, fmt, mem, sync::Arc};
@@ -168,6 +169,7 @@ enum VideoInput {
 }
 
 pub struct Device {
+    unique: String,
     kind: DeviceKind,
     alloc_buffers: RangeAllocator<u32>,
     bios: Option<Bios>,
@@ -426,6 +428,7 @@ impl Device {
         //TODO: get number of available buffers
         let buffers = 1024;
         Ok(Self {
+            unique: format!("pci:{}", pcid_handle.config().func.addr),
             kind,
             alloc_buffers: RangeAllocator::new(0..buffers),
             bios,
@@ -764,9 +767,8 @@ impl Device {
                     let fb = KmsFramebuffer {
                         width,
                         height,
+                        pixel_format: DrmFourcc::Argb8888,
                         pitch: stride,
-                        bpp: 32,
-                        depth: 32,
                         buffer: Arc::new(buffer),
                         driver_data: (),
                     };

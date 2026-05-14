@@ -1,6 +1,7 @@
 #![feature(macro_metavar_expr)]
 
 use std::collections::HashMap;
+use std::ffi::c_char;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, Write};
@@ -90,6 +91,7 @@ pub trait GraphicsAdapter: Sized + Debug {
 
     fn init(&mut self, objects: &mut KmsObjects<Self>);
 
+    fn get_unique(&self) -> String;
     fn get_cap(&self, cap: u32) -> Result<u64>;
     fn set_client_cap(&self, cap: u32, value: u64) -> Result<()>;
 
@@ -281,6 +283,7 @@ struct VtState<T: GraphicsAdapter> {
 enum Handle<T: GraphicsAdapter> {
     V2 {
         vt: usize,
+        unique: Option<String>,
         next_id: u32,
         buffers: HashMap<u32, Arc<T::Buffer>>,
     },
@@ -414,6 +417,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
             Handle::V2 {
                 vt,
+                unique: None,
                 next_id: 0,
                 buffers: HashMap::new(),
             }
@@ -427,11 +431,17 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         })
     }
 
+    fn fstat(&mut self, _id: usize, stat: &mut syscall::Stat, _ctx: &CallerCtx) -> Result<()> {
+        stat.st_dev = 226 /*DRM_MAJOR*/ << 8;
+        Ok(())
+    }
+
     fn fpath(&mut self, id: usize, buf: &mut [u8], _ctx: &CallerCtx) -> syscall::Result<usize> {
         FpathWriter::with(buf, &self.scheme_name, |w| {
             match self.handles.get(id)? {
                 Handle::V2 {
                     vt,
+                    unique: _,
                     next_id: _,
                     buffers: _,
                 } => write!(w, "v2/{vt}").unwrap(),
@@ -462,6 +472,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
             Handle::SchemeRoot => return Err(Error::new(EOPNOTSUPP)),
             Handle::V2 {
                 vt,
+                unique,
                 next_id,
                 buffers,
             } => match metadata[0] {
@@ -476,12 +487,39 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     Ok(0)
                 }),
+                ipc::GET_UNIQUE => ipc::DrmUnique::with(payload, |mut data| {
+                    if let Some(unique) = unique {
+                        data.set_unique(unsafe {
+                            mem::transmute::<&[u8], &[c_char]>(unique.as_bytes())
+                        });
+                    } else {
+                        data.set_unique_len(0);
+                    }
+                    Ok(0)
+                }),
+                ipc::SET_VERSION => ipc::DrmSetVersion::with(payload, |mut data| {
+                    // We only support version 1.4 currently
+                    if data.drm_di_major() != 0 || data.drm_di_minor() != 4 {
+                        return Err(Error::new(EINVAL));
+                    }
+                    if data.drm_dd_major() != 0 || data.drm_dd_minor() != 4 {
+                        return Err(Error::new(EINVAL));
+                    }
+                    data.set_drm_di_major(1);
+                    data.set_drm_di_minor(4);
+                    data.set_drm_dd_major(1);
+                    data.set_drm_dd_minor(4);
+
+                    *unique = Some(self.adapter.get_unique());
+
+                    Ok(0)
+                }),
                 ipc::GET_CAP => ipc::DrmGetCap::with(payload, |mut data| {
                     data.set_value(
                         self.adapter.get_cap(
                             data.capability()
                                 .try_into()
-                                .map_err(|_| syscall::Error::new(EINVAL))?,
+                                .map_err(|_| Error::new(EINVAL))?,
                         )?,
                     );
                     Ok(0)
@@ -490,7 +528,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     self.adapter.set_client_cap(
                         data.capability()
                             .try_into()
-                            .map_err(|_| syscall::Error::new(EINVAL))?,
+                            .map_err(|_| Error::new(EINVAL))?,
                         data.value(),
                     )?;
                     Ok(0)
@@ -733,28 +771,42 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 ipc::MODE_GET_FB => ipc::DrmModeFbCmd::with(payload, |mut data| {
                     let fb = self.objects.get_framebuffer(KmsObjectId(data.fb_id()))?;
 
+                    let (bpp, depth) = match fb.pixel_format {
+                        DrmFourcc::Xrgb8888 => (32, 24),
+                        DrmFourcc::Argb8888 => (32, 32),
+                        _ => todo!(),
+                    };
+
                     *next_id += 1;
                     buffers.insert(*next_id, fb.buffer.clone());
 
                     data.set_width(fb.width);
                     data.set_height(fb.height);
                     data.set_pitch(fb.pitch);
-                    data.set_bpp(fb.bpp);
-                    data.set_depth(fb.depth);
+                    data.set_bpp(bpp);
+                    data.set_depth(depth);
                     data.set_handle(*next_id);
                     Ok(0)
                 }),
                 ipc::MODE_ADD_FB => ipc::DrmModeFbCmd::with(payload, |mut data| {
                     let buffer = buffers.get(&data.handle()).ok_or(Error::new(EINVAL))?;
 
+                    if data.bpp() != 32 {
+                        return Err(Error::new(EINVAL));
+                    }
+                    let pixel_format = match data.depth() {
+                        24 => DrmFourcc::Xrgb8888,
+                        32 => DrmFourcc::Argb8888,
+                        _ => return Err(Error::new(EINVAL)),
+                    };
+
                     let fb = self.adapter.create_framebuffer(buffer);
 
                     let id = self.objects.add_framebuffer(objects::KmsFramebuffer {
                         width: data.width(),
                         height: data.height(),
+                        pixel_format,
                         pitch: data.pitch(),
-                        bpp: data.bpp(),
-                        depth: data.depth(),
                         buffer: buffer.clone(),
                         driver_data: fb,
                     });
@@ -877,6 +929,27 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_plane_id_ptr(&ids);
                     Ok(0)
                 }),
+                ipc::MODE_ADD_FB2 => ipc::DrmModeFbCmd2::with(payload, |mut data| {
+                    // FIXME handle multi-plane framebuffers
+
+                    let buffer = buffers.get(&data.handles()[0]).ok_or(Error::new(EINVAL))?;
+
+                    let fb = self.adapter.create_framebuffer(buffer);
+
+                    let id = self.objects.add_framebuffer(objects::KmsFramebuffer {
+                        width: data.width(),
+                        height: data.height(),
+                        pixel_format: DrmFourcc::try_from(data.pixel_format())
+                            .map_err(|_| Error::new(EINVAL))?,
+                        pitch: data.pitches()[0],
+                        buffer: buffer.clone(),
+                        driver_data: fb,
+                    });
+
+                    data.set_fb_id(id.0);
+
+                    Ok(0)
+                }),
                 ipc::MODE_GET_PLANE => ipc::DrmModeGetPlane::with(payload, |mut data| {
                     let i = id_index(data.plane_id());
                     let crtc_id = self.objects.crtc_ids()[i as usize];
@@ -949,9 +1022,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     data.set_width(fb.width);
                     data.set_height(fb.height);
-                    data.set_pixel_format(DrmFourcc::Argb8888 as u32);
+                    data.set_pixel_format(fb.pixel_format as u32);
                     data.set_handles([*next_id, 0, 0, 0]);
-                    data.set_pitches([fb.width * 4, 0, 0, 0]);
+                    data.set_pitches([fb.pitch, 0, 0, 0]);
                     data.set_offsets([0; 4]);
                     data.set_modifier([0; 4]);
                     Ok(0)
@@ -973,6 +1046,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
         let (framebuffer, offset) = match self.handles.get(id)? {
             Handle::V2 {
                 vt: _,
+                unique: _,
                 next_id: _,
                 buffers,
             } => (

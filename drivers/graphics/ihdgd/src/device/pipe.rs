@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use common::io::{Io, MmioPtr};
 use driver_graphics::kms::objects::KmsFramebuffer;
+use drm_fourcc::DrmFourcc;
 use range_alloc::RangeAllocator;
 use syscall::error::Result;
 use syscall::{Error, EIO};
@@ -94,9 +95,8 @@ impl Plane {
         KmsFramebuffer {
             width,
             height,
+            pixel_format: DrmFourcc::Argb8888,
             pitch: stride,
-            bpp: 32,
-            depth: 32,
             buffer: Arc::new(buffer),
             driver_data: (),
         }

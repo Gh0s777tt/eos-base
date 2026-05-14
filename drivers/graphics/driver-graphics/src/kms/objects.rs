@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
+use drm_fourcc::DrmFourcc;
 use drm_sys::{
     drm_mode_modeinfo, DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
     DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PROPERTY,
@@ -235,9 +236,8 @@ define_object_props!(object, KmsCrtc<T: GraphicsAdapter> {
 pub struct KmsFramebuffer<T: GraphicsAdapter> {
     pub width: u32,
     pub height: u32,
+    pub pixel_format: DrmFourcc,
     pub pitch: u32,
-    pub bpp: u32,
-    pub depth: u32,
     pub buffer: Arc<T::Buffer>,
     pub driver_data: T::Framebuffer,
 }

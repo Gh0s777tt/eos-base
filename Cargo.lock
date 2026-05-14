@@ -1073,6 +1073,7 @@ dependencies = [
  "common",
  "daemon",
  "driver-graphics",
+ "drm-fourcc",
  "drm-sys",
  "edid",
  "embedded-hal",
@@ -1823,7 +1824,7 @@ dependencies = [
 [[package]]
 name = "redox-ioctl"
 version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/relibc.git#36d2efa33444d26a584d3e6cb17ba108079c24ea"
+source = "git+https://gitlab.redox-os.org/redox-os/relibc.git#546bc6fb21b990ca9195a1115717c9a842fe4909"
 dependencies = [
  "drm-sys",
  "redox_syscall 0.7.5",
