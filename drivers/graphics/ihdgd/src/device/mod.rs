@@ -4,6 +4,7 @@ use common::{
 };
 use driver_graphics::kms::connector::KmsConnectorStatus;
 use driver_graphics::kms::objects::{KmsFramebuffer, KmsObjects};
+use drm_fourcc::DrmFourcc;
 use pcid_interface::{PciFunction, PciFunctionHandle};
 use range_alloc::RangeAllocator;
 use std::{collections::VecDeque, fmt, mem, sync::Arc};
@@ -766,9 +767,8 @@ impl Device {
                     let fb = KmsFramebuffer {
                         width,
                         height,
+                        pixel_format: DrmFourcc::Argb8888,
                         pitch: stride,
-                        bpp: 32,
-                        depth: 32,
                         buffer: Arc::new(buffer),
                         driver_data: (),
                     };

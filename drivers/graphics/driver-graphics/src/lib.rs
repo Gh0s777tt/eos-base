@@ -771,28 +771,42 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 ipc::MODE_GET_FB => ipc::DrmModeFbCmd::with(payload, |mut data| {
                     let fb = self.objects.get_framebuffer(KmsObjectId(data.fb_id()))?;
 
+                    let (bpp, depth) = match fb.pixel_format {
+                        DrmFourcc::Xrgb8888 => (32, 24),
+                        DrmFourcc::Argb8888 => (32, 32),
+                        _ => todo!(),
+                    };
+
                     *next_id += 1;
                     buffers.insert(*next_id, fb.buffer.clone());
 
                     data.set_width(fb.width);
                     data.set_height(fb.height);
                     data.set_pitch(fb.pitch);
-                    data.set_bpp(fb.bpp);
-                    data.set_depth(fb.depth);
+                    data.set_bpp(bpp);
+                    data.set_depth(depth);
                     data.set_handle(*next_id);
                     Ok(0)
                 }),
                 ipc::MODE_ADD_FB => ipc::DrmModeFbCmd::with(payload, |mut data| {
                     let buffer = buffers.get(&data.handle()).ok_or(Error::new(EINVAL))?;
 
+                    if data.bpp() != 32 {
+                        return Err(Error::new(EINVAL));
+                    }
+                    let pixel_format = match data.depth() {
+                        24 => DrmFourcc::Xrgb8888,
+                        32 => DrmFourcc::Argb8888,
+                        _ => return Err(Error::new(EINVAL)),
+                    };
+
                     let fb = self.adapter.create_framebuffer(buffer);
 
                     let id = self.objects.add_framebuffer(objects::KmsFramebuffer {
                         width: data.width(),
                         height: data.height(),
+                        pixel_format,
                         pitch: data.pitch(),
-                        bpp: data.bpp(),
-                        depth: data.depth(),
                         buffer: buffer.clone(),
                         driver_data: fb,
                     });
@@ -915,6 +929,27 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                     data.set_plane_id_ptr(&ids);
                     Ok(0)
                 }),
+                ipc::MODE_ADD_FB2 => ipc::DrmModeFbCmd2::with(payload, |mut data| {
+                    // FIXME handle multi-plane framebuffers
+
+                    let buffer = buffers.get(&data.handles()[0]).ok_or(Error::new(EINVAL))?;
+
+                    let fb = self.adapter.create_framebuffer(buffer);
+
+                    let id = self.objects.add_framebuffer(objects::KmsFramebuffer {
+                        width: data.width(),
+                        height: data.height(),
+                        pixel_format: DrmFourcc::try_from(data.pixel_format())
+                            .map_err(|_| Error::new(EINVAL))?,
+                        pitch: data.pitches()[0],
+                        buffer: buffer.clone(),
+                        driver_data: fb,
+                    });
+
+                    data.set_fb_id(id.0);
+
+                    Ok(0)
+                }),
                 ipc::MODE_GET_PLANE => ipc::DrmModeGetPlane::with(payload, |mut data| {
                     let i = id_index(data.plane_id());
                     let crtc_id = self.objects.crtc_ids()[i as usize];
@@ -987,9 +1022,9 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
 
                     data.set_width(fb.width);
                     data.set_height(fb.height);
-                    data.set_pixel_format(DrmFourcc::Argb8888 as u32);
+                    data.set_pixel_format(fb.pixel_format as u32);
                     data.set_handles([*next_id, 0, 0, 0]);
-                    data.set_pitches([fb.width * 4, 0, 0, 0]);
+                    data.set_pitches([fb.pitch, 0, 0, 0]);
                     data.set_offsets([0; 4]);
                     data.set_modifier([0; 4]);
                     Ok(0)
