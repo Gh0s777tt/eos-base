@@ -8,6 +8,7 @@ edition = "2021"
 drm.workspace = true
 orbclient.workspace = true
 ransid.workspace = true
+psf-rs.workspace = true
 
 graphics-ipc = { path = "../graphics-ipc" }
 

@@ -20,6 +20,9 @@ daemon = { path = "../../../daemon" }
 graphics-ipc = { path = "../graphics-ipc" }
 inputd = { path = "../../inputd" }
 libredox.workspace = true
+psf-rs.workspace = true
+serde.workspace = true
+toml.workspace = true
 
 [features]
 default = []

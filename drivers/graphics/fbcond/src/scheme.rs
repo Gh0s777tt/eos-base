@@ -1,12 +1,17 @@
 use std::collections::BTreeMap;
+use std::fs;
 use std::os::fd::AsRawFd;
 
+use console_draw::ConsoleFont;
 use event::{EventQueue, UserData};
+use orbclient::FONT;
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult};
 use scheme_utils::{FpathWriter, HandleMap};
 use syscall::schemev2::NewFdFlags;
 use syscall::{Error, EventFlags, Result, EACCES, EAGAIN, EBADF, ENOENT, O_NONBLOCK};
+
+use serde::Deserialize;
 
 use crate::display::Display;
 use crate::text::TextScreen;
@@ -49,6 +54,39 @@ impl FbconScheme {
     pub fn new(vt_ids: &[usize], event_queue: &mut EventQueue<VtIndex>) -> FbconScheme {
         let mut vts = BTreeMap::new();
 
+        let config = match fs::read_to_string("/etc/fbcond.toml") {
+            Ok(config) => config,
+            Err(err) => {
+                log::debug!("Failed to read config: {err}");
+                String::new()
+            }
+        };
+        let config = match toml::from_str::<FbconConfig>(&config) {
+            Ok(config) => config,
+            Err(err) => {
+                log::debug!("Failed to parse config: {err}");
+                log::debug!("Using fallback font");
+                FbconConfig {
+                    font: FontConfig {
+                        path: String::new(),
+                    },
+                }
+            }
+        };
+
+        let font = if !&config.font.path.is_empty() {
+            match fs::read(&config.font.path) {
+                Ok(contents) => Some(ConsoleFont::from_psf(&contents)),
+                Err(err) => {
+                    log::debug!("Failed to read font {}: {err}", &config.font.path);
+                    log::debug!("Using fallback font");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         for &vt_i in vt_ids {
             let display = Display::open_new_vt().expect("Failed to open display for vt");
             event_queue
@@ -58,7 +96,8 @@ impl FbconScheme {
                     event::EventFlags::READ,
                 )
                 .expect("Failed to subscribe to input events for vt");
-            vts.insert(VtIndex(vt_i), TextScreen::new(display));
+
+            vts.insert(VtIndex(vt_i), TextScreen::new(display, font.clone()));
         }
 
         FbconScheme {
@@ -190,4 +229,13 @@ impl SchemeSync for FbconScheme {
     fn on_close(&mut self, id: usize) {
         self.handles.remove(id);
     }
+}
+
+#[derive(Deserialize)]
+struct FbconConfig {
+    font: FontConfig,
+}
+#[derive(Deserialize)]
+struct FontConfig {
+    path: String,
 }
