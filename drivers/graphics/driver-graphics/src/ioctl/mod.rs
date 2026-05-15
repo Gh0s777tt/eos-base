@@ -202,7 +202,7 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
             Ok(0)
         }),
         ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
-            cursor::mode_cursor(adapter, vts, handle, data)
+            cursor::mode_cursor(adapter, objects, active_vt, vts, handle, data)
         }),
         ipc::MODE_GET_ENCODER => ipc::DrmModeGetEncoder::with(payload, |mut data| {
             let encoder = objects.get_encoder(KmsObjectId(data.encoder_id()))?;
@@ -345,8 +345,8 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
                     Damage {
                         x: 0,
                         y: 0,
-                        width: 0,
-                        height: 0,
+                        width: data.src_w(),
+                        height: data.src_h(),
                     },
                 )?;
             }
@@ -380,7 +380,7 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
             property::mode_obj_get_properties(objects, data)
         }),
         ipc::MODE_CURSOR2 => ipc::DrmModeCursor2::with(payload, |data| {
-            cursor::mode_cursor2(adapter, vts, handle, data)
+            cursor::mode_cursor2(adapter, objects, active_vt, vts, handle, data)
         }),
         ipc::MODE_GET_FB2 => ipc::DrmModeFbCmd2::with(payload, |data| {
             framebuffer::mode_get_fb2(objects, handle, data)

@@ -112,11 +112,6 @@ pub trait GraphicsAdapter: Sized + Debug {
         new_plane_state: KmsPlaneState<Self>,
         damage: Damage,
     ) -> syscall::Result<()>;
-
-    // FIXME replace this with an actual plane marked as cursor plane once we
-    // support planes internally.
-    fn has_cursor_plane(&self) -> bool;
-    fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Buffer>, dirty_fb: bool);
 }
 
 pub trait Buffer: Debug {
@@ -126,14 +121,6 @@ pub trait Buffer: Debug {
 pub trait Framebuffer: Debug {}
 
 impl Framebuffer for () {}
-
-pub struct CursorPlane<C: Buffer> {
-    pub x: i32,
-    pub y: i32,
-    pub hot_x: i32,
-    pub hot_y: i32,
-    pub buffer: Option<Arc<C>>,
-}
 
 pub struct GraphicsScheme<T: GraphicsAdapter> {
     inner: GraphicsSchemeInner<T>,
@@ -281,7 +268,6 @@ struct VtState<T: GraphicsAdapter> {
     connector_state: Vec<KmsConnectorState<T>>,
     crtc_state: Vec<KmsCrtcState<T>>,
     plane_state: Vec<KmsPlaneState<T>>,
-    cursor_plane: Option<CursorPlane<T::Buffer>>,
 }
 
 impl<T: GraphicsAdapter> VtState<T> {
@@ -313,7 +299,6 @@ struct DrmHandle<T: GraphicsAdapter> {
 
 impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
     fn get_or_create_vt<'a>(
-        adapter: &T,
         objects: &KmsObjects<T>,
         vts: &'a mut HashMap<usize, VtState<T>>,
         vt: usize,
@@ -331,13 +316,6 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 .planes()
                 .map(|plane| plane.lock().unwrap().state.clone())
                 .collect(),
-            cursor_plane: adapter.has_cursor_plane().then(|| CursorPlane {
-                x: 0,
-                y: 0,
-                hot_x: 0,
-                hot_y: 0,
-                buffer: None,
-            }),
         })
     }
 
@@ -354,8 +332,7 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
 
         self.active_vt = vt;
 
-        let vt_state =
-            GraphicsSchemeInner::get_or_create_vt(&self.adapter, &self.objects, &mut self.vts, vt);
+        let vt_state = GraphicsSchemeInner::get_or_create_vt(&self.objects, &mut self.vts, vt);
 
         for (connector_idx, connector_state) in vt_state.connector_state.iter().enumerate() {
             let connector_id = self.objects.connector_ids()[connector_idx];
@@ -410,10 +387,6 @@ impl<T: GraphicsAdapter> GraphicsSchemeInner<T> {
                 )
                 .unwrap();
         }
-
-        if let Some(cursor_plane) = &vt_state.cursor_plane {
-            self.adapter.handle_cursor(cursor_plane, true);
-        }
     }
 }
 
@@ -447,7 +420,7 @@ impl<T: GraphicsAdapter> SchemeSync for GraphicsSchemeInner<T> {
                 .map_err(|_| Error::new(EINVAL))?;
 
             // Ensure the VT exists such that the rest of the methods can freely access it.
-            Self::get_or_create_vt(&self.adapter, &self.objects, &mut self.vts, vt);
+            Self::get_or_create_vt(&self.objects, &mut self.vts, vt);
 
             Handle::V2(DrmHandle {
                 vt,
