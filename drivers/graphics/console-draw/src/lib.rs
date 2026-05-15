@@ -1,5 +1,3 @@
-extern crate ransid;
-
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::{cmp, io, mem, ptr};
@@ -7,6 +5,7 @@ use std::{cmp, io, mem, ptr};
 use drm::buffer::{Buffer, DrmFourcc};
 use drm::control::{connector, crtc, framebuffer, ClipRect, Device, Mode};
 use graphics_ipc::{CpuBackedBuffer, V2GraphicsHandle};
+
 use orbclient::FONT;
 
 #[derive(Debug, Copy, Clone)]
@@ -133,15 +132,68 @@ struct DisplayMap {
     height: usize,
 }
 
+#[derive(Clone)]
+pub struct ConsoleFont {
+    glyphs: Vec<u8>,
+    width: usize,
+    height: usize,
+}
+
+impl ConsoleFont {
+    pub fn new(glyphs: Vec<u8>, width: usize, height: usize) -> ConsoleFont {
+        ConsoleFont {
+            glyphs,
+            width,
+            height,
+        }
+    }
+
+    pub fn from_psf(data: &[u8]) -> ConsoleFont {
+        let font = psf_rs::Font::load(data);
+
+        let width = font.header.glyph_width as usize;
+        let height = font.header.glyph_height as usize;
+        let bytes_per_row = (width + 7) / 8;
+        let glyph_count = font.header.length as usize;
+
+        let mut glyphs = vec![0u8; glyph_count * height * bytes_per_row];
+
+        for i in 0..glyph_count {
+            if let Some(c) = char::from_u32(i as u32) {
+                let glyph_offset = i * height * bytes_per_row;
+
+                font.display_glyph(c, |bit, x, y| {
+                    if bit != 0 {
+                        let byte_offset =
+                            glyph_offset + (y as usize) * bytes_per_row + ((x as usize) / 8);
+                        let bit_offset = 7 - (x % 8);
+                        if byte_offset < glyphs.len() {
+                            glyphs[byte_offset] |= 1 << bit_offset;
+                        }
+                    }
+                });
+            }
+        }
+
+        Self {
+            glyphs,
+            width,
+            height,
+        }
+    }
+}
+
 pub struct TextScreen {
     console: ransid::Console,
+    font: ConsoleFont,
 }
 
 impl TextScreen {
-    pub fn new() -> TextScreen {
+    pub fn new(font: Option<ConsoleFont>) -> TextScreen {
         TextScreen {
             // Width and height will be filled in on the next write to the console
             console: ransid::Console::new(0, 0),
+            font: font.unwrap_or_else(|| ConsoleFont::new(FONT.to_vec(), 8, 16)),
         }
     }
 
@@ -210,18 +262,19 @@ impl TextScreen {
         x: usize,
         y: usize,
         character: char,
+        font: &ConsoleFont,
         color: u32,
         _bold: bool,
         _italic: bool,
     ) {
-        if x + 8 <= map.width && y + 16 <= map.height {
+        if x + font.width <= map.width && y + font.height <= map.height {
             let mut dst = map.offscreen as *mut u8 as usize + (y * map.width + x) * 4;
 
-            let font_i = 16 * (character as usize);
-            if font_i + 16 <= FONT.len() {
-                for row in 0..16 {
-                    let row_data = FONT[font_i + row];
-                    for col in 0..8 {
+            let font_i = font.height * (character as usize);
+            if font_i + font.height <= font.glyphs.len() {
+                for row in 0..font.height {
+                    let row_data = font.glyphs[font_i + row];
+                    for col in 0..font.width {
                         if (row_data >> (7 - col)) & 1 == 1 {
                             unsafe {
                                 *((dst + col * 4) as *mut u32) = color;
@@ -265,7 +318,8 @@ impl TextScreen {
             }
         };
 
-        self.console.resize(map.width / 8, map.height / 16);
+        self.console
+            .resize(map.width / self.font.width, map.height / self.font.height);
         if self.console.state.x >= self.console.state.w {
             self.console.state.x = self.console.state.w - 1;
         }
@@ -279,7 +333,13 @@ impl TextScreen {
         {
             let x = self.console.state.x;
             let y = self.console.state.y;
-            Self::invert(map, x * 8, y * 16, 8, 16);
+            Self::invert(
+                map,
+                x * self.font.width,
+                y * self.font.height,
+                self.font.width,
+                self.font.height,
+            );
             col_changed(x);
             line_changed(y);
         }
@@ -293,13 +353,29 @@ impl TextScreen {
                 bold,
                 ..
             } => {
-                Self::char(map, x * 8, y * 16, c, color.as_rgb(), bold, false);
+                Self::char(
+                    map,
+                    x * self.font.width,
+                    y * self.font.height,
+                    c,
+                    &self.font,
+                    color.as_rgb(),
+                    bold,
+                    false,
+                );
                 col_changed(x);
                 line_changed(y);
             }
             ransid::Event::Input { data } => input.extend(data),
             ransid::Event::Rect { x, y, w, h, color } => {
-                Self::rect(map, x * 8, y * 16, w * 8, h * 16, color.as_rgb());
+                Self::rect(
+                    map,
+                    x * self.font.width,
+                    y * self.font.height,
+                    w * self.font.width,
+                    h * self.font.height,
+                    color.as_rgb(),
+                );
                 for y2 in y..y + h {
                     line_changed(y2);
                 }
@@ -322,11 +398,13 @@ impl TextScreen {
                 for raw_y in 0..h {
                     let y = if from_y > to_y { raw_y } else { h - raw_y - 1 };
 
-                    for pixel_y in 0..16 {
+                    for pixel_y in 0..self.font.width {
                         {
-                            let off_from = ((from_y + y) * 16 + pixel_y) * width + from_x * 8;
-                            let off_to = ((to_y + y) * 16 + pixel_y) * width + to_x * 8;
-                            let len = w * 8;
+                            let off_from = ((from_y + y) * self.font.height + pixel_y) * width
+                                + from_x * self.font.width;
+                            let off_to = ((to_y + y) * self.font.height + pixel_y) * width
+                                + to_x * self.font.width;
+                            let len = w * self.font.width;
 
                             if off_from + len <= pixels.len() && off_to + len <= pixels.len() {
                                 unsafe {
@@ -356,15 +434,23 @@ impl TextScreen {
         {
             let x = self.console.state.x;
             let y = self.console.state.y;
-            Self::invert(map, x * 8, y * 16, 8, 16);
+            Self::invert(
+                map,
+                x * self.font.width,
+                y * self.font.height,
+                self.font.width,
+                self.font.height,
+            );
             line_changed(y);
         }
 
         let damage = Damage {
-            x: u32::try_from(min_changed_x).unwrap() * 8,
-            y: u32::try_from(min_changed_y).unwrap() * 16,
-            width: u32::try_from(max_changed_x.saturating_sub(min_changed_x) + 1).unwrap() * 8,
-            height: u32::try_from(max_changed_y.saturating_sub(min_changed_y) + 1).unwrap() * 16,
+            x: u32::try_from(min_changed_x).unwrap() * self.font.width as u32,
+            y: u32::try_from(min_changed_y).unwrap() * self.font.height as u32,
+            width: u32::try_from(max_changed_x.saturating_sub(min_changed_x) + 1).unwrap()
+                * self.font.width as u32,
+            height: u32::try_from(max_changed_y.saturating_sub(min_changed_y) + 1).unwrap()
+                * self.font.height as u32,
         };
 
         damage
@@ -420,10 +506,10 @@ impl TextScreen {
             } else {
                 let deleted_rows = (old_map.height - new_map.height).div_ceil(16);
                 for row in 0..new_map.height {
-                    if row + (deleted_rows + 1) * 16 >= old_map.height {
+                    if row + (deleted_rows + 1) * self.font.height >= old_map.height {
                         break;
                     }
-                    copy_row(old_map, new_map, row + deleted_rows * 16, row);
+                    copy_row(old_map, new_map, row + deleted_rows * self.font.height, row);
                 }
                 self.console.state.y = self.console.state.y.saturating_sub(deleted_rows);
             }

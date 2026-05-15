@@ -13,10 +13,10 @@ pub struct TextScreen {
 }
 
 impl TextScreen {
-    pub fn new(display: Display) -> TextScreen {
+    pub fn new(display: Display, font: Option<console_draw::ConsoleFont>) -> TextScreen {
         TextScreen {
             display,
-            inner: console_draw::TextScreen::new(),
+            inner: console_draw::TextScreen::new(font),
             ctrl: false,
             input: VecDeque::new(),
         }
