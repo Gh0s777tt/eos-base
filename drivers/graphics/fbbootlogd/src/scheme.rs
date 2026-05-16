@@ -28,7 +28,7 @@ impl FbbootlogScheme {
         let mut scheme = FbbootlogScheme {
             input_handle: ConsumerHandle::bootlog_vt().expect("fbbootlogd: Failed to open vt"),
             display_map: None,
-            text_screen: console_draw::TextScreen::new(),
+            text_screen: console_draw::TextScreen::new(None),
             text_buffer: console_draw::TextBuffer::new(1000),
             is_scrollback: false,
             scrollback_offset: 1000,
