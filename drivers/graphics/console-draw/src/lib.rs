@@ -398,7 +398,7 @@ impl TextScreen {
                 for raw_y in 0..h {
                     let y = if from_y > to_y { raw_y } else { h - raw_y - 1 };
 
-                    for pixel_y in 0..self.font.width {
+                    for pixel_y in 0..self.font.height {
                         {
                             let off_from = ((from_y + y) * self.font.height + pixel_y) * width
                                 + from_x * self.font.width;
