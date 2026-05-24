@@ -504,7 +504,7 @@ impl TextScreen {
                     copy_row(old_map, new_map, row, row);
                 }
             } else {
-                let deleted_rows = (old_map.height - new_map.height).div_ceil(16);
+                let deleted_rows = (old_map.height - new_map.height).div_ceil(self.font.height);
                 for row in 0..new_map.height {
                     if row + (deleted_rows + 1) * self.font.height >= old_map.height {
                         break;
