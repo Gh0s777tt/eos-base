@@ -1,4 +1,4 @@
-use console_draw::{Damage, TextScreen, V2DisplayMap};
+use console_draw::{TextScreen, V2DisplayMap};
 use drm::buffer::Buffer;
 use drm::control::Device;
 use graphics_ipc::V2GraphicsHandle;
@@ -72,12 +72,6 @@ impl Display {
                     return;
                 }
             }
-        }
-    }
-
-    pub fn sync_rect(&mut self, damage: Damage) {
-        if let Some(map) = &mut self.map {
-            map.dirty_fb(damage).unwrap();
         }
     }
 }

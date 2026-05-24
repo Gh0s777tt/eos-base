@@ -398,7 +398,7 @@ impl TextScreen {
                 for raw_y in 0..h {
                     let y = if from_y > to_y { raw_y } else { h - raw_y - 1 };
 
-                    for pixel_y in 0..self.font.width {
+                    for pixel_y in 0..self.font.height {
                         {
                             let off_from = ((from_y + y) * self.font.height + pixel_y) * width
                                 + from_x * self.font.width;
@@ -504,7 +504,7 @@ impl TextScreen {
                     copy_row(old_map, new_map, row, row);
                 }
             } else {
-                let deleted_rows = (old_map.height - new_map.height).div_ceil(16);
+                let deleted_rows = (old_map.height - new_map.height).div_ceil(self.font.height);
                 for row in 0..new_map.height {
                     if row + (deleted_rows + 1) * self.font.height >= old_map.height {
                         break;

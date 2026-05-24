@@ -4,7 +4,6 @@ use std::os::fd::AsRawFd;
 
 use console_draw::ConsoleFont;
 use event::{EventQueue, UserData};
-use orbclient::FONT;
 use redox_scheme::scheme::SchemeSync;
 use redox_scheme::{CallerCtx, OpenResult};
 use scheme_utils::{FpathWriter, HandleMap};
