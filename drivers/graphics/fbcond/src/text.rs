@@ -125,8 +125,7 @@ impl TextScreen {
             Display::handle_resize(map, &mut self.inner);
 
             let damage = self.inner.write(map, buf, &mut self.input);
-
-            self.display.sync_rect(damage);
+            map.dirty_fb(damage).unwrap();
         }
 
         Ok(buf.len())

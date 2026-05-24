@@ -232,10 +232,7 @@ impl SchemeSync for FbbootlogScheme {
 
             if !self.is_scrollback {
                 let damage = self.text_screen.write(map, buf, &mut VecDeque::new());
-
-                if let Some(map) = &mut self.display_map {
-                    map.dirty_fb(damage).unwrap();
-                }
+                map.dirty_fb(damage).unwrap();
             }
         }
 
