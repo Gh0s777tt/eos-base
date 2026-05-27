@@ -13,7 +13,7 @@ use common::io::Pio;
 #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
 use common::io::Mmio;
 
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, trace, warn};
 
 use std::fmt;
 

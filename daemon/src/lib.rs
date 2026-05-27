@@ -2,7 +2,7 @@
 #![feature(never_type)]
 
 use std::io::{self, PipeWriter, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 

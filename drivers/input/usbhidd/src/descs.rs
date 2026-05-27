@@ -41,17 +41,17 @@ impl HidDescriptor {
         let kind = bytes[1];
 
         // A valid descriptor has at least one class descriptor
-        if (length < Self::HID_DESC_FIXED_SIZE + Self::HID_CLASS_DESC_SIZE) {
+        if length < Self::HID_DESC_FIXED_SIZE + Self::HID_CLASS_DESC_SIZE {
             return Err(anyhow!("Invalid length"));
         }
 
-        if (kind != HidClassType::HID as u8) {
+        if kind != HidClassType::HID as u8 {
             return Err(anyhow!("This is not a hid descriptor"));
         }
 
         let num_descriptors = bytes[5];
 
-        if (length != Self::HID_DESC_FIXED_SIZE + num_descriptors * Self::HID_CLASS_DESC_SIZE) {
+        if length != Self::HID_DESC_FIXED_SIZE + num_descriptors * Self::HID_CLASS_DESC_SIZE {
             return Err(anyhow!(
                 "Len doesn't match the given number of descriptors ({num_descriptors})"
             ));
