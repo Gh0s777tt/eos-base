@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
-#![allow(internal_features)]
-#![feature(core_intrinsics, str_from_raw_parts, never_type)]
+#![feature(abort_immediate, never_type)]
 
 #[cfg(target_arch = "aarch64")]
 #[path = "aarch64.rs"]
@@ -50,7 +49,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
     }
 
     let _ = writeln!(&mut Writer, "{}", info);
-    core::intrinsics::abort();
+    core::process::abort_immediate();
 }
 
 const HEAP_OFF: usize = arch::USERMODE_END / 2;

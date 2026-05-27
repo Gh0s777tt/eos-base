@@ -44,7 +44,8 @@ fn daemon(daemon: SchemeDaemon) -> anyhow::Result<()> {
         let mut sigaction = MaybeUninit::<libc::sigaction>::uninit();
         addr_of_mut!((*sigaction.as_mut_ptr()).sa_flags).write(0);
         libc::sigemptyset(addr_of_mut!((*sigaction.as_mut_ptr()).sa_mask));
-        addr_of_mut!((*sigaction.as_mut_ptr()).sa_sigaction).write(sigusr_handler as usize);
+        addr_of_mut!((*sigaction.as_mut_ptr()).sa_sigaction)
+            .write(sigusr_handler as *const () as usize);
         sigaction.assume_init()
     };
     libredox::call::sigaction(flag::SIGUSR1, Some(&new_sigaction), None)?;

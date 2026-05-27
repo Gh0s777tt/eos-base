@@ -1,5 +1,3 @@
-// #![cfg_attr(target_arch = "aarch64", feature(stdsimd))] // Required for yield instruction
-
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::usize;
