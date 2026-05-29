@@ -725,10 +725,7 @@ impl<'a> ProcScheme<'a> {
             sig_pctl: None, // TODO
             rtqs: Vec::new(),
         }));
-        if let Err(err) = new_process
-            .borrow_mut()
-            .sync_kernel_attrs(&self.auth)
-        {
+        if let Err(err) = new_process.borrow_mut().sync_kernel_attrs(&self.auth) {
             log::warn!("Failed to set kernel attrs when forking: {err}");
         }
 
@@ -919,7 +916,7 @@ impl<'a> ProcScheme<'a> {
         mut op: OpCall,
         awoken: &mut VecDeque<VirtualId>,
     ) -> Poll<Response> {
-        let id = op.fd;
+        let id = op.fd();
         let (payload, metadata) = op.payload_and_metadata();
         match self.handles[id] {
             Handle::Init => Response::ready_err(EBADF, op),
@@ -1068,25 +1065,27 @@ impl<'a> ProcScheme<'a> {
                     // FIXME remove this ProcCall variant
                     ProcCall::Setrens => Response::ready_err(EINVAL, op),
                     ProcCall::SetProcPriority => {
-                        let target_pid = NonZeroUsize::new(metadata[1] as usize).map_or(fd_pid, |n| ProcessId(n.get()));
+                        let target_pid = NonZeroUsize::new(metadata[1] as usize)
+                            .map_or(fd_pid, |n| ProcessId(n.get()));
 
                         let new_prio = metadata[2] as u32;
 
                         Ready(Response::new(
-                            self.on_setprocprio(fd_pid, target_pid, new_prio).map(|()| 0),
-                            op
+                            self.on_setprocprio(fd_pid, target_pid, new_prio)
+                                .map(|()| 0),
+                            op,
                         ))
-                    },
+                    }
                     ProcCall::GetProcPriority => {
                         let target_pid = NonZeroUsize::new(metadata[1] as usize)
                             .map_or(fd_pid, |n| ProcessId(n.get()));
 
                         Ready(Response::new(
-                            self.on_getprocprio(fd_pid, target_pid).map(|prio| prio as usize),
+                            self.on_getprocprio(fd_pid, target_pid)
+                                .map(|prio| prio as usize),
                             op,
                         ))
-                    },
-
+                    }
                 }
             }
             Handle::Ps(_) => Response::ready_err(EOPNOTSUPP, op),
@@ -2566,7 +2565,12 @@ impl<'a> ProcScheme<'a> {
             return Err(Error::new(EINVAL));
         }
 
-        let caller_euid = self.processes.get(&caller_pid).ok_or(Error::new(ESRCH))?.borrow().euid;
+        let caller_euid = self
+            .processes
+            .get(&caller_pid)
+            .ok_or(Error::new(ESRCH))?
+            .borrow()
+            .euid;
 
         let target_rc = self.processes.get(&target_pid).ok_or(Error::new(ESRCH))?;
         let mut target = target_rc.borrow_mut();
@@ -2583,11 +2587,7 @@ impl<'a> ProcScheme<'a> {
         Ok(())
     }
 
-    fn on_getprocprio(
-        &self,
-        caller_pid: ProcessId,
-        target_pid: ProcessId,
-    ) -> Result<u32> {
+    fn on_getprocprio(&self, caller_pid: ProcessId, target_pid: ProcessId) -> Result<u32> {
         let target_rc = self.processes.get(&target_pid).ok_or(Error::new(ESRCH))?;
         Ok(target_rc.borrow().prio)
     }

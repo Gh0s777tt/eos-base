@@ -13,7 +13,7 @@ dependencies = [
  "pcid",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
  "spin",
 ]
@@ -48,7 +48,7 @@ dependencies = [
  "plain",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "ron",
  "rustc-hash",
  "scheme-utils",
@@ -80,7 +80,7 @@ dependencies = [
  "log",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -193,7 +193,7 @@ dependencies = [
  "libc",
  "libredox",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
 ]
 
@@ -225,7 +225,7 @@ dependencies = [
  "fdt 0.2.0-alpha1",
  "libredox",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -423,7 +423,7 @@ dependencies = [
  "libredox",
  "log",
  "redox-log",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -514,7 +514,7 @@ dependencies = [
  "libc",
  "libredox",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -582,7 +582,7 @@ dependencies = [
  "log",
  "partitionlib",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
 ]
 
@@ -599,7 +599,7 @@ dependencies = [
  "log",
  "redox-ioctl",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
 ]
 
@@ -610,7 +610,7 @@ dependencies = [
  "daemon",
  "libredox",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
 ]
 
@@ -667,7 +667,7 @@ dependencies = [
  "log",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -747,7 +747,7 @@ dependencies = [
  "ransid",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
 ]
 
@@ -768,7 +768,7 @@ dependencies = [
  "ransid",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
  "serde",
  "toml",
@@ -1061,7 +1061,7 @@ dependencies = [
  "log",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -1076,7 +1076,7 @@ dependencies = [
  "pcid",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
  "spin",
 ]
@@ -1100,7 +1100,7 @@ dependencies = [
  "range-alloc",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "void",
 ]
 
@@ -1124,7 +1124,7 @@ dependencies = [
  "libc",
  "libredox",
  "plain",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "serde",
  "serde_json",
  "toml",
@@ -1141,7 +1141,7 @@ dependencies = [
  "log",
  "orbclient",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
 ]
 
@@ -1166,7 +1166,7 @@ dependencies = [
  "rand 0.10.1",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
 ]
 
@@ -1193,7 +1193,7 @@ dependencies = [
  "libredox",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -1228,15 +1228,15 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libredox"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e02f3bb43d335493c96bf3fd3a321600bf6bd07ed34bc64118e9293bdffea46c"
+checksum = "f02ab6bace2054fb888a3c16f990117b579d14a3088e472d63c6011fa185c9d3"
 dependencies = [
  "bitflags 2.11.1",
  "ioslice",
  "libc",
  "plain",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -1260,7 +1260,7 @@ dependencies = [
  "driver-block",
  "libredox",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -1285,7 +1285,7 @@ dependencies = [
  "daemon",
  "libredox",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
 ]
 
@@ -1342,7 +1342,7 @@ dependencies = [
  "redox-log",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
  "smoltcp",
 ]
@@ -1398,7 +1398,7 @@ dependencies = [
  "partitionlib",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "smallvec 1.15.1",
 ]
 
@@ -1525,7 +1525,7 @@ dependencies = [
  "pico-args",
  "plain",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
  "serde",
 ]
@@ -1541,7 +1541,7 @@ dependencies = [
  "log",
  "pcid",
  "pico-args",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "serde",
  "toml",
 ]
@@ -1627,7 +1627,7 @@ dependencies = [
  "orbclient",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -1649,7 +1649,7 @@ dependencies = [
  "libredox",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "redox_termios",
  "scheme-utils",
 ]
@@ -1683,7 +1683,7 @@ dependencies = [
  "indexmap",
  "libredox",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
  "slab",
 ]
@@ -1789,7 +1789,7 @@ dependencies = [
  "rand_core 0.5.1",
  "raw-cpuid",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
  "sha2",
 ]
@@ -1851,10 +1851,10 @@ dependencies = [
 [[package]]
 name = "redox-ioctl"
 version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/relibc.git#546bc6fb21b990ca9195a1115717c9a842fe4909"
+source = "git+https://gitlab.redox-os.org/redox-os/relibc.git#0813a23294ba082037cf09d0afd2643e9e77b4ba"
 dependencies = [
  "drm-sys",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -1870,19 +1870,19 @@ dependencies = [
 
 [[package]]
 name = "redox-scheme"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e58cb7dee1058575f320f9bfa32c7c0eda857e285c2a163a0eb595d37add09cd"
+checksum = "ecd26e368655cb4fdda914512c46c5640221ebe5fa6df5da19c941b9f06ed153"
 dependencies = [
  "libredox",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
 name = "redox_event"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ea3e412d205440c7b0218af26247226f979ed1201674cda7a33cc70609084b5"
+checksum = "8c07d0d6d291e3a951bd847b1cd4af32fc6243d64116cf7702838c02797688b7"
 dependencies = [
  "bitflags 2.11.1",
  "libredox",
@@ -1899,9 +1899,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.7.5"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4666a1a60d8412eab19d94f6d13dcc9cea0a5ef4fdf6a5db306537413c661b1b"
+checksum = "7c7591fa2c6b601dfcfe5f043f65a1c39fcdf50efefcd7f1572e538c1f4b398d"
 dependencies = [
  "bitflags 2.11.1",
 ]
@@ -1921,7 +1921,7 @@ dependencies = [
  "libredox",
  "qemu-exit",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "redox_termios",
 ]
 
@@ -1997,7 +1997,7 @@ dependencies = [
  "log",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -2012,7 +2012,7 @@ dependencies = [
  "log",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -2051,7 +2051,7 @@ dependencies = [
  "log",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
  "spin",
 ]
@@ -2062,7 +2062,7 @@ version = "0.0.0"
 dependencies = [
  "libredox",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -2452,7 +2452,7 @@ dependencies = [
  "log",
  "orbclient",
  "plain",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "rehid",
  "smallvec 1.15.1",
  "xhcid",
@@ -2464,7 +2464,7 @@ version = "0.1.0"
 dependencies = [
  "common",
  "log",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "xhcid",
 ]
 
@@ -2478,7 +2478,7 @@ dependencies = [
  "libredox",
  "plain",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "thiserror 2.0.18",
  "xhcid",
 ]
@@ -2516,7 +2516,7 @@ dependencies = [
  "orbclient",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -2543,7 +2543,7 @@ dependencies = [
  "orbclient",
  "ransid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
 ]
 
 [[package]]
@@ -2559,7 +2559,7 @@ dependencies = [
  "log",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "spin",
  "static_assertions",
  "thiserror 2.0.18",
@@ -2578,7 +2578,7 @@ dependencies = [
  "log",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "static_assertions",
  "thiserror 2.0.18",
 ]
@@ -2598,7 +2598,7 @@ dependencies = [
  "orbclient",
  "pcid",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "spin",
  "static_assertions",
  "virtio-core",
@@ -2615,7 +2615,7 @@ dependencies = [
  "libredox",
  "log",
  "pcid",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "static_assertions",
  "virtio-core",
 ]
@@ -2955,7 +2955,7 @@ dependencies = [
  "plain",
  "redox-scheme",
  "redox_event",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "regex",
  "scheme-utils",
  "serde",
@@ -2992,7 +2992,7 @@ dependencies = [
  "daemon",
  "libredox",
  "redox-scheme",
- "redox_syscall 0.7.5",
+ "redox_syscall 0.8.0",
  "scheme-utils",
 ]
 
