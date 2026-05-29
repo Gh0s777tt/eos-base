@@ -6,7 +6,7 @@ use scheme_utils::{FpathWriter, HandleMap};
 use syscall::dirent::{DirEntry, DirentBuf, DirentKind};
 use syscall::error::{
     EACCES, EBADF, EBADFD, EEXIST, EINVAL, EIO, EISDIR, ENOMEM, ENOSYS, ENOTDIR, ENOTEMPTY,
-    EOPNOTSUPP, EOVERFLOW, EPERM,
+    EOPNOTSUPP, EOVERFLOW, EPERM, ERANGE,
 };
 use syscall::flag::{
     StdFsCallKind, O_ACCMODE, O_CREAT, O_DIRECTORY, O_EXCL, O_RDONLY, O_RDWR, O_STAT, O_TRUNC,
@@ -25,7 +25,14 @@ use crate::filesystem::{self, File, FileData, Filesystem, Inode};
 
 enum Handle {
     Inode(usize),
-    SchemeRoot,
+}
+
+impl Handle {
+    fn as_inode(&self) -> Result<usize> {
+        match self {
+            &Self::Inode(inode) => Ok(inode),
+        }
+    }
 }
 
 pub struct Scheme {
@@ -164,7 +171,7 @@ impl Scheme {
 
 impl SchemeSync for Scheme {
     fn scheme_root(&mut self) -> Result<usize> {
-        Ok(self.handles.insert(Handle::SchemeRoot))
+        Ok(self.handles.insert(Handle::Inode(Filesystem::ROOT_INODE)))
     }
     fn openat(
         &mut self,
@@ -174,7 +181,7 @@ impl SchemeSync for Scheme {
         fcntl_flags: u32,
         ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
+        if self.handles.get(dirfd)?.as_inode()? != Filesystem::ROOT_INODE {
             return Err(Error::new(EACCES));
         }
 
@@ -272,7 +279,7 @@ impl SchemeSync for Scheme {
     }
     fn unlinkat(&mut self, dirfd: usize, path: &str, flags: usize, ctx: &CallerCtx) -> Result<()> {
         {
-            if !matches!(self.handles.get(dirfd)?, Handle::SchemeRoot) {
+            if !self.handles.get(dirfd)?.as_inode()? != Filesystem::ROOT_INODE {
                 return Err(Error::new(EACCES));
             }
         }
@@ -294,10 +301,7 @@ impl SchemeSync for Scheme {
         let Ok(offset) = usize::try_from(offset) else {
             return Ok(0);
         };
-        let inode = match self.handles.get(fd)? {
-            Handle::Inode(inode) => inode,
-            Handle::SchemeRoot => return Err(Error::new(EISDIR)),
-        };
+        let inode = self.handles.get(fd)?.as_inode()?;
         let file = self
             .filesystem
             .files
@@ -330,10 +334,7 @@ impl SchemeSync for Scheme {
         let Ok(offset) = usize::try_from(opaque_offset) else {
             return Ok(buf);
         };
-        let inode = match self.handles.get(fd)? {
-            Handle::Inode(inode) => inode,
-            Handle::SchemeRoot => return Err(Error::new(EISDIR)),
-        };
+        let inode = self.handles.get(fd)?.as_inode()?;
         let file = self
             .filesystem
             .files
@@ -365,10 +366,7 @@ impl SchemeSync for Scheme {
         let Ok(offset) = usize::try_from(offset) else {
             return Ok(0);
         };
-        let inode = match self.handles.get(fd)? {
-            Handle::Inode(inode) => inode,
-            Handle::SchemeRoot => return Err(Error::new(EISDIR)),
-        };
+        let inode = self.handles.get(fd)?.as_inode()?;
         let file = self
             .filesystem
             .files
@@ -395,10 +393,7 @@ impl SchemeSync for Scheme {
         }
     }
     fn fchmod(&mut self, fd: usize, mode: u16, _ctx: &CallerCtx) -> Result<()> {
-        let inode = match self.handles.get(fd)? {
-            Handle::Inode(inode) => inode,
-            Handle::SchemeRoot => return Err(Error::new(EISDIR)),
-        };
+        let inode = self.handles.get(fd)?.as_inode()?;
         let file = self
             .filesystem
             .files
@@ -460,11 +455,7 @@ impl SchemeSync for Scheme {
     }
     fn fpath(&mut self, fd: usize, buf: &mut [u8], _ctx: &CallerCtx) -> Result<usize> {
         FpathWriter::with(buf, &self.scheme_name, |w| {
-            let mut current_inode = match *self.handles.get(fd)? {
-                Handle::Inode(inode) => inode,
-                Handle::SchemeRoot => return Err(Error::new(EISDIR)),
-            };
-
+            let mut current_inode = self.handles.get(fd)?.as_inode()?;
             let mut chain = Vec::new();
 
             let mut current_info = self
@@ -508,10 +499,7 @@ impl SchemeSync for Scheme {
         Err(Error::new(ENOSYS))
     }
     fn fstat(&mut self, fd: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {
-        let inode = match *self.handles.get(fd)? {
-            Handle::Inode(inode) => inode,
-            Handle::SchemeRoot => return Err(Error::new(EISDIR)),
-        };
+        let inode = self.handles.get(fd)?.as_inode()?;
 
         let block_size = self.filesystem.block_size();
         let file = self
@@ -586,10 +574,7 @@ impl SchemeSync for Scheme {
         Ok(())
     }
     fn ftruncate(&mut self, fd: usize, size: u64, _ctx: &CallerCtx) -> Result<()> {
-        let inode = match self.handles.get(fd)? {
-            Handle::Inode(inode) => inode,
-            Handle::SchemeRoot => return Err(Error::new(EISDIR)),
-        };
+        let inode = self.handles.get(fd)?.as_inode()?;
         let file = self
             .filesystem
             .files
@@ -615,10 +600,7 @@ impl SchemeSync for Scheme {
         Ok(())
     }
     fn futimens(&mut self, fd: usize, times: &[TimeSpec], _ctx: &CallerCtx) -> Result<()> {
-        let inode = match self.handles.get(fd)? {
-            Handle::Inode(inode) => inode,
-            Handle::SchemeRoot => return Err(Error::new(EISDIR)),
-        };
+        let inode = self.handles.get(fd)?.as_inode()?;
         let file = self
             .filesystem
             .files
@@ -632,6 +614,71 @@ impl SchemeSync for Scheme {
         file.mtime = new_mtime;
 
         Ok(())
+    }
+
+    fn relpathat(
+        &mut self,
+        dir_id: usize,
+        id: usize,
+        path: &mut [u8],
+        _ctx: &CallerCtx,
+    ) -> Result<usize> {
+        let (&Handle::Inode(dir_inode), &Handle::Inode(mut current_inode)) =
+            (self.handles.get(dir_id)?, self.handles.get(id)?)
+        else {
+            return Err(Error::new(EBADF));
+        };
+
+        let mut chain = Vec::new();
+
+        let mut current_info = self
+            .filesystem
+            .files
+            .get(&current_inode)
+            .ok_or(Error::new(EBADFD))?;
+
+        while current_inode != dir_inode && current_inode != Filesystem::ROOT_INODE {
+            let parent_info = self
+                .filesystem
+                .files
+                .get(&current_info.parent.0)
+                .ok_or(Error::new(EBADFD))?;
+
+            let FileData::Directory(ref dir) = parent_info.data else {
+                return Err(Error::new(EBADFD));
+            };
+
+            let (name, _) = dir
+                .iter()
+                .find(|(_name, inode)| inode.0 == current_inode)
+                .ok_or(Error::new(ENOENT))?;
+
+            chain.push(name);
+
+            current_inode = current_info.parent.0;
+            current_info = parent_info;
+        }
+
+        let mut offset = 0;
+        for (i, component) in chain.iter().rev().enumerate() {
+            if i != 0 {
+                if offset >= path.len() {
+                    return Err(Error::new(ERANGE));
+                }
+                path[offset] = b'/';
+                offset += 1;
+            }
+
+            let bytes: &[u8] = component.as_ref();
+            if offset + bytes.len() > path.len() {
+                return Err(Error::new(ERANGE));
+            }
+
+            path[offset..offset + bytes.len()].copy_from_slice(bytes);
+            offset += bytes.len();
+        }
+
+        Ok(offset)
     }
 
     fn std_fs_call(
