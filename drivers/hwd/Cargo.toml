@@ -13,6 +13,7 @@ libredox = { workspace = true, default-features = false, features = ["std", "cal
 amlserde = { path = "../amlserde" }
 common = { path = "../common" }
 daemon = { path = "../../daemon" }
+redox_syscall = "0.8.1"
 
 [lints]
 workspace = true
