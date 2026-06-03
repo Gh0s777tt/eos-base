@@ -17,6 +17,9 @@ mod ec;
 
 mod scheme;
 
+use libredox::Fd;
+use syscall::flag::{AcpiVerb, CallFlags};
+
 fn daemon(daemon: daemon::Daemon) -> ! {
     common::setup_logging(
         "misc",
@@ -28,9 +31,17 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
     log::info!("acpid start");
 
-    let rxsdt_raw_data: Arc<[u8]> = std::fs::read("/scheme/kernel.acpi/rxsdt")
-        .expect("acpid: failed to read `/scheme/kernel.acpi/rxsdt`")
-        .into();
+    let kernel_acpi_handle = Fd::open("/scheme/kernel.acpi", libredox::flag::O_CLOEXEC, 0)
+        .expect("acpid: failed to open kernel ACPI handle");
+
+    let rxsdt_raw_data: Arc<[u8]> = {
+        let len = kernel_acpi_handle.call_ro(&mut [], CallFlags::READ, &[AcpiVerb::ReadRxsdt as u64])
+            .expect("acpid: failed to get rxsdt length");
+        let mut buf = vec! [0_u8; len];
+        kernel_acpi_handle.call_ro(&mut buf, CallFlags::READ, &[AcpiVerb::ReadRxsdt as u64])
+            .expect("acpid: failed to read rxsdt");
+        buf.into()
+    };
 
     if rxsdt_raw_data.is_empty() {
         log::info!("System doesn't use ACPI");
@@ -77,8 +88,8 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     common::acquire_port_io_rights().expect("acpid: failed to set I/O privilege level to Ring 3");
 
-    let shutdown_pipe = File::open("/scheme/kernel.acpi/kstop")
-        .expect("acpid: failed to open `/scheme/kernel.acpi/kstop`");
+    let shutdown_pipe = kernel_acpi_handle.openat("kstop", libredox::flag::O_CLOEXEC, 0)
+        .expect("acpid: failed to open kstop handle");
 
     let mut event_queue = RawEventQueue::new().expect("acpid: failed to create event queue");
     let socket = Socket::nonblock().expect("acpid: failed to create disk scheme");
@@ -87,7 +98,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let mut handler = Blocking::new(&socket, 16);
 
     event_queue
-        .subscribe(shutdown_pipe.as_raw_fd() as usize, 0, EventFlags::READ)
+        .subscribe(shutdown_pipe.raw() as usize, 0, EventFlags::READ)
         .expect("acpid: failed to register shutdown pipe for event queue");
     event_queue
         .subscribe(socket.inner().raw(), 1, EventFlags::READ)
@@ -97,6 +108,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         .expect("acpid: failed to register acpi scheme to namespace");
 
     daemon.ready();
+    log::info!("acpid ready");
 
     libredox::call::setrens(0, 0).expect("acpid: failed to enter null namespace");
 
@@ -120,7 +132,10 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                     ControlFlow::Break(()) => break,
                 }
             }
-        } else if event.fd == shutdown_pipe.as_raw_fd() as usize {
+        } else if event.fd == shutdown_pipe.raw() {
+            if shutdown_pipe.call_ro(&mut [], CallFlags::empty(), &[AcpiVerb::CheckShutdown as u64]).expect("acpid: failed to get shutdown status") == 0 {
+                continue;
+            }
             log::info!("Received shutdown request from kernel.");
             mounted = false;
         } else {

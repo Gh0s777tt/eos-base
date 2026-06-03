@@ -1,6 +1,9 @@
 use amlserde::{AmlSerde, AmlSerdeValue};
 use std::{error::Error, fs, process::Command};
 
+use libredox::Fd;
+use syscall::flag::{AcpiVerb, CallFlags};
+
 use super::Backend;
 
 pub struct AcpiBackend {
@@ -9,10 +12,16 @@ pub struct AcpiBackend {
 
 impl Backend for AcpiBackend {
     fn new() -> Result<Self, Box<dyn Error>> {
-        let rxsdt = fs::read("/scheme/kernel.acpi/rxsdt")?;
+        let kernel_handle = Fd::open("/scheme/kernel.acpi", libredox::flag::O_CLOEXEC, 0)?;
+        let len = kernel_handle.call_ro(&mut [], CallFlags::empty(), &[AcpiVerb::ReadRxsdt as u64])?;
+        let mut rxsdt = vec! [0_u8; len];
+        kernel_handle.call_ro(&mut rxsdt, CallFlags::empty(), &[AcpiVerb::ReadRxsdt as u64])?;
 
         // Spawn acpid
-        //TODO: pass rxsdt data to acpid?
+
+        // TODO: rather than put it in the namespace, have init pass the acpi handle to hwd, and
+        // then pass it to acpid?
+
         #[allow(deprecated, reason = "we can't yet move this to init")]
         daemon::Daemon::spawn(Command::new("acpid"));
 
