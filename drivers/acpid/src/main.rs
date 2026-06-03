@@ -35,10 +35,12 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         .expect("acpid: failed to open kernel ACPI handle");
 
     let rxsdt_raw_data: Arc<[u8]> = {
-        let len = kernel_acpi_handle.call_ro(&mut [], CallFlags::READ, &[AcpiVerb::ReadRxsdt as u64])
+        let len = kernel_acpi_handle
+            .call_ro(&mut [], CallFlags::READ, &[AcpiVerb::ReadRxsdt as u64])
             .expect("acpid: failed to get rxsdt length");
-        let mut buf = vec! [0_u8; len];
-        kernel_acpi_handle.call_ro(&mut buf, CallFlags::READ, &[AcpiVerb::ReadRxsdt as u64])
+        let mut buf = vec![0_u8; len];
+        kernel_acpi_handle
+            .call_ro(&mut buf, CallFlags::READ, &[AcpiVerb::ReadRxsdt as u64])
             .expect("acpid: failed to read rxsdt");
         buf.into()
     };
@@ -88,7 +90,8 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     common::acquire_port_io_rights().expect("acpid: failed to set I/O privilege level to Ring 3");
 
-    let shutdown_pipe = kernel_acpi_handle.openat("kstop", libredox::flag::O_CLOEXEC, 0)
+    let shutdown_pipe = kernel_acpi_handle
+        .openat("kstop", libredox::flag::O_CLOEXEC, 0)
         .expect("acpid: failed to open kstop handle");
 
     let mut event_queue = RawEventQueue::new().expect("acpid: failed to create event queue");
@@ -133,7 +136,15 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                 }
             }
         } else if event.fd == shutdown_pipe.raw() {
-            if shutdown_pipe.call_ro(&mut [], CallFlags::empty(), &[AcpiVerb::CheckShutdown as u64]).expect("acpid: failed to get shutdown status") == 0 {
+            if shutdown_pipe
+                .call_ro(
+                    &mut [],
+                    CallFlags::empty(),
+                    &[AcpiVerb::CheckShutdown as u64],
+                )
+                .expect("acpid: failed to get shutdown status")
+                == 0
+            {
                 continue;
             }
             log::info!("Received shutdown request from kernel.");

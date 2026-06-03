@@ -13,9 +13,14 @@ pub struct AcpiBackend {
 impl Backend for AcpiBackend {
     fn new() -> Result<Self, Box<dyn Error>> {
         let kernel_handle = Fd::open("/scheme/kernel.acpi", libredox::flag::O_CLOEXEC, 0)?;
-        let len = kernel_handle.call_ro(&mut [], CallFlags::empty(), &[AcpiVerb::ReadRxsdt as u64])?;
-        let mut rxsdt = vec! [0_u8; len];
-        kernel_handle.call_ro(&mut rxsdt, CallFlags::empty(), &[AcpiVerb::ReadRxsdt as u64])?;
+        let len =
+            kernel_handle.call_ro(&mut [], CallFlags::empty(), &[AcpiVerb::ReadRxsdt as u64])?;
+        let mut rxsdt = vec![0_u8; len];
+        kernel_handle.call_ro(
+            &mut rxsdt,
+            CallFlags::empty(),
+            &[AcpiVerb::ReadRxsdt as u64],
+        )?;
 
         // Spawn acpid
 
