@@ -49,12 +49,12 @@ clean:
 # test if booting
 test: all
 	$(MAKE) install
-	redoxer exec --folder ./sysroot/:/ true
+	REDOXER_SYSROOT=$(DESTDIR) redoxer exec true
 
 # test with interactive gui
 test-gui: all
 	$(MAKE) install
-	redoxer exec --gui --folder ./sysroot/:/ ion
+	REDOXER_SYSROOT=$(DESTDIR) redoxer exec --gui ion
 
 # -----------------------------------------------------------------------------
 # base
