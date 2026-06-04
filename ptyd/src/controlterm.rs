@@ -6,6 +6,7 @@ use syscall::flag::{EventFlags, F_GETFL, F_SETFL, O_ACCMODE, O_NONBLOCK};
 
 use crate::pty::Pty;
 use crate::resource::Resource;
+use scheme_utils::FpathWriter;
 
 /// Read side of a pipe
 pub struct PtyControlTerm {
@@ -36,7 +37,10 @@ impl Resource for PtyControlTerm {
     }
 
     fn path(&mut self, buf: &mut [u8]) -> Result<usize> {
-        self.pty.borrow_mut().path(buf)
+        FpathWriter::with(buf, "pty", |w| {
+            write!(w, "{}", "ptmx").unwrap();
+            Ok(())
+        })
     }
 
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {

@@ -82,7 +82,7 @@ fn handle(
 
 fn getpty(columns: u32, lines: u32) -> io::Result<(RawFd, String)> {
     let master = libredox::call::open(
-        "/scheme/pty",
+        "/scheme/pty/ptmx",
         libredox::flag::O_CLOEXEC
             | libredox::flag::O_RDWR
             | libredox::flag::O_CREAT
