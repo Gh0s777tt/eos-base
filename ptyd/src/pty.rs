@@ -7,6 +7,7 @@ use syscall::error::Result;
 pub struct Pty {
     pub id: usize,
     pub pgrp: usize,
+    pub locked: bool,
     pub termios: Termios,
     pub winsize: Winsize,
     pub cooked: Vec<u8>,
@@ -21,6 +22,7 @@ impl Pty {
         Pty {
             id,
             pgrp: 0,
+            locked: true,
             termios: Termios::default(),
             winsize: Winsize::default(),
             cooked: Vec::new(),

@@ -12,6 +12,8 @@ use syscall::schemev2::NewFdFlags;
 
 use crate::controlterm::PtyControlTerm;
 use crate::pgrp::PtyPgrp;
+use crate::ptlock::PtyLock;
+use crate::ptname::PtsName;
 use crate::pty::Pty;
 use crate::resource::Resource;
 use crate::subterm::PtySubTerm;
@@ -72,7 +74,12 @@ impl SchemeSync for PtyScheme {
         let id = self.next_id;
         self.next_id += 1;
 
+        // This happens if we are passed "/scheme/pty" and not "/scheme/pty/ptmx".
         if path.is_empty() {
+            return Err(Error::new(ENOENT));
+        }
+
+        if path == "ptmx" {
             let pty = Rc::new(RefCell::new(Pty::new(id)));
             self.handles.insert(
                 id,
@@ -119,6 +126,10 @@ impl SchemeSync for PtyScheme {
                 Box::new(PtyTermios::new(old_resource.pty(), old_resource.flags()))
             } else if buf == b"winsize" {
                 Box::new(PtyWinsize::new(old_resource.pty(), old_resource.flags()))
+            } else if buf == b"ptlock" {
+                Box::new(PtyLock::new(old_resource.pty(), old_resource.flags()))
+            } else if buf == b"ptsname" {
+                Box::new(PtsName::new(old_resource.pty(), old_resource.flags()))
             } else {
                 return Err(Error::new(EINVAL));
             }
