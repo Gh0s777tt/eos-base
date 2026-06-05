@@ -110,10 +110,10 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     register_sync_scheme(&socket, "acpi", &mut scheme)
         .expect("acpid: failed to register acpi scheme to namespace");
 
+    libredox::call::setrens(0, 0).expect("acpid: failed to enter null namespace");
+
     daemon.ready();
     log::info!("acpid ready");
-
-    libredox::call::setrens(0, 0).expect("acpid: failed to enter null namespace");
 
     let mut mounted = true;
     while mounted {
