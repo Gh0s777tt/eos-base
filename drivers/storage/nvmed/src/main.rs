@@ -81,6 +81,11 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
     let interrupt_vector = irq_helpers::pci_allocate_interrupt_vector(&mut pcid_handle, "nvmed");
     let iv = interrupt_vector.vector();
     let irq_handle = interrupt_vector.irq_handle().try_clone().unwrap();
+    // E-OS R-401c: on non-x86, pci_allocate_interrupt_vector() always returns a Legacy (INTx)
+    // vector -- there is no MSI/MSI-X on aarch64. INTx is level-triggered and must be EOI'd by
+    // the executor (read + write the irq handle each interrupt); the hardcoded `false` below
+    // treated the level IRQ as edge/MSI and never re-armed it, so nvmed hung right after spawn.
+    let intx = cfg!(not(any(target_arch = "x86", target_arch = "x86_64")));
 
     let mut nvme = Nvme::new(address.as_ptr() as usize, interrupt_vector, pcid_handle)
         .expect("nvmed: failed to allocate driver data");
@@ -89,7 +94,7 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
     log::debug!("Finished base initialization");
     let nvme = Arc::new(nvme);
 
-    let executor = nvme::executor::init(Arc::clone(&nvme), iv, false /* FIXME */, irq_handle);
+    let executor = nvme::executor::init(Arc::clone(&nvme), iv, intx, irq_handle);
 
     let mut time_handle = File::open(&format!("/scheme/time/{}", libredox::flag::CLOCK_MONOTONIC))
         .expect("failed to open time handle");
