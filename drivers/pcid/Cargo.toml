@@ -24,6 +24,8 @@ redox-scheme.workspace = true
 scheme-utils = { path = "../../scheme-utils" }
 redox_syscall.workspace = true
 serde.workspace = true
+ron.workspace = true
+amlserde = { path = "../amlserde" }
 
 common = { path = "../common" }
 daemon = { path = "../../daemon" }
