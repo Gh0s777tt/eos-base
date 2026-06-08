@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 mod keymaps {
     pub static US: [(u8, [char; 2]); 53] = [
-        (orbclient::K_ESC, ['\x1B', '\x1B']),
+        (orbclient::K_ESC, ['\0', '\0']),
         (orbclient::K_1, ['1', '!']),
         (orbclient::K_2, ['2', '@']),
         (orbclient::K_3, ['3', '#']),
@@ -17,7 +17,7 @@ mod keymaps {
         (orbclient::K_0, ['0', ')']),
         (orbclient::K_MINUS, ['-', '_']),
         (orbclient::K_EQUALS, ['=', '+']),
-        (orbclient::K_BKSP, ['\x7F', '\x7F']),
+        (orbclient::K_BKSP, ['\0', '\0']),
         (orbclient::K_TAB, ['\t', '\t']),
         (orbclient::K_Q, ['q', 'Q']),
         (orbclient::K_W, ['w', 'W']),
@@ -31,7 +31,7 @@ mod keymaps {
         (orbclient::K_P, ['p', 'P']),
         (orbclient::K_BRACE_OPEN, ['[', '{']),
         (orbclient::K_BRACE_CLOSE, [']', '}']),
-        (orbclient::K_ENTER, ['\n', '\n']),
+        (orbclient::K_ENTER, ['\0', '\0']),
         (orbclient::K_CTRL, ['\0', '\0']),
         (orbclient::K_A, ['a', 'A']),
         (orbclient::K_S, ['s', 'S']),
@@ -60,7 +60,7 @@ mod keymaps {
     ];
 
     pub static GB: [(u8, [char; 2]); 54] = [
-        (orbclient::K_ESC, ['\x1B', '\x1B']),
+        (orbclient::K_ESC, ['\0', '\0']),
         (orbclient::K_1, ['1', '!']),
         (orbclient::K_2, ['2', '"']),
         (orbclient::K_3, ['3', '£']),
@@ -73,7 +73,7 @@ mod keymaps {
         (orbclient::K_0, ['0', ')']),
         (orbclient::K_MINUS, ['-', '_']),
         (orbclient::K_EQUALS, ['=', '+']),
-        (orbclient::K_BKSP, ['\x7F', '\x7F']),
+        (orbclient::K_BKSP, ['\0', '\0']),
         (orbclient::K_TAB, ['\t', '\t']),
         (orbclient::K_Q, ['q', 'Q']),
         (orbclient::K_W, ['w', 'W']),
@@ -87,7 +87,7 @@ mod keymaps {
         (orbclient::K_P, ['p', 'P']),
         (orbclient::K_BRACE_OPEN, ['[', '{']),
         (orbclient::K_BRACE_CLOSE, [']', '}']),
-        (orbclient::K_ENTER, ['\n', '\n']),
+        (orbclient::K_ENTER, ['\0', '\0']),
         (orbclient::K_CTRL, ['\0', '\0']),
         (orbclient::K_A, ['a', 'A']),
         (orbclient::K_S, ['s', 'S']),
@@ -118,7 +118,7 @@ mod keymaps {
     ];
 
     pub static DVORAK: [(u8, [char; 2]); 53] = [
-        (orbclient::K_ESC, ['\x1B', '\x1B']),
+        (orbclient::K_ESC, ['\0', '\0']),
         (orbclient::K_1, ['1', '!']),
         (orbclient::K_2, ['2', '@']),
         (orbclient::K_3, ['3', '#']),
@@ -131,7 +131,7 @@ mod keymaps {
         (orbclient::K_0, ['0', ')']),
         (orbclient::K_MINUS, ['[', '{']),
         (orbclient::K_EQUALS, [']', '}']),
-        (orbclient::K_BKSP, ['\x7F', '\x7F']),
+        (orbclient::K_BKSP, ['\0', '\0']),
         (orbclient::K_TAB, ['\t', '\t']),
         (orbclient::K_Q, ['\'', '"']),
         (orbclient::K_W, [',', '<']),
@@ -145,7 +145,7 @@ mod keymaps {
         (orbclient::K_P, ['l', 'L']),
         (orbclient::K_BRACE_OPEN, ['/', '?']),
         (orbclient::K_BRACE_CLOSE, ['=', '+']),
-        (orbclient::K_ENTER, ['\n', '\n']),
+        (orbclient::K_ENTER, ['\0', '\0']),
         (orbclient::K_CTRL, ['\0', '\0']),
         (orbclient::K_A, ['a', 'A']),
         (orbclient::K_S, ['o', 'O']),
@@ -174,7 +174,7 @@ mod keymaps {
     ];
 
     pub static AZERTY: [(u8, [char; 2]); 53] = [
-        (orbclient::K_ESC, ['\x1B', '\x1B']),
+        (orbclient::K_ESC, ['\0', '\0']),
         (orbclient::K_1, ['&', '1']),
         (orbclient::K_2, ['é', '2']),
         (orbclient::K_3, ['"', '3']),
@@ -187,7 +187,7 @@ mod keymaps {
         (orbclient::K_0, ['à', '0']),
         (orbclient::K_MINUS, [')', '°']),
         (orbclient::K_EQUALS, ['=', '+']),
-        (orbclient::K_BKSP, ['\x7F', '\x7F']),
+        (orbclient::K_BKSP, ['\0', '\0']),
         (orbclient::K_TAB, ['\t', '\t']),
         (orbclient::K_Q, ['a', 'A']),
         (orbclient::K_W, ['z', 'Z']),
@@ -201,7 +201,7 @@ mod keymaps {
         (orbclient::K_P, ['p', 'P']),
         (orbclient::K_BRACE_OPEN, ['^', '¨']),
         (orbclient::K_BRACE_CLOSE, ['$', '£']),
-        (orbclient::K_ENTER, ['\n', '\n']),
+        (orbclient::K_ENTER, ['\0', '\0']),
         (orbclient::K_CTRL, ['\0', '\0']),
         (orbclient::K_A, ['q', 'Q']),
         (orbclient::K_S, ['s', 'S']),
@@ -230,7 +230,7 @@ mod keymaps {
     ];
 
     pub static BEPO: [(u8, [char; 2]); 53] = [
-        (orbclient::K_ESC, ['\x1B', '\x1B']),
+        (orbclient::K_ESC, ['\0', '\0']),
         (orbclient::K_1, ['"', '1']),
         (orbclient::K_2, ['«', '2']),
         (orbclient::K_3, ['»', '3']),
@@ -243,7 +243,7 @@ mod keymaps {
         (orbclient::K_0, ['*', '0']),
         (orbclient::K_MINUS, ['=', '°']),
         (orbclient::K_EQUALS, ['%', '`']),
-        (orbclient::K_BKSP, ['\x7F', '\x7F']),
+        (orbclient::K_BKSP, ['\0', '\0']),
         (orbclient::K_TAB, ['\t', '\t']),
         (orbclient::K_Q, ['b', 'B']),
         (orbclient::K_W, ['é', 'É']),
@@ -257,7 +257,7 @@ mod keymaps {
         (orbclient::K_P, ['j', 'J']),
         (orbclient::K_BRACE_OPEN, ['z', 'Z']),
         (orbclient::K_BRACE_CLOSE, ['w', 'W']),
-        (orbclient::K_ENTER, ['\n', '\n']),
+        (orbclient::K_ENTER, ['\0', '\0']),
         (orbclient::K_CTRL, ['\0', '\0']),
         (orbclient::K_A, ['a', 'A']),
         (orbclient::K_S, ['u', 'U']),
@@ -286,7 +286,7 @@ mod keymaps {
     ];
 
     pub static IT: [(u8, [char; 2]); 53] = [
-        (orbclient::K_ESC, ['\x1B', '\x1B']),
+        (orbclient::K_ESC, ['\0', '\0']),
         (orbclient::K_1, ['1', '!']),
         (orbclient::K_2, ['2', '"']),
         (orbclient::K_3, ['3', '£']),
@@ -299,7 +299,7 @@ mod keymaps {
         (orbclient::K_0, ['0', '=']),
         (orbclient::K_MINUS, ['?', '\'']),
         (orbclient::K_EQUALS, ['ì', '^']),
-        (orbclient::K_BKSP, ['\x7F', '\x7F']),
+        (orbclient::K_BKSP, ['\0', '\0']),
         (orbclient::K_TAB, ['\t', '\t']),
         (orbclient::K_Q, ['q', 'Q']),
         (orbclient::K_W, ['w', 'W']),
@@ -313,8 +313,8 @@ mod keymaps {
         (orbclient::K_P, ['p', 'P']),
         (orbclient::K_BRACE_OPEN, ['è', 'é']),
         (orbclient::K_BRACE_CLOSE, ['+', '*']),
-        (orbclient::K_ENTER, ['\n', '\n']),
-        (orbclient::K_CTRL, ['\x20', '\x20']),
+        (orbclient::K_ENTER, ['\0', '\0']),
+        (orbclient::K_CTRL, ['\0', '\0']),
         (orbclient::K_A, ['a', 'A']),
         (orbclient::K_S, ['s', 'S']),
         (orbclient::K_D, ['d', 'D']),
