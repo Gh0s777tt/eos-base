@@ -218,10 +218,43 @@ fn enable_function(
                 mapping.parent_interrupt,
                 mapping.parent_interrupt_cells,
             ))
+        } else if pcie.interrupt_map.is_empty() {
+            // No FDT interrupt-map (ACPI boot): route INTx via the ACPI _PRT to a GIC SPI so the
+            // driver opens it as irq:phandle-0 (phandle 0 = the MADT-registered GIC). This is what
+            // lets aarch64 boot WITHOUT `-machine virt,acpi=off` (E-OS R-401f).
+            let device = pci_address.device();
+            let pin_idx = interrupt_pin.saturating_sub(1); // config pin is 1..=4; _PRT pin is 0..=3
+            match acpi_prt_routing()
+                .iter()
+                .find(|(d, p, _)| *d == device && *p == pin_idx)
+            {
+                Some((_, _, gsi)) => {
+                    let gic_irq = gsi.saturating_sub(32); // GIC SPI index = GSI - 32
+                    debug!(
+                        "pcid: ACPI _PRT routed {:02x}:{:02x}.x pin {} -> GSI {} (GIC SPI {})",
+                        pci_address.bus(),
+                        device,
+                        interrupt_pin,
+                        gsi,
+                        gic_irq
+                    );
+                    // GIC #interrupt-cells=3: [type=SPI(0), number=SPI-index, flags=level-high(4)]
+                    Some((0u32, [0u32, gic_irq, 4u32], 3usize))
+                }
+                None => {
+                    warn!(
+                        "pcid: no ACPI _PRT route for {:02x}:{:02x}.x pin {}",
+                        pci_address.bus(),
+                        device,
+                        interrupt_pin
+                    );
+                    None
+                }
+            }
         } else {
             None
         };
-        if mapping.is_some() {
+        if phandled.is_some() {
             debug!("found mapping: addr={:?} => {:?}", addr, phandled);
         }
 
@@ -229,6 +262,102 @@ fn enable_function(
     } else {
         None
     }
+}
+
+/// Cache of the ACPI PCI interrupt routing table (`_PRT`), resolved to GIC GSIs.
+/// Tuples are (pci_device, intx_pin_0based, gsi). Empty if not an ACPI boot or acpid is absent.
+static ACPI_PRT_ROUTING: std::sync::OnceLock<Vec<(u8, u8, u32)>> = std::sync::OnceLock::new();
+
+fn acpi_prt_routing() -> &'static Vec<(u8, u8, u32)> {
+    ACPI_PRT_ROUTING.get_or_init(read_acpi_prt_routing)
+}
+
+/// Read `\_SB.PCIx._PRT` from acpid's `acpi:/symbols`, resolving each entry's interrupt link
+/// device (`_SB.Lxxx`) to its GIC GSI via the link's `_CRS` (an ACPI Extended Interrupt
+/// Descriptor). Used under ACPI boot, where pcid otherwise has no PCIe interrupt-map and so
+/// could not route legacy INTx (which previously forced `-machine virt,acpi=off` on aarch64).
+fn read_acpi_prt_routing() -> Vec<(u8, u8, u32)> {
+    use amlserde::{AmlSerde, AmlSerdeValue};
+    use std::collections::HashMap;
+    let mut routing = Vec::new();
+    let syms: Vec<String> = match std::fs::read_dir("/scheme/acpi/symbols") {
+        Ok(rd) => rd
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect(),
+        Err(e) => {
+            warn!("pcid: read_dir /scheme/acpi/symbols failed: {}", e);
+            return routing;
+        }
+    };
+    debug!("pcid: listed {} acpi symbols", syms.len());
+    let mut link_cache: HashMap<String, Option<u32>> = HashMap::new();
+    for prt in syms.iter().filter(|n| n.ends_with("._PRT")) {
+        debug!("pcid: reading ACPI _PRT {}", prt);
+        let Ok(content) = std::fs::read_to_string(format!("/scheme/acpi/symbols/{}", prt)) else {
+            continue;
+        };
+        let Ok(node) = ron::from_str::<AmlSerde>(&content) else {
+            warn!("pcid: failed to parse ACPI _PRT {}", prt);
+            continue;
+        };
+        let AmlSerdeValue::Package { contents } = node.value else {
+            continue;
+        };
+        for entry in &contents {
+            let AmlSerdeValue::Package { contents: e } = entry else {
+                continue;
+            };
+            if e.len() < 4 {
+                continue;
+            }
+            let (AmlSerdeValue::Integer(addr), AmlSerdeValue::Integer(pin)) = (&e[0], &e[1]) else {
+                continue;
+            };
+            let device = (*addr >> 16) as u8; // _PRT Address = (device << 16) | 0xFFFF
+            let gsi = match &e[2] {
+                // Source = interrupt link device name (e.g. "L000") -> resolve via its _CRS (cached).
+                AmlSerdeValue::String(link) => {
+                    let resolved = link_cache
+                        .entry(link.clone())
+                        .or_insert_with(|| resolve_link_gsi(&syms, link));
+                    match resolved {
+                        Some(g) => *g,
+                        None => continue,
+                    }
+                }
+                // Source = 0 (integer) -> SourceIndex *is* the GSI (the static-GSI form).
+                AmlSerdeValue::Integer(_) => match &e[3] {
+                    AmlSerdeValue::Integer(g) => *g as u32,
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            routing.push((device, *pin as u8, gsi));
+        }
+    }
+    info!(
+        "pcid: ACPI _PRT INTx routing resolved: {} entries",
+        routing.len()
+    );
+    routing
+}
+
+/// Resolve a PCI interrupt link device (e.g. `"L000"` / `"\\_SB_.L000"`) to its current GIC GSI
+/// by reading the link's `_CRS` and parsing the Extended Interrupt Descriptor (tag 0x89).
+fn resolve_link_gsi(syms: &[String], link: &str) -> Option<u32> {
+    use amlserde::{AmlSerde, AmlSerdeValue};
+    let last = link.rsplit(|c: char| c == '.' || c == '\\').next().unwrap_or(link);
+    let crs = syms.iter().find(|n| n.ends_with(&format!("{}._CRS", last)))?;
+    let content = std::fs::read_to_string(format!("/scheme/acpi/symbols/{}", crs)).ok()?;
+    let node = ron::from_str::<AmlSerde>(&content).ok()?;
+    let AmlSerdeValue::Buffer(bytes) = node.value else {
+        return None;
+    };
+    // Extended Interrupt Descriptor: tag 0x89, len(2), flags(1), count(1), GSI(4 LE), ...
+    let pos = bytes.iter().position(|&b| b == 0x89)?;
+    let g = bytes.get(pos + 5..pos + 9)?;
+    Some(u32::from_le_bytes([g[0], g[1], g[2], g[3]]))
 }
 
 fn main() {
@@ -252,6 +381,13 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let mut scheme = scheme::PciScheme::new(pcie);
     let socket = redox_scheme::Socket::create().expect("failed to open pci scheme socket");
     let handler = Blocking::new(&socket, 16);
+
+    // EOS R-401f: populate the ACPI _PRT INTx routing BEFORE registering our pci_fd with acpid, so
+    // acpid's AML-interpreter build (triggered by our read of acpi:/symbols) cannot deadlock against
+    // pcid, which is not yet serving the pci scheme. Only relevant under ACPI boot (empty interrupt_map).
+    if scheme.pcie.interrupt_map.is_empty() {
+        let _ = acpi_prt_routing();
+    }
 
     {
         match libredox::Fd::open("/scheme/acpi/register_pci", libredox::flag::O_WRONLY, 0) {
