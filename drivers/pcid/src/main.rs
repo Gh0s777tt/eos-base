@@ -218,10 +218,13 @@ fn enable_function(
                 mapping.parent_interrupt,
                 mapping.parent_interrupt_cells,
             ))
-        } else if pcie.interrupt_map.is_empty() {
+        } else if cfg!(not(any(target_arch = "x86", target_arch = "x86_64")))
+            && pcie.interrupt_map.is_empty()
+        {
             // No FDT interrupt-map (ACPI boot): route INTx via the ACPI _PRT to a GIC SPI so the
             // driver opens it as irq:phandle-0 (phandle 0 = the MADT-registered GIC). This is what
-            // lets aarch64 boot WITHOUT `-machine virt,acpi=off` (E-OS R-401f).
+            // lets aarch64 boot WITHOUT `-machine virt,acpi=off` (E-OS R-401f). x86/x86_64 keep the
+            // plain IRQ-line path (phandle routing does not exist in non-dtb kernels).
             let device = pci_address.device();
             let pin_idx = interrupt_pin.saturating_sub(1); // config pin is 1..=4; _PRT pin is 0..=3
             match acpi_prt_routing()
@@ -385,7 +388,13 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     // EOS R-401f: populate the ACPI _PRT INTx routing BEFORE registering our pci_fd with acpid, so
     // acpid's AML-interpreter build (triggered by our read of acpi:/symbols) cannot deadlock against
     // pcid, which is not yet serving the pci scheme. Only relevant under ACPI boot (empty interrupt_map).
-    if scheme.pcie.interrupt_map.is_empty() {
+    // NOT on x86/x86_64: there legacy INTx is routed by plain IRQ line number (PIC/IOAPIC), the
+    // irq:phandle-N scheme path only exists in cfg(dtb) kernels (aarch64/riscv64), and reading
+    // acpi:/symbols this early would force acpid's AML build before our pci_fd is registered
+    // (x86 DSDTs have PCI config OpRegions, so that build would be degraded).
+    if cfg!(not(any(target_arch = "x86", target_arch = "x86_64")))
+        && scheme.pcie.interrupt_map.is_empty()
+    {
         let _ = acpi_prt_routing();
     }
 
