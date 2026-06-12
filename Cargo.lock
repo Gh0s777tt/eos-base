@@ -1423,9 +1423,9 @@ checksum = "2839e79665f131bdb5782e51f2c6c9599c133c6098982a54c794358bf432529c"
 
 [[package]]
 name = "orbclient"
-version = "0.3.54"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a570f6bca41d29acb2139229a7c873ec99bc9a313bd10804081d89bfac8ff329"
+checksum = "c7617479bc75c12124d08d04307c562603b317a4162d785760a17d2c2e52345c"
 dependencies = [
  "libc",
  "libredox",
