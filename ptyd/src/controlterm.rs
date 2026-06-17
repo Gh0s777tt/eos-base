@@ -38,7 +38,7 @@ impl Resource for PtyControlTerm {
 
     fn path(&mut self, buf: &mut [u8]) -> Result<usize> {
         FpathWriter::with(buf, "pty", |w| {
-            write!(w, "{}", "ptmx").unwrap();
+            write!(w, "ptmx").unwrap();
             Ok(())
         })
     }
