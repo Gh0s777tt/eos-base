@@ -205,7 +205,8 @@ impl ProducerHandle {
     }
 
     pub fn write_event(&mut self, event: orbclient::Event) -> io::Result<()> {
-        self.0.write_all(&event)?;
+        let amount = self.0.write(&event)?;
+        assert!(amount == core::mem::size_of::<orbclient::Event>());
         Ok(())
     }
 }

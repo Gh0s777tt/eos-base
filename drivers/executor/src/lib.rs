@@ -187,7 +187,8 @@ impl<Hw: Hardware> LocalExecutor<Hw> {
         if self.intx {
             let mut buf = [0_u8; core::mem::size_of::<usize>()];
             if (&self.irq_handle).read(&mut buf).unwrap() != 0 {
-                (&self.irq_handle).write_all(&buf).unwrap();
+                let amount = (&self.irq_handle).write(&buf).unwrap();
+                assert!(amount == core::mem::size_of::<usize>());
             }
         }
 
