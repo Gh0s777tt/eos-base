@@ -43,8 +43,7 @@ pub struct Daemon {
 
 impl Daemon {
     /// Create a new daemon.
-    #[expect(clippy::new_ret_no_self)]
-    pub fn new(f: impl FnOnce(Daemon) -> !) -> ! {
+    pub fn new(f: impl FnOnce(Self) -> !) -> ! {
         let write_pipe = unsafe { io::PipeWriter::from_raw_fd(get_fd("INIT_NOTIFY")) };
 
         f(Daemon { write_pipe })
