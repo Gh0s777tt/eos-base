@@ -75,7 +75,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
 
                 timeout_count = timeout_count.wrapping_add(1);
 
-                for (_id, handle) in scheme.handles.iter_mut() {
+                for handle in scheme.handles.values_mut() {
                     if let Handle::Resource(res) = handle {
                         res.timeout(timeout_count);
                     }

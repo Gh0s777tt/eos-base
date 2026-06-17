@@ -87,7 +87,7 @@ impl<'sock> Blocking<'sock> {
             }) => {
                 panic!("scheme response writing should always block");
             }
-            Err(err) => return Err(LError::from(err).into()),
+            Err(err) => Err(LError::from(err).into()),
         }
     }
 
