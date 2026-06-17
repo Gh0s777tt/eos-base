@@ -205,7 +205,7 @@ impl ProducerHandle {
     }
 
     pub fn write_event(&mut self, event: orbclient::Event) -> io::Result<()> {
-        self.0.write(&event)?;
+        self.0.write_all(&event)?;
         Ok(())
     }
 }
