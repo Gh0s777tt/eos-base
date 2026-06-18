@@ -1515,6 +1515,7 @@ dependencies = [
 name = "pcid"
 version = "0.1.0"
 dependencies = [
+ "amlserde",
  "bincode",
  "common",
  "daemon",
@@ -1527,6 +1528,7 @@ dependencies = [
  "plain",
  "redox-scheme",
  "redox_syscall 0.8.1",
+ "ron",
  "scheme-utils",
  "serde",
 ]
@@ -2617,6 +2619,21 @@ dependencies = [
  "pcid",
  "redox_syscall 0.8.1",
  "static_assertions",
+ "virtio-core",
+]
+
+[[package]]
+name = "virtio-rngd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "common",
+ "daemon",
+ "futures",
+ "libredox",
+ "log",
+ "pcid",
+ "redox_syscall 0.8.1",
  "virtio-core",
 ]
 

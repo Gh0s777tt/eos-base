@@ -1,0 +1,21 @@
+[package]
+name = "virtio-rngd"
+description = "VirtIO entropy (RNG) driver"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+futures = { version = "0.3.28", features = ["executor"] }
+
+virtio-core = { path = "../../virtio-core" }
+pcid = { path = "../../pcid" }
+common = { path = "../../common" }
+daemon = { path = "../../../daemon" }
+
+redox_syscall.workspace = true
+libredox.workspace = true
+
+[lints]
+workspace = true
