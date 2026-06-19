@@ -655,38 +655,53 @@ impl IntelHDA {
 
         self.regs.statests.write(0x7FFF);
 
-        // 3.3.7
+        // 3.3.7: reset the controller. On aarch64 the Timeout helper (which relies on
+        // std::time::Instant) does not reliably fire and thread::sleep is unreliable
+        // this early in boot, so bound these waits with a hard spin cap. Otherwise a
+        // controller that never completes reset hangs the entire boot, because
+        // pcid-spawner blocks waiting for ihdad to signal readiness.
+        const RESET_SPINS: u32 = 5_000_000;
+
+        // Enter reset (CRST low) and wait for the controller to acknowledge.
+        self.regs.gctl.writef(CRST, false);
         {
-            let timeout = Timeout::from_secs(1);
-            self.regs.gctl.writef(CRST, false);
-            loop {
-                if !self.regs.gctl.readf(CRST) {
-                    break;
+            let mut spins: u32 = 0;
+            while self.regs.gctl.readf(CRST) {
+                spins += 1;
+                if spins > RESET_SPINS {
+                    log::error!(
+                        "ihda: controller did not enter reset (gctl={:08X})",
+                        self.regs.gctl.read()
+                    );
+                    return Err(Error::new(EIO));
                 }
-                timeout.run().map_err(|()| {
-                    log::error!("failed to start reset");
-                    Error::new(EIO)
-                })?;
+                core::hint::spin_loop();
             }
         }
 
-        thread::sleep(Duration::from_millis(1));
-
+        // Brief settle, then leave reset (CRST high) and wait for it to come up.
+        for _ in 0..100_000 {
+            core::hint::spin_loop();
+        }
+        self.regs.gctl.writef(CRST, true);
         {
-            let timeout = Timeout::from_secs(1);
-            self.regs.gctl.writef(CRST, true);
-            loop {
-                if self.regs.gctl.readf(CRST) {
-                    break;
+            let mut spins: u32 = 0;
+            while !self.regs.gctl.readf(CRST) {
+                spins += 1;
+                if spins > RESET_SPINS {
+                    log::error!(
+                        "ihda: controller did not leave reset (gctl={:08X})",
+                        self.regs.gctl.read()
+                    );
+                    return Err(Error::new(EIO));
                 }
-                timeout.run().map_err(|()| {
-                    log::error!("failed to finish reset");
-                    Error::new(EIO)
-                })?;
+                core::hint::spin_loop();
             }
         }
 
-        thread::sleep(Duration::from_millis(2));
+        for _ in 0..200_000 {
+            core::hint::spin_loop();
+        }
 
         let mut ticks: u32 = 0;
         while self.regs.statests.read() == 0 {
