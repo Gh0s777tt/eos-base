@@ -60,8 +60,16 @@ fn daemon(daemon: daemon::Daemon, mut pcid_handle: PciFunctionHandle) -> ! {
         let event_queue =
             EventQueue::<Source>::new().expect("ihdad: Could not create event queue.");
         let socket = Socket::nonblock().expect("ihdad: failed to create socket");
-        let mut device = unsafe {
-            hda::IntelHDA::new(address, vend_prod).expect("ihdad: failed to allocate device")
+        let mut device = match unsafe { hda::IntelHDA::new(address, vend_prod) } {
+            Ok(dev) => dev,
+            Err(err) => {
+                // HDA init failed (e.g. the controller does not come up on this
+                // platform). Don't hang or panic: signal readiness so pcid-spawner
+                // proceeds and the rest of the system boots, just without audio.
+                log::warn!("ihdad: HDA initialization failed ({err:?}); audio unavailable");
+                daemon.ready();
+                std::process::exit(0);
+            }
         };
         let mut readiness_based = ReadinessBased::new(&socket, 16);
 
