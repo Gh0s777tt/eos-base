@@ -56,30 +56,28 @@ fn create_rdrand_seed() -> [u8; SEED_BYTES] {
     }
     #[cfg(target_arch = "aarch64")]
     {
-        fn is_cpu_feature_detected(feature: &str) -> bool {
-            if let Ok(cpu) = std::fs::read_to_string("/scheme/sys/cpu") {
-                return cpu
-                    .lines()
-                    .find_map(|s| s.strip_prefix("Features:"))
-                    .map(|s| s.split(" ").find(|s| s == &feature))
-                    .is_some();
+        // Read RNDRRS unconditionally. On real FEAT_RNG cores this is the hardware
+        // entropy source; on cores without FEAT_RNG (e.g. cortex-a72, Raspberry Pi
+        // 3/4) the instruction is UNDEFINED, but the E-OS kernel traps it and
+        // emulates RNDR/RNDRRS (R-401b: a splitmix64 PRNG seeded from CNTPCT). So we
+        // get a non-zero seed instead of falling back to the insecure all-zero seed.
+        //
+        // The previous `is_cpu_feature_detected("rand")` gate skipped this entirely
+        // on non-FEAT_RNG cores, which re-introduced the zero seed and left the
+        // kernel's R-401b emulation dead code. virtio-rngd later mixes real hardware
+        // entropy into the pool via /scheme/rand (see drivers/rng/virtio-rngd).
+        let mut failure = false;
+        for i in 0..SEED_BYTES / 8 {
+            // We get 8 bytes at a time from the RNDRRS register.
+            let rand: u64;
+            unsafe {
+                asm!("mrs {}, s3_3_c2_c4_1", out(reg) rand); // rndrrs
             }
-            false
+            failure |= rand == 0;
+            rng[i * 8..(i * 8 + 8)].copy_from_slice(&rand.to_le_bytes());
         }
-        if is_cpu_feature_detected("rand") {
-            let mut failure = false;
-            for i in 0..SEED_BYTES / 8 {
-                // We get 8 bytes at a time from RNDRRS register
-                let rand: u64;
-                unsafe {
-                    asm!("mrs {}, s3_3_c2_c4_1", out(reg) rand); // rndrrs
-                }
-                failure |= rand == 0;
-                rng[i * 8..(i * 8 + 8)].copy_from_slice(&rand.to_le_bytes());
-            }
-            have_seeded = !failure;
-        }
-    } // TODO integrate alternative entropy sources
+        have_seeded = !failure;
+    }
     if !have_seeded {
         println!("randd: Seeding failed, no entropy source.  Random numbers on this platform are NOT SECURE");
     }
