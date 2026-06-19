@@ -9,6 +9,7 @@ use core::sync::atomic::{AtomicU16, Ordering};
 
 use std::fs::File;
 use std::future::Future;
+use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex, Weak};
 use std::task::{Poll, Waker};
@@ -19,6 +20,18 @@ pub enum Error {
     SyscallError(#[from] libredox::error::Error),
     #[error("the device is incapable of {0:?}")]
     InCapable(CfgType),
+}
+
+/// How the device delivers interrupts to the driver.
+///
+/// x86 uses MSI-X. Platforms without an MSI controller in E-OS (aarch64,
+/// riscv64) fall back to legacy, level-triggered PCI INTx, which must be
+/// acknowledged at both the device (read the ISR status register) and the
+/// kernel (read + write the IRQ handle) on every interrupt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptMethod {
+    MsiX,
+    Intx,
 }
 
 /// Returns the queue part sizes in bytes.
@@ -54,21 +67,55 @@ pub const fn queue_part_sizes(queue_size: usize) -> (usize, usize, usize) {
     )
 }
 
-pub fn spawn_irq_thread(irq_handle: &File, queue: &Arc<Queue<'static>>) {
-    let irq_fd = irq_handle.as_raw_fd();
+pub fn spawn_irq_thread(
+    irq_handle: &File,
+    queue: &Arc<Queue<'static>>,
+    interrupt_method: InterruptMethod,
+    isr_addr: usize,
+) {
+    // Own a clone of the IRQ handle in the thread so we can both subscribe to it
+    // and, for INTx, read/write it to acknowledge interrupts.
+    let irq_handle = irq_handle
+        .try_clone()
+        .expect("virtio-core: failed to clone IRQ handle for the interrupt thread");
     let queue_copy = queue.clone();
 
     std::thread::spawn(move || {
         let event_queue = RawEventQueue::new().unwrap();
 
         event_queue
-            .subscribe(irq_fd as usize, 0, event::EventFlags::READ)
+            .subscribe(irq_handle.as_raw_fd() as usize, 0, event::EventFlags::READ)
             .unwrap();
 
         for _ in event_queue.map(Result::unwrap) {
-            // Wake up the tasks waiting on the queue.
-            for (_, task) in queue_copy.waker.lock().unwrap().iter() {
-                task.wake_by_ref();
+            if interrupt_method == InterruptMethod::Intx {
+                // Consume the kernel-side IRQ count (a usize).
+                let mut buf = [0u8; core::mem::size_of::<usize>()];
+                let count = (&irq_handle).read(&mut buf).unwrap_or(0);
+
+                // Read the VirtIO ISR status register: this confirms the
+                // interrupt was ours and, crucially, de-asserts the device's
+                // level-triggered INTx line (reading the register clears it).
+                if isr_addr != 0 {
+                    unsafe {
+                        core::ptr::read_volatile(isr_addr as *const u8);
+                    }
+                }
+
+                // Wake up the tasks waiting on the queue.
+                for (_, task) in queue_copy.waker.lock().unwrap().iter() {
+                    task.wake_by_ref();
+                }
+
+                // EOI: write the count back so the kernel re-arms the line.
+                if count != 0 {
+                    let _ = (&irq_handle).write(&buf);
+                }
+            } else {
+                // MSI-X is edge-triggered and acknowledged by the kernel.
+                for (_, task) in queue_copy.waker.lock().unwrap().iter() {
+                    task.wake_by_ref();
+                }
             }
         }
     });
@@ -523,6 +570,9 @@ pub struct StandardTransport<'a> {
     notify: *const u8,
     notify_mul: u32,
     device_space: *const u8,
+    /// VirtIO ISR status register; only read in INTx mode (null otherwise).
+    isr: *const u8,
+    interrupt_method: InterruptMethod,
 
     queue_index: AtomicU16,
 }
@@ -533,11 +583,15 @@ impl<'a> StandardTransport<'a> {
         notify: *const u8,
         notify_mul: u32,
         device_space: *const u8,
+        isr: *const u8,
+        interrupt_method: InterruptMethod,
     ) -> Arc<Self> {
         Arc::new(Self {
             common: Mutex::new(common),
             notify,
             notify_mul,
+            isr,
+            interrupt_method,
 
             queue_index: AtomicU16::new(0),
             device_space,
@@ -608,7 +662,11 @@ impl Transport for StandardTransport<'_> {
     }
 
     fn setup_config_notify(&self, vector: u16) {
-        self.common.lock().unwrap().config_msix_vector.set(vector);
+        let hw_vector = match self.interrupt_method {
+            InterruptMethod::MsiX => vector,
+            InterruptMethod::Intx => VIRTIO_MSI_NO_VECTOR,
+        };
+        self.common.lock().unwrap().config_msix_vector.set(hw_vector);
     }
 
     fn config_generation(&self) -> u32 {
@@ -638,9 +696,15 @@ impl Transport for StandardTransport<'_> {
         common.queue_driver.set(avail.phys_addr() as u64);
         common.queue_device.set(used.phys_addr() as u64);
 
-        // Set the MSI-X vector.
-        common.queue_msix_vector.set(vector);
-        assert!(common.queue_msix_vector.get() == vector);
+        // Tell the device which interrupt to raise for this queue. In MSI-X mode
+        // that is the caller's vector; in INTx mode we write NO_VECTOR so the
+        // device falls back to the shared legacy INTx line.
+        let hw_vector = match self.interrupt_method {
+            InterruptMethod::MsiX => vector,
+            InterruptMethod::Intx => VIRTIO_MSI_NO_VECTOR,
+        };
+        common.queue_msix_vector.set(hw_vector);
+        assert!(common.queue_msix_vector.get() == hw_vector);
 
         // Enable the queue.
         common.queue_enable.set(1);
@@ -658,10 +722,11 @@ impl Transport for StandardTransport<'_> {
             used,
             StandardBell(notification_bell),
             queue_index,
-            vector,
+            // Store the hardware vector so reinit_queue re-programs the same value.
+            hw_vector,
         );
 
-        spawn_irq_thread(irq_handle, &queue);
+        spawn_irq_thread(irq_handle, &queue, self.interrupt_method, self.isr as usize);
         Ok(queue)
     }
 

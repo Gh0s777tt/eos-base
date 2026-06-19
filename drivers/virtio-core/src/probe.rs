@@ -5,7 +5,7 @@ use common::MemoryType;
 use pcid_interface::*;
 
 use crate::spec::*;
-use crate::transport::{Error, StandardTransport, Transport};
+use crate::transport::{Error, InterruptMethod, StandardTransport, Transport};
 
 pub struct Device {
     pub transport: Arc<dyn Transport>,
@@ -45,13 +45,14 @@ pub fn probe_device(pcid_handle: &mut PciFunctionHandle) -> Result<Device, Error
     let mut common_addr = None;
     let mut notify_addr = None;
     let mut device_addr = None;
+    let mut isr_addr = None;
 
     for raw_capability in pcid_handle.get_vendor_capabilities() {
         // SAFETY: We have verified that the length of the data is correct.
         let capability = unsafe { &*(raw_capability.data.as_ptr() as *const PciCapability) };
 
         match capability.cfg_type {
-            CfgType::Common | CfgType::Notify | CfgType::Device => {}
+            CfgType::Common | CfgType::Notify | CfgType::Device | CfgType::Isr => {}
             _ => continue,
         }
 
@@ -82,6 +83,11 @@ pub fn probe_device(pcid_handle: &mut PciFunctionHandle) -> Result<Device, Error
                 device_addr = Some(address);
             }
 
+            CfgType::Isr => {
+                debug_assert!(isr_addr.is_none());
+                isr_addr = Some(address);
+            }
+
             _ => unreachable!(),
         }
     }
@@ -99,22 +105,28 @@ pub fn probe_device(pcid_handle: &mut PciFunctionHandle) -> Result<Device, Error
     let common = unsafe { &mut *(common_addr as *mut CommonCfg) };
     let device_space = unsafe { &mut *(device_addr as *mut u8) };
 
+    // Setup interrupts: MSI-X where the platform's interrupt controller supports
+    // it (x86), otherwise legacy PCI INTx (aarch64/riscv64). See
+    // `crate::arch::setup_interrupt`.
+    let (irq_handle, interrupt_method) = crate::arch::setup_interrupt(pcid_handle)?;
+
+    // The ISR status register is only needed in INTx mode, to de-assert the
+    // level-triggered line on each interrupt. It is mapped above if present.
+    let isr_addr = isr_addr.unwrap_or(0);
+    if interrupt_method == InterruptMethod::Intx && isr_addr == 0 {
+        log::warn!("virtio: INTx selected but the device exposes no ISR capability");
+    }
+
     let transport = StandardTransport::new(
         common,
         notify_addr as *const u8,
         notify_multiplier,
         device_space,
+        isr_addr as *const u8,
+        interrupt_method,
     );
 
-    // Setup interrupts.
-    let all_pci_features = pcid_handle.fetch_all_features();
-    let has_msix = all_pci_features.iter().any(|feature| feature.is_msix());
-
-    // According to the virtio specification, the device REQUIRED to support MSI-X.
-    assert!(has_msix, "virtio: device does not support MSI-X");
-    let irq_handle = crate::arch::enable_msix(pcid_handle)?;
-
-    log::debug!("virtio: using standard PCI transport");
+    log::debug!("virtio: using standard PCI transport ({interrupt_method:?})");
 
     let device = Device {
         transport,

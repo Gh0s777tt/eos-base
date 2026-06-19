@@ -1,4 +1,4 @@
-use crate::transport::Error;
+use crate::transport::{Error, InterruptMethod};
 
 use pcid_interface::irq_helpers::{allocate_single_interrupt_vector_for_msi, read_bsp_apic_id};
 use std::fs::File;
@@ -34,4 +34,12 @@ pub fn enable_msix(pcid_handle: &mut PciFunctionHandle) -> Result<File, Error> {
 
     log::debug!("virtio: using MSI-X (interrupt_handle={interrupt_handle:?})");
     Ok(interrupt_handle)
+}
+
+/// Set up the device's interrupt. On x86 this is always MSI-X.
+pub fn setup_interrupt(
+    pcid_handle: &mut PciFunctionHandle,
+) -> Result<(File, InterruptMethod), Error> {
+    let irq_handle = enable_msix(pcid_handle)?;
+    Ok((irq_handle, InterruptMethod::MsiX))
 }
