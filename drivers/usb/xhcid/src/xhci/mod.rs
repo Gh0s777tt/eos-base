@@ -1251,19 +1251,14 @@ impl<const N: usize> Xhci<N> {
         trace!("Spawning driver on port: {}", port);
 
         //TODO: support choosing config?
-        let config_desc = &ps
-            .dev_desc
-            .as_ref()
-            .ok_or_else(|| {
-                log::warn!("Missing device descriptor");
-                Error::new(EBADF)
-            })?
-            .config_descs
-            .first()
-            .ok_or_else(|| {
-                log::warn!("Missing config descriptor");
-                Error::new(EBADF)
-            })?;
+        let dev_desc = ps.dev_desc.as_ref().ok_or_else(|| {
+            log::warn!("Missing device descriptor");
+            Error::new(EBADF)
+        })?;
+        let config_desc = dev_desc.config_descs.first().ok_or_else(|| {
+            log::warn!("Missing config descriptor");
+            Error::new(EBADF)
+        })?;
 
         trace!("Got config and device descriptors on port {}", port);
 
@@ -1287,10 +1282,35 @@ impl<const N: usize> Xhci<N> {
             }
 
             if let Some(driver) = self.drivers_config.drivers.iter().find(|driver| {
+                if let Some(ref ids) = driver.ids {
+                    let mut device_found = false;
+                    for (vendor, devices) in ids {
+                        let vendor_without_prefix = vendor.trim_start_matches("0x");
+                        let vendor = i64::from_str_radix(vendor_without_prefix, 16).unwrap() as u16;
+
+                        if vendor != dev_desc.vendor {
+                            continue;
+                        }
+
+                        for device in devices {
+                            if *device == dev_desc.product {
+                                device_found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !device_found {
+                        return false;
+                    }
+                }
                 driver.class == ifdesc.class
                     && driver
                         .subclass()
                         .map(|subclass| subclass == ifdesc.sub_class)
+                        .unwrap_or(true)
+                    && driver
+                        .protocol
+                        .map(|protocol| protocol == ifdesc.protocol)
                         .unwrap_or(true)
             }) {
                 info!(
@@ -1337,7 +1357,7 @@ impl<const N: usize> Xhci<N> {
                     ifdesc.alternate_setting,
                     ifdesc.class,
                     ifdesc.sub_class,
-                    ifdesc.protocol
+                    ifdesc.protocol,
                 );
             }
         }
@@ -1485,6 +1505,8 @@ struct DriverConfig {
     name: String,
     class: u8,
     subclass: i16, // The subclass may be meaningless for some drivers, hence negative values (and values above 255) mean "undefined".
+    protocol: Option<u8>,
+    ids: Option<BTreeMap<String, Vec<u16>>>,
     command: Vec<String>,
 }
 impl DriverConfig {

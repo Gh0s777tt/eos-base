@@ -1,9 +1,15 @@
 use anyhow::{Context, Result};
-use std::{env, thread, time};
+use std::{
+    collections::{BTreeMap, HashMap},
+    env,
+    sync::mpsc,
+    thread, time,
+};
 
 use inputd::ProducerHandle;
 use orbclient::KeyEvent as OrbKeyEvent;
 use rehid::{
+    hidreport::{Report, Usage},
     report_desc::{ReportTy, REPORT_DESC_TY},
     report_handler::ReportHandler,
     usage_tables::{GenericDesktopUsage, UsagePage},
@@ -16,6 +22,7 @@ use xhcid_interface::{
 use crate::descs::HidDescriptor;
 
 mod descs;
+mod overrides;
 mod reqs;
 
 fn send_key_event(display: &mut ProducerHandle, usage_page: u16, usage: u16, pressed: bool) {
@@ -173,6 +180,15 @@ fn main() -> Result<()> {
         .expect(USAGE)
         .parse::<u8>()
         .expect("Expected integer as input of interface");
+    let mut report_desc_override = None;
+    if let Some(override_name) = args.next() {
+        for (name, bytes) in overrides::OVERRIDES.iter() {
+            if name == &override_name {
+                report_desc_override = Some(bytes.to_vec());
+                break;
+            }
+        }
+    }
 
     let name = format!("{}_{}_{}_hid", scheme, port, interface_num);
     common::setup_logging(
@@ -204,7 +220,7 @@ fn main() -> Result<()> {
     log::debug!("{:X?}", desc);
 
     let mut endp_count = 0;
-    let (conf_desc, (if_desc, endp_desc_opt, hid_desc)) = desc
+    let (conf_desc, (if_desc, endp_desc_opt, hid_desc_opt)) = desc
         .config_descs
         .iter()
         .find_map(|conf_desc| {
@@ -215,16 +231,28 @@ fn main() -> Result<()> {
                         if endp_desc.ty() == EndpointTy::Interrupt
                             && endp_desc.direction() == EndpDirection::In
                         {
+                            log::warn!(
+                                "using endpoint 0x{:x} {:?} {:?}",
+                                endp_desc.address,
+                                endp_desc.ty(),
+                                endp_desc.direction()
+                            );
                             Some((endp_count, endp_desc.clone()))
                         } else {
+                            log::warn!(
+                                "ignoring endpoint 0x{:x} {:?} {:?}",
+                                endp_desc.address,
+                                endp_desc.ty(),
+                                endp_desc.direction()
+                            );
                             None
                         }
                     });
-                    let hid_desc = if_desc.unknown_descs.iter().find_map(|unknown_desc| {
+                    let hid_desc_opt = if_desc.unknown_descs.iter().find_map(|unknown_desc| {
                         //TODO: should we do any filtering?
                         HidDescriptor::from_bytes(&unknown_desc.all_bytes).ok()
-                    })?;
-                    Some((if_desc.clone(), endp_desc_opt, hid_desc))
+                    });
+                    Some((if_desc.clone(), endp_desc_opt, hid_desc_opt))
                 } else {
                     endp_count += if_desc.endpoints.len();
                     None
@@ -247,21 +275,29 @@ fn main() -> Result<()> {
 
     //TODO: dynamically create good values, fix xhcid so it does not block on each request
     // This sets all reports to a duration of 4ms
-    reqs::set_idle(&handle, 1, 0, interface_num as u16).context("Failed to set idle")?;
+    if let Err(err) = reqs::set_idle(&handle, 1, 0, interface_num as u16) {
+        log::warn!("failed to set idle: {}", err);
+    }
 
-    let report_desc_len = hid_desc.get_report_desc()?.desc_len;
+    let report_desc_bytes = if let Some(hid_desc) = hid_desc_opt {
+        let report_desc_len = hid_desc.get_report_desc()?.desc_len;
 
-    let mut report_desc_bytes = vec![0u8; report_desc_len as usize];
-    handle
-        .get_descriptor(
-            PortReqRecipient::Interface,
-            REPORT_DESC_TY,
-            0,
-            //TODO: should this be an index into interface_descs?
-            interface_num as u16,
-            &mut report_desc_bytes,
-        )
-        .context("Failed to retrieve report descriptor")?;
+        let mut report_desc_bytes = vec![0u8; report_desc_len as usize];
+        handle
+            .get_descriptor(
+                PortReqRecipient::Interface,
+                REPORT_DESC_TY,
+                0,
+                //TODO: should this be an index into interface_descs?
+                interface_num as u16,
+                &mut report_desc_bytes,
+            )
+            .context("Failed to retrieve report descriptor")?;
+
+        report_desc_bytes
+    } else {
+        report_desc_override.expect("failed to find report descriptor")
+    };
 
     let mut handler =
         ReportHandler::new(&report_desc_bytes).expect("failed to parse report descriptor");
@@ -270,9 +306,23 @@ fn main() -> Result<()> {
         Some((_endp_num, endp_desc)) => endp_desc.max_packet_size as usize,
         None => handler.total_byte_length as usize,
     };
-    let mut report_buffer = vec![0u8; report_len];
-    let report_ty = ReportTy::Input;
-    let report_id = 0;
+
+    let mut report_collections = HashMap::new();
+    for report in handler.descriptor.input_reports() {
+        for field in report.fields() {
+            let key = (report.report_id().map(u8::from), u32::from(field.id()));
+            if let Some(old) = report_collections.get(&key) {
+                log::warn!(
+                    "key {:?} has old collections {:?} and new collections {:?}",
+                    key,
+                    old,
+                    field.collections()
+                );
+                continue;
+            }
+            report_collections.insert(key, field.collections().to_vec());
+        }
+    }
 
     let mut display = ProducerHandle::new().context("Failed to open input socket")?;
     let mut endpoint_opt = match endp_desc_opt {
@@ -285,107 +335,318 @@ fn main() -> Result<()> {
         },
         None => None,
     };
+
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || -> Result<()> {
+        let mut report_buffer = vec![0u8; report_len];
+        let report_ty = ReportTy::Input;
+        let report_id = 0;
+        loop {
+            //TODO: get frequency from device
+            //TODO: use sleeps when accuracy is better: thread::sleep(time::Duration::from_millis(10));
+            let timer = time::Instant::now();
+            while timer.elapsed() < time::Duration::from_millis(1) {
+                thread::yield_now();
+            }
+
+            if let Some(endpoint) = &mut endpoint_opt {
+                // interrupt transfer
+                endpoint
+                    .transfer_read(&mut report_buffer)
+                    .context("failed to get report")?;
+            } else {
+                // control transfer
+                reqs::get_report(
+                    &handle,
+                    report_ty,
+                    report_id,
+                    //TODO: should this be an index into interface_descs?
+                    interface_num as u16,
+                    &mut report_buffer,
+                )
+                .context("failed to get report")?;
+            }
+
+            tx.send(report_buffer.clone())
+                .context("failed to send report to main thread")?;
+        }
+    });
+
     let mut left_shift = false;
     let mut right_shift = false;
     let mut last_mouse_pos = (0, 0);
     let mut last_buttons = [false, false, false];
+    let mut gamepad_state = HashMap::new();
     loop {
-        //TODO: get frequency from device
-        //TODO: use sleeps when accuracy is better: thread::sleep(time::Duration::from_millis(10));
-        let timer = time::Instant::now();
-        while timer.elapsed() < time::Duration::from_millis(1) {
-            thread::yield_now();
-        }
-
-        if let Some(endpoint) = &mut endpoint_opt {
-            // interrupt transfer
-            endpoint
-                .transfer_read(&mut report_buffer)
-                .context("failed to get report")?;
-        } else {
-            // control transfer
-            reqs::get_report(
-                &handle,
-                report_ty,
-                report_id,
-                //TODO: should this be an index into interface_descs?
-                interface_num as u16,
-                &mut report_buffer,
-            )
-            .context("failed to get report")?;
-        }
-
         let mut mouse_pos = last_mouse_pos;
         let mut mouse_dx = 0i32;
         let mut mouse_dy = 0i32;
         let mut scroll_y = 0i32;
         let mut buttons = last_buttons;
-        for event in handler
-            .handle(&report_buffer)
-            .expect("failed to parse report")
-        {
-            log::debug!("{}", event);
-            if event.usage_page == UsagePage::GenericDesktop as u16 {
-                if event.usage == GenericDesktopUsage::X as u16 {
-                    if event.relative {
-                        mouse_dx += event.value as i32;
+        match rx.try_recv() {
+            Ok(report_buffer) => {
+                for event in handler
+                    .handle(&report_buffer)
+                    .expect("failed to parse report")
+                {
+                    let mut gamepad = false;
+                    if let Some(collections) =
+                        report_collections.get(&(event.report_id, event.field_id))
+                    {
+                        for collection in collections {
+                            for usage in collection.usages() {
+                                match UsagePage::from_repr(usage.usage_page.into()) {
+                                    Some(UsagePage::GenericDesktop) => {
+                                        match GenericDesktopUsage::from_repr(usage.usage_id.into())
+                                        {
+                                            Some(GenericDesktopUsage::GamePad) => {
+                                                gamepad = true;
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
                     } else {
-                        mouse_pos.0 = event.value as i32;
+                        log::warn!(
+                            "collections missing for report {:?} field {}",
+                            event.report_id,
+                            event.field_id
+                        );
                     }
-                } else if event.usage == GenericDesktopUsage::Y as u16 {
-                    if event.relative {
-                        mouse_dy += event.value as i32;
-                    } else {
-                        mouse_pos.1 = event.value as i32;
+
+                    // Special handling for gamepad
+                    //TODO: make this more generic
+                    if gamepad {
+                        let last = gamepad_state
+                            .get(&(event.usage_page, event.usage))
+                            .map_or(0, |x: &(i64, i64)| x.1);
+                        gamepad_state.insert((event.usage_page, event.usage), (event.value, last));
+                        continue;
                     }
-                } else if event.usage == GenericDesktopUsage::Wheel as u16 {
-                    //TODO: what is X scroll?
-                    if event.relative {
-                        scroll_y += event.value as i32;
-                    } else {
-                        log::warn!("absolute mouse wheel not supported");
+
+                    match UsagePage::from_repr(event.usage_page) {
+                        Some(UsagePage::GenericDesktop) => {
+                            match GenericDesktopUsage::from_repr(event.usage) {
+                                Some(GenericDesktopUsage::X) => {
+                                    if event.relative {
+                                        mouse_dx += event.value as i32;
+                                    } else {
+                                        mouse_pos.0 = event.value as i32;
+                                    }
+                                }
+                                Some(GenericDesktopUsage::Y) => {
+                                    if event.relative {
+                                        mouse_dy += event.value as i32;
+                                    } else {
+                                        mouse_pos.1 = event.value as i32;
+                                    }
+                                }
+                                Some(GenericDesktopUsage::Wheel) => {
+                                    //TODO: what is X scroll?
+                                    if event.relative {
+                                        scroll_y += event.value as i32;
+                                    } else {
+                                        log::warn!("absolute mouse wheel not supported");
+                                    }
+                                }
+                                unsupported => {
+                                    log::info!(
+                                        "unsupported generic desktop usage 0x{:X}:0x{:X} ({:?}) value {}",
+                                        event.usage_page,
+                                        event.usage,
+                                        unsupported,
+                                        event.value
+                                    );
+                                }
+                            }
+                        }
+                        Some(UsagePage::KeyboardOrKeypad) => {
+                            let (pressed, shift_opt) = if event.value != 0 {
+                                (true, Some(left_shift | right_shift))
+                            } else {
+                                (false, None)
+                            };
+                            if event.usage == 0xE1 {
+                                left_shift = pressed;
+                            } else if event.usage == 0xE5 {
+                                right_shift = pressed;
+                            }
+                            send_key_event(&mut display, event.usage_page, event.usage, pressed);
+                        }
+                        Some(UsagePage::Button) => {
+                            if event.usage > 0 && event.usage as usize <= buttons.len() {
+                                buttons[event.usage as usize - 1] = event.value != 0;
+                            } else {
+                                log::info!(
+                                    "unsupported buttons usage 0x{:X}:0x{:X} value {}",
+                                    event.usage_page,
+                                    event.usage,
+                                    event.value
+                                );
+                            }
+                        }
+                        _ => {
+                            if event.usage_page >= 0xFF00 {
+                                // Ignore vendor defined event
+                            } else {
+                                log::info!(
+                                    "unsupported usage 0x{:X}:0x{:X} value {}",
+                                    event.usage_page,
+                                    event.usage,
+                                    event.value
+                                );
+                            }
+                        }
                     }
-                } else {
-                    log::info!(
-                        "unsupported generic desktop usage 0x{:X}:0x{:X} value {}",
-                        event.usage_page,
-                        event.usage,
-                        event.value
-                    );
                 }
-            } else if event.usage_page == UsagePage::KeyboardOrKeypad as u16 {
-                let (pressed, shift_opt) = if event.value != 0 {
-                    (true, Some(left_shift | right_shift))
-                } else {
-                    (false, None)
-                };
-                if event.usage == 0xE1 {
-                    left_shift = pressed;
-                } else if event.usage == 0xE5 {
-                    right_shift = pressed;
-                }
-                send_key_event(&mut display, event.usage_page, event.usage, pressed);
-            } else if event.usage_page == UsagePage::Button as u16 {
-                if event.usage > 0 && event.usage as usize <= buttons.len() {
-                    buttons[event.usage as usize - 1] = event.value != 0;
-                } else {
-                    log::info!(
-                        "unsupported buttons usage 0x{:X}:0x{:X} value {}",
-                        event.usage_page,
-                        event.usage,
-                        event.value
-                    );
-                }
-            } else if event.usage_page >= 0xFF00 {
-                // Ignore vendor defined event
-            } else {
-                log::info!(
-                    "unsupported usage 0x{:X}:0x{:X} value {}",
-                    event.usage_page,
-                    event.usage,
-                    event.value
-                );
             }
+            Err(mpsc::TryRecvError::Empty) => {
+                //TODO: get frequency from device
+                //TODO: use sleeps when accuracy is better: thread::sleep(time::Duration::from_millis(10));
+                let timer = time::Instant::now();
+                while timer.elapsed() < time::Duration::from_millis(1) {
+                    thread::yield_now();
+                }
+            }
+            Err(err) => {
+                anyhow::bail!("failed to recv report buffer from thread: {:?}", err);
+            }
+        }
+
+        for (&(usage_page, usage), &(value, last)) in gamepad_state.iter() {
+            let gamepad_axis = |value| {
+                let deadzone = 8096;
+                if value < -deadzone {
+                    value + deadzone
+                } else if value > deadzone {
+                    value - deadzone
+                } else {
+                    0
+                }
+            };
+            let mut gamepad_key = |scancode, pressed| {
+                let key_event = OrbKeyEvent {
+                    character: '\0',
+                    scancode,
+                    pressed,
+                };
+
+                match display.write_event(key_event.to_event()) {
+                    Ok(_) => (),
+                    Err(err) => {
+                        log::warn!("failed to send key event to orbital: {}", err);
+                    }
+                }
+            };
+            let mut gamepad_axis_keys = |value, last, k_neg, k_pos| {
+                let axis = gamepad_axis(value);
+                let press_neg = axis < 0;
+                let press_pos = axis > 0;
+                let last_axis = gamepad_axis(last);
+                if press_neg != (last_axis < 0) {
+                    gamepad_key(k_neg, press_neg);
+                }
+                if press_pos != (last_axis > 0) {
+                    gamepad_key(k_pos, press_pos);
+                }
+            };
+            match UsagePage::from_repr(usage_page) {
+                Some(UsagePage::GenericDesktop) => match GenericDesktopUsage::from_repr(usage) {
+                    Some(GenericDesktopUsage::X) => {
+                        gamepad_axis_keys(value, last, orbclient::K_A, orbclient::K_D);
+                    }
+                    Some(GenericDesktopUsage::Y) => {
+                        gamepad_axis_keys(value, last, orbclient::K_S, orbclient::K_W);
+                    }
+                    Some(GenericDesktopUsage::Rx) => {
+                        mouse_dx += (gamepad_axis(value) / 4096) as i32;
+                    }
+                    Some(GenericDesktopUsage::Ry) => {
+                        mouse_dy -= (gamepad_axis(value) / 4096) as i32;
+                    }
+                    Some(GenericDesktopUsage::DpadLeft) => {
+                        if value != last {
+                            gamepad_key(orbclient::K_A, value != 0);
+                        }
+                    }
+                    Some(GenericDesktopUsage::DpadRight) => {
+                        if value != last {
+                            gamepad_key(orbclient::K_D, value != 0);
+                        }
+                    }
+                    Some(GenericDesktopUsage::DpadUp) => {
+                        if value != last {
+                            gamepad_key(orbclient::K_W, value != 0);
+                        }
+                    }
+                    Some(GenericDesktopUsage::DpadDown) => {
+                        if value != last {
+                            gamepad_key(orbclient::K_S, value != 0);
+                        }
+                    }
+                    _ => {}
+                },
+                Some(UsagePage::Button) => match usage {
+                    // A
+                    1 => {
+                        if value != last {
+                            gamepad_key(orbclient::K_SEMICOLON, value != 0)
+                        }
+                    }
+                    // B
+                    2 => {
+                        if value != last {
+                            gamepad_key(orbclient::K_L, value != 0)
+                        }
+                    }
+                    // X
+                    3 => {
+                        if value != last {
+                            gamepad_key(orbclient::K_O, value != 0)
+                        }
+                    }
+                    // Y
+                    4 => {
+                        if value != last {
+                            gamepad_key(orbclient::K_K, value != 0)
+                        }
+                    }
+                    // LB
+                    5 => {
+                        if value != last {
+                            gamepad_key(orbclient::K_I, value != 0)
+                        }
+                    }
+                    // RB
+                    6 => {
+                        if value != last {
+                            gamepad_key(orbclient::K_P, value != 0)
+                        }
+                    }
+                    // Select
+                    7 => {
+                        if value != last {
+                            gamepad_key(orbclient::K_SPACE, value != 0)
+                        }
+                    }
+                    // Start
+                    8 => {
+                        if value != last {
+                            gamepad_key(orbclient::K_ENTER, value != 0)
+                        }
+                    }
+                    _ => {
+                        //log::warn!("unknown gamepad button {}", usage)
+                    }
+                },
+                _ => {}
+            }
+        }
+        for (_, (value, last)) in gamepad_state.iter_mut() {
+            *last = *value;
         }
 
         if mouse_pos != last_mouse_pos {

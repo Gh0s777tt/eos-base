@@ -1957,7 +1957,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 [[package]]
 name = "rehid"
 version = "0.1.0"
-source = "git+https://gitlab.redox-os.org/redox-os/rehid.git#39d7ef05c97fd4e5e2cfd38b1a21f20d888c5e00"
+source = "git+https://gitlab.redox-os.org/redox-os/rehid.git#da987bc6d0f043bb025ece0d35804da2b250fab3"
 dependencies = [
  "hidreport",
  "log",

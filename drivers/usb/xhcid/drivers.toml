@@ -16,3 +16,13 @@ name = "USB HID"
 class = 3 # HID class
 subclass = -1
 command = ["usbhidd", "$SCHEME", "$PORT", "$IF_NUM"]
+
+[[drivers]]
+name = "USB HID Xbox 360"
+class = 255 # Vendor specific class
+subclass = 93
+protocol = 1
+ids = { 0x045e = [
+    0x028e # Xbox 360 controller
+] }
+command = ["usbhidd", "$SCHEME", "$PORT", "$IF_NUM", "xbox-360"]
