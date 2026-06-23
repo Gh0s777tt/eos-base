@@ -569,22 +569,22 @@ fn main() -> Result<()> {
                     }
                     Some(GenericDesktopUsage::DpadLeft) => {
                         if value != last {
-                            gamepad_key(orbclient::K_A, value != 0);
+                            gamepad_key(orbclient::K_LEFT, value != 0);
                         }
                     }
                     Some(GenericDesktopUsage::DpadRight) => {
                         if value != last {
-                            gamepad_key(orbclient::K_D, value != 0);
+                            gamepad_key(orbclient::K_RIGHT, value != 0);
                         }
                     }
                     Some(GenericDesktopUsage::DpadUp) => {
                         if value != last {
-                            gamepad_key(orbclient::K_W, value != 0);
+                            gamepad_key(orbclient::K_UP, value != 0);
                         }
                     }
                     Some(GenericDesktopUsage::DpadDown) => {
                         if value != last {
-                            gamepad_key(orbclient::K_S, value != 0);
+                            gamepad_key(orbclient::K_DOWN, value != 0);
                         }
                     }
                     _ => {}
