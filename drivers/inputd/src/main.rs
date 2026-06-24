@@ -429,6 +429,18 @@ impl SchemeSync for InputScheme {
                     }
                 },
 
+                // Set ID for controller events
+                EventOption::ControllerAxis(mut axis_event) => {
+                    //TODO: what to do with overflow?
+                    axis_event.id = id as u32;
+                    events.to_mut()[i] = axis_event.to_event();
+                }
+                EventOption::ControllerButton(mut button_event) => {
+                    //TODO: what to do with overflow?
+                    button_event.id = id as u32;
+                    events.to_mut()[i] = button_event.to_event();
+                }
+
                 _ => continue,
             }
 

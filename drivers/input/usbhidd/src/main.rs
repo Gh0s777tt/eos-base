@@ -1,17 +1,12 @@
 use anyhow::{Context, Result};
-use std::{
-    collections::{BTreeMap, HashMap},
-    env,
-    sync::mpsc,
-    thread, time,
-};
+use std::{collections::HashMap, env, thread, time};
 
 use inputd::ProducerHandle;
 use orbclient::KeyEvent as OrbKeyEvent;
 use rehid::{
-    hidreport::{Report, Usage},
+    hidreport::Report,
     report_desc::{ReportTy, REPORT_DESC_TY},
-    report_handler::ReportHandler,
+    report_handler::{ReportEvent, ReportHandler},
     usage_tables::{GenericDesktopUsage, UsagePage},
 };
 use xhcid_interface::{
@@ -160,6 +155,38 @@ fn send_key_event(display: &mut ProducerHandle, usage_page: u16, usage: u16, pre
         Ok(_) => (),
         Err(err) => {
             log::warn!("failed to send key event to orbital: {}", err);
+        }
+    }
+}
+
+fn send_gamepad_axis(display: &mut ProducerHandle, axis: u16, value: i64) {
+    let event = orbclient::ControllerAxisEvent {
+        // Filled in by inputd
+        id: 0,
+        axis,
+        value: value as i32,
+    };
+
+    match display.write_event(event.to_event()) {
+        Ok(_) => (),
+        Err(err) => {
+            log::warn!("failed to send axis event to orbital: {}", err);
+        }
+    }
+}
+
+fn send_gamepad_button(display: &mut ProducerHandle, button: u16, pressed: bool) {
+    let event = orbclient::ControllerButtonEvent {
+        // Filled in by inputd
+        id: 0,
+        button,
+        pressed,
+    };
+
+    match display.write_event(event.to_event()) {
+        Ok(_) => (),
+        Err(err) => {
+            log::warn!("failed to send button event to orbital: {}", err);
         }
     }
 }
@@ -336,41 +363,9 @@ fn main() -> Result<()> {
         None => None,
     };
 
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || -> Result<()> {
-        let mut report_buffer = vec![0u8; report_len];
-        let report_ty = ReportTy::Input;
-        let report_id = 0;
-        loop {
-            //TODO: get frequency from device
-            //TODO: use sleeps when accuracy is better: thread::sleep(time::Duration::from_millis(10));
-            let timer = time::Instant::now();
-            while timer.elapsed() < time::Duration::from_millis(1) {
-                thread::yield_now();
-            }
-
-            if let Some(endpoint) = &mut endpoint_opt {
-                // interrupt transfer
-                endpoint
-                    .transfer_read(&mut report_buffer)
-                    .context("failed to get report")?;
-            } else {
-                // control transfer
-                reqs::get_report(
-                    &handle,
-                    report_ty,
-                    report_id,
-                    //TODO: should this be an index into interface_descs?
-                    interface_num as u16,
-                    &mut report_buffer,
-                )
-                .context("failed to get report")?;
-            }
-
-            tx.send(report_buffer.clone())
-                .context("failed to send report to main thread")?;
-        }
-    });
+    let mut report_buffer = vec![0u8; report_len];
+    let report_ty = ReportTy::Input;
+    let report_id = 0;
 
     let mut left_shift = false;
     let mut right_shift = false;
@@ -378,286 +373,239 @@ fn main() -> Result<()> {
     let mut last_buttons = [false, false, false];
     let mut gamepad_state = HashMap::new();
     loop {
+        //TODO: get frequency from device
+        //TODO: use sleeps when accuracy is better: thread::sleep(time::Duration::from_millis(10));
+        let timer = time::Instant::now();
+        while timer.elapsed() < time::Duration::from_millis(1) {
+            thread::yield_now();
+        }
+
+        if let Some(endpoint) = &mut endpoint_opt {
+            // interrupt transfer
+            endpoint
+                .transfer_read(&mut report_buffer)
+                .context("failed to get report")?;
+        } else {
+            // control transfer
+            reqs::get_report(
+                &handle,
+                report_ty,
+                report_id,
+                //TODO: should this be an index into interface_descs?
+                interface_num as u16,
+                &mut report_buffer,
+            )
+            .context("failed to get report")?;
+        }
+
         let mut mouse_pos = last_mouse_pos;
         let mut mouse_dx = 0i32;
         let mut mouse_dy = 0i32;
         let mut scroll_y = 0i32;
         let mut buttons = last_buttons;
-        match rx.try_recv() {
-            Ok(report_buffer) => {
-                for event in handler
-                    .handle(&report_buffer)
-                    .expect("failed to parse report")
-                {
-                    let mut gamepad = false;
-                    if let Some(collections) =
-                        report_collections.get(&(event.report_id, event.field_id))
-                    {
-                        for collection in collections {
-                            for usage in collection.usages() {
-                                match UsagePage::from_repr(usage.usage_page.into()) {
-                                    Some(UsagePage::GenericDesktop) => {
-                                        match GenericDesktopUsage::from_repr(usage.usage_id.into())
-                                        {
-                                            Some(GenericDesktopUsage::GamePad) => {
-                                                gamepad = true;
-                                            }
-                                            _ => {}
-                                        }
+        for event in handler
+            .handle(&report_buffer)
+            .expect("failed to parse report")
+        {
+            let mut gamepad = false;
+            if let Some(collections) = report_collections.get(&(event.report_id, event.field_id)) {
+                for collection in collections {
+                    for usage in collection.usages() {
+                        match UsagePage::from_repr(usage.usage_page.into()) {
+                            Some(UsagePage::GenericDesktop) => {
+                                match GenericDesktopUsage::from_repr(usage.usage_id.into()) {
+                                    Some(GenericDesktopUsage::GamePad) => {
+                                        gamepad = true;
                                     }
                                     _ => {}
                                 }
                             }
+                            _ => {}
                         }
-                    } else {
-                        log::warn!(
-                            "collections missing for report {:?} field {}",
-                            event.report_id,
-                            event.field_id
-                        );
                     }
+                }
+            } else {
+                log::warn!(
+                    "collections missing for report {:?} field {}",
+                    event.report_id,
+                    event.field_id
+                );
+            }
 
-                    // Special handling for gamepad
-                    //TODO: make this more generic
-                    if gamepad {
-                        let last = gamepad_state
-                            .get(&(event.usage_page, event.usage))
-                            .map_or(0, |x: &(i64, i64)| x.1);
-                        gamepad_state.insert((event.usage_page, event.usage), (event.value, last));
-                        continue;
-                    }
-
-                    match UsagePage::from_repr(event.usage_page) {
-                        Some(UsagePage::GenericDesktop) => {
-                            match GenericDesktopUsage::from_repr(event.usage) {
-                                Some(GenericDesktopUsage::X) => {
-                                    if event.relative {
-                                        mouse_dx += event.value as i32;
-                                    } else {
-                                        mouse_pos.0 = event.value as i32;
-                                    }
-                                }
-                                Some(GenericDesktopUsage::Y) => {
-                                    if event.relative {
-                                        mouse_dy += event.value as i32;
-                                    } else {
-                                        mouse_pos.1 = event.value as i32;
-                                    }
-                                }
-                                Some(GenericDesktopUsage::Wheel) => {
-                                    //TODO: what is X scroll?
-                                    if event.relative {
-                                        scroll_y += event.value as i32;
-                                    } else {
-                                        log::warn!("absolute mouse wheel not supported");
-                                    }
-                                }
-                                unsupported => {
-                                    log::info!(
-                                        "unsupported generic desktop usage 0x{:X}:0x{:X} ({:?}) value {}",
-                                        event.usage_page,
-                                        event.usage,
-                                        unsupported,
-                                        event.value
-                                    );
-                                }
-                            }
-                        }
-                        Some(UsagePage::KeyboardOrKeypad) => {
-                            let (pressed, shift_opt) = if event.value != 0 {
-                                (true, Some(left_shift | right_shift))
-                            } else {
-                                (false, None)
-                            };
-                            if event.usage == 0xE1 {
-                                left_shift = pressed;
-                            } else if event.usage == 0xE5 {
-                                right_shift = pressed;
-                            }
-                            send_key_event(&mut display, event.usage_page, event.usage, pressed);
-                        }
-                        Some(UsagePage::Button) => {
-                            if event.usage > 0 && event.usage as usize <= buttons.len() {
-                                buttons[event.usage as usize - 1] = event.value != 0;
-                            } else {
-                                log::info!(
-                                    "unsupported buttons usage 0x{:X}:0x{:X} value {}",
-                                    event.usage_page,
-                                    event.usage,
-                                    event.value
+            // Special handling for gamepad
+            //TODO: make this more generic
+            if gamepad {
+                let ReportEvent {
+                    usage_page,
+                    usage,
+                    value,
+                    ..
+                } = event;
+                let last = gamepad_state
+                    .get(&(usage_page, usage))
+                    .map_or(0, |x: &(i64, i64)| x.0);
+                gamepad_state.insert((usage_page, usage), (value, last));
+                if value == last {
+                    continue;
+                }
+                match UsagePage::from_repr(usage_page) {
+                    Some(UsagePage::GenericDesktop) => {
+                        match GenericDesktopUsage::from_repr(usage) {
+                            Some(GenericDesktopUsage::X) => {
+                                send_gamepad_axis(
+                                    &mut display,
+                                    orbclient::CONTROLLER_AXIS_X,
+                                    value,
                                 );
                             }
-                        }
-                        _ => {
-                            if event.usage_page >= 0xFF00 {
-                                // Ignore vendor defined event
-                            } else {
-                                log::info!(
-                                    "unsupported usage 0x{:X}:0x{:X} value {}",
-                                    event.usage_page,
-                                    event.usage,
-                                    event.value
+                            Some(GenericDesktopUsage::Y) => {
+                                send_gamepad_axis(
+                                    &mut display,
+                                    orbclient::CONTROLLER_AXIS_Y,
+                                    value,
                                 );
                             }
+                            Some(GenericDesktopUsage::Z) => {
+                                send_gamepad_axis(
+                                    &mut display,
+                                    orbclient::CONTROLLER_AXIS_Z,
+                                    value,
+                                );
+                            }
+                            Some(GenericDesktopUsage::Rx) => {
+                                send_gamepad_axis(
+                                    &mut display,
+                                    orbclient::CONTROLLER_AXIS_RX,
+                                    value,
+                                );
+                            }
+                            Some(GenericDesktopUsage::Ry) => {
+                                send_gamepad_axis(
+                                    &mut display,
+                                    orbclient::CONTROLLER_AXIS_RY,
+                                    value,
+                                );
+                            }
+                            Some(GenericDesktopUsage::Rz) => {
+                                send_gamepad_axis(
+                                    &mut display,
+                                    orbclient::CONTROLLER_AXIS_RZ,
+                                    value,
+                                );
+                            }
+                            Some(GenericDesktopUsage::DpadLeft) => {
+                                send_gamepad_button(
+                                    &mut display,
+                                    orbclient::CONTROLLER_DPAD_LEFT,
+                                    value != 0,
+                                );
+                            }
+                            Some(GenericDesktopUsage::DpadRight) => {
+                                send_gamepad_button(
+                                    &mut display,
+                                    orbclient::CONTROLLER_DPAD_RIGHT,
+                                    value != 0,
+                                );
+                            }
+                            Some(GenericDesktopUsage::DpadUp) => {
+                                send_gamepad_button(
+                                    &mut display,
+                                    orbclient::CONTROLLER_DPAD_UP,
+                                    value != 0,
+                                );
+                            }
+                            Some(GenericDesktopUsage::DpadDown) => {
+                                send_gamepad_button(
+                                    &mut display,
+                                    orbclient::CONTROLLER_DPAD_DOWN,
+                                    value != 0,
+                                );
+                            }
+                            _ => {}
                         }
                     }
-                }
-            }
-            Err(mpsc::TryRecvError::Empty) => {
-                //TODO: get frequency from device
-                //TODO: use sleeps when accuracy is better: thread::sleep(time::Duration::from_millis(10));
-                let timer = time::Instant::now();
-                while timer.elapsed() < time::Duration::from_millis(1) {
-                    thread::yield_now();
-                }
-            }
-            Err(err) => {
-                anyhow::bail!("failed to recv report buffer from thread: {:?}", err);
-            }
-        }
-
-        for (&(usage_page, usage), &(value, last)) in gamepad_state.iter() {
-            let gamepad_axis = |value| {
-                let deadzone = 8096;
-                if value < -deadzone {
-                    value + deadzone
-                } else if value > deadzone {
-                    value - deadzone
-                } else {
-                    0
-                }
-            };
-            let mut gamepad_key = |scancode, pressed| {
-                let key_event = OrbKeyEvent {
-                    character: '\0',
-                    scancode,
-                    pressed,
-                };
-
-                match display.write_event(key_event.to_event()) {
-                    Ok(_) => (),
-                    Err(err) => {
-                        log::warn!("failed to send key event to orbital: {}", err);
-                    }
-                }
-            };
-            let mut gamepad_axis_keys = |value, last, k_neg, k_pos| {
-                let threshold = 10240;
-                let press_neg = value < -threshold;
-                let press_pos = value > threshold;
-                if press_neg != (last < -threshold) {
-                    gamepad_key(k_neg, press_neg);
-                }
-                if press_pos != (last > threshold) {
-                    gamepad_key(k_pos, press_pos);
-                }
-            };
-            match UsagePage::from_repr(usage_page) {
-                Some(UsagePage::GenericDesktop) => match GenericDesktopUsage::from_repr(usage) {
-                    Some(GenericDesktopUsage::X) => {
-                        gamepad_axis_keys(value, last, orbclient::K_A, orbclient::K_D);
-                    }
-                    Some(GenericDesktopUsage::Y) => {
-                        gamepad_axis_keys(value, last, orbclient::K_S, orbclient::K_W);
-                    }
-                    Some(GenericDesktopUsage::Z) => {
-                        let pressed = value > 64;
-                        if pressed != (last > 64) {
-                            gamepad_key(orbclient::K_Q, pressed);
-                        }
-                    }
-                    Some(GenericDesktopUsage::Rx) => {
-                        mouse_dx += (gamepad_axis(value) / 4096) as i32;
-                    }
-                    Some(GenericDesktopUsage::Ry) => {
-                        mouse_dy -= (gamepad_axis(value) / 4096) as i32;
-                    }
-                    Some(GenericDesktopUsage::Rz) => {
-                        let pressed = value > 64;
-                        if pressed != (last > 64) {
-                            gamepad_key(orbclient::K_E, pressed);
-                        }
-                    }
-                    Some(GenericDesktopUsage::DpadLeft) => {
-                        if value != last {
-                            gamepad_key(orbclient::K_LEFT, value != 0);
-                        }
-                    }
-                    Some(GenericDesktopUsage::DpadRight) => {
-                        if value != last {
-                            gamepad_key(orbclient::K_RIGHT, value != 0);
-                        }
-                    }
-                    Some(GenericDesktopUsage::DpadUp) => {
-                        if value != last {
-                            gamepad_key(orbclient::K_UP, value != 0);
-                        }
-                    }
-                    Some(GenericDesktopUsage::DpadDown) => {
-                        if value != last {
-                            gamepad_key(orbclient::K_DOWN, value != 0);
-                        }
+                    Some(UsagePage::Button) => {
+                        send_gamepad_button(&mut display, usage, value != 0);
                     }
                     _ => {}
-                },
-                Some(UsagePage::Button) => match usage {
-                    // A
-                    1 => {
-                        if value != last {
-                            gamepad_key(orbclient::K_SEMICOLON, value != 0)
-                        }
-                    }
-                    // B
-                    2 => {
-                        if value != last {
-                            gamepad_key(orbclient::K_L, value != 0)
-                        }
-                    }
-                    // X
-                    3 => {
-                        if value != last {
-                            gamepad_key(orbclient::K_O, value != 0)
-                        }
-                    }
-                    // Y
-                    4 => {
-                        if value != last {
-                            gamepad_key(orbclient::K_K, value != 0)
-                        }
-                    }
-                    // LB
-                    5 => {
-                        if value != last {
-                            gamepad_key(orbclient::K_I, value != 0)
-                        }
-                    }
-                    // RB
-                    6 => {
-                        if value != last {
-                            gamepad_key(orbclient::K_P, value != 0)
-                        }
-                    }
-                    // Select
-                    7 => {
-                        if value != last {
-                            gamepad_key(orbclient::K_SPACE, value != 0)
-                        }
-                    }
-                    // Start
-                    8 => {
-                        if value != last {
-                            gamepad_key(orbclient::K_ENTER, value != 0)
-                        }
-                    }
-                    _ => {
-                        //log::warn!("unknown gamepad button {}", usage)
-                    }
-                },
-                _ => {}
+                }
+                continue;
             }
-        }
-        for (_, (value, last)) in gamepad_state.iter_mut() {
-            *last = *value;
+
+            match UsagePage::from_repr(event.usage_page) {
+                Some(UsagePage::GenericDesktop) => {
+                    match GenericDesktopUsage::from_repr(event.usage) {
+                        Some(GenericDesktopUsage::X) => {
+                            if event.relative {
+                                mouse_dx += event.value as i32;
+                            } else {
+                                mouse_pos.0 = event.value as i32;
+                            }
+                        }
+                        Some(GenericDesktopUsage::Y) => {
+                            if event.relative {
+                                mouse_dy += event.value as i32;
+                            } else {
+                                mouse_pos.1 = event.value as i32;
+                            }
+                        }
+                        Some(GenericDesktopUsage::Wheel) => {
+                            //TODO: what is X scroll?
+                            if event.relative {
+                                scroll_y += event.value as i32;
+                            } else {
+                                log::warn!("absolute mouse wheel not supported");
+                            }
+                        }
+                        unsupported => {
+                            log::info!(
+                                "unsupported generic desktop usage 0x{:X}:0x{:X} ({:?}) value {}",
+                                event.usage_page,
+                                event.usage,
+                                unsupported,
+                                event.value
+                            );
+                        }
+                    }
+                }
+                Some(UsagePage::KeyboardOrKeypad) => {
+                    let (pressed, shift_opt) = if event.value != 0 {
+                        (true, Some(left_shift | right_shift))
+                    } else {
+                        (false, None)
+                    };
+                    if event.usage == 0xE1 {
+                        left_shift = pressed;
+                    } else if event.usage == 0xE5 {
+                        right_shift = pressed;
+                    }
+                    send_key_event(&mut display, event.usage_page, event.usage, pressed);
+                }
+                Some(UsagePage::Button) => {
+                    if event.usage > 0 && event.usage as usize <= buttons.len() {
+                        buttons[event.usage as usize - 1] = event.value != 0;
+                    } else {
+                        log::info!(
+                            "unsupported buttons usage 0x{:X}:0x{:X} value {}",
+                            event.usage_page,
+                            event.usage,
+                            event.value
+                        );
+                    }
+                }
+                _ => {
+                    if event.usage_page >= 0xFF00 {
+                        // Ignore vendor defined event
+                    } else {
+                        log::info!(
+                            "unsupported usage 0x{:X}:0x{:X} value {}",
+                            event.usage_page,
+                            event.usage,
+                            event.value
+                        );
+                    }
+                }
+            }
         }
 
         if mouse_pos != last_mouse_pos {
