@@ -542,14 +542,13 @@ fn main() -> Result<()> {
                 }
             };
             let mut gamepad_axis_keys = |value, last, k_neg, k_pos| {
-                let axis = gamepad_axis(value);
-                let press_neg = axis < 0;
-                let press_pos = axis > 0;
-                let last_axis = gamepad_axis(last);
-                if press_neg != (last_axis < 0) {
+                let threshold = 10240;
+                let press_neg = value < -threshold;
+                let press_pos = value > threshold;
+                if press_neg != (last < -threshold) {
                     gamepad_key(k_neg, press_neg);
                 }
-                if press_pos != (last_axis > 0) {
+                if press_pos != (last > threshold) {
                     gamepad_key(k_pos, press_pos);
                 }
             };
@@ -561,11 +560,23 @@ fn main() -> Result<()> {
                     Some(GenericDesktopUsage::Y) => {
                         gamepad_axis_keys(value, last, orbclient::K_S, orbclient::K_W);
                     }
+                    Some(GenericDesktopUsage::Z) => {
+                        let pressed = value > 64;
+                        if pressed != (last > 64) {
+                            gamepad_key(orbclient::K_Q, pressed);
+                        }
+                    }
                     Some(GenericDesktopUsage::Rx) => {
                         mouse_dx += (gamepad_axis(value) / 4096) as i32;
                     }
                     Some(GenericDesktopUsage::Ry) => {
                         mouse_dy -= (gamepad_axis(value) / 4096) as i32;
+                    }
+                    Some(GenericDesktopUsage::Rz) => {
+                        let pressed = value > 64;
+                        if pressed != (last > 64) {
+                            gamepad_key(orbclient::K_E, pressed);
+                        }
                     }
                     Some(GenericDesktopUsage::DpadLeft) => {
                         if value != last {
