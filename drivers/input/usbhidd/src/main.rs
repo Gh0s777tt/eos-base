@@ -208,9 +208,10 @@ fn main() -> Result<()> {
         .parse::<u8>()
         .expect("Expected integer as input of interface");
     let mut report_desc_override = None;
-    if let Some(override_name) = args.next() {
+    let override_name_opt = args.next();
+    if let Some(override_name) = &override_name_opt {
         for (name, bytes) in overrides::OVERRIDES.iter() {
-            if name == &override_name {
+            if name == override_name {
                 report_desc_override = Some(bytes.to_vec());
                 break;
             }
@@ -247,39 +248,59 @@ fn main() -> Result<()> {
     log::debug!("{:X?}", desc);
 
     let mut endp_count = 0;
-    let (conf_desc, (if_desc, endp_desc_opt, hid_desc_opt)) = desc
+    let (conf_desc, (if_desc, endp_int_in_opt, endp_int_out_opt, hid_desc_opt)) = desc
         .config_descs
         .iter()
         .find_map(|conf_desc| {
             let if_desc = conf_desc.interface_descs.iter().find_map(|if_desc| {
                 if if_desc.number == interface_num {
-                    let endp_desc_opt = if_desc.endpoints.iter().find_map(|endp_desc| {
+                    let mut endp_int_in_opt = None;
+                    let mut endp_int_out_opt = None;
+                    for endp_desc in if_desc.endpoints.iter() {
                         endp_count += 1;
-                        if endp_desc.ty() == EndpointTy::Interrupt
-                            && endp_desc.direction() == EndpDirection::In
-                        {
-                            log::warn!(
-                                "using endpoint 0x{:x} {:?} {:?}",
-                                endp_desc.address,
-                                endp_desc.ty(),
-                                endp_desc.direction()
-                            );
-                            Some((endp_count, endp_desc.clone()))
-                        } else {
-                            log::warn!(
-                                "ignoring endpoint 0x{:x} {:?} {:?}",
-                                endp_desc.address,
-                                endp_desc.ty(),
-                                endp_desc.direction()
-                            );
-                            None
+                        match (endp_desc.ty(), endp_desc.direction()) {
+                            (EndpointTy::Interrupt, EndpDirection::In)
+                                if endp_int_in_opt.is_none() =>
+                            {
+                                log::warn!(
+                                    "using endpoint 0x{:x} {:?} {:?}",
+                                    endp_desc.address,
+                                    endp_desc.ty(),
+                                    endp_desc.direction()
+                                );
+                                endp_int_in_opt = Some((endp_count, endp_desc.clone()));
+                            }
+                            (EndpointTy::Interrupt, EndpDirection::Out)
+                                if endp_int_out_opt.is_none() =>
+                            {
+                                log::warn!(
+                                    "using endpoint 0x{:x} {:?} {:?}",
+                                    endp_desc.address,
+                                    endp_desc.ty(),
+                                    endp_desc.direction()
+                                );
+                                endp_int_out_opt = Some((endp_count, endp_desc.clone()));
+                            }
+                            _ => {
+                                log::warn!(
+                                    "ignoring endpoint 0x{:x} {:?} {:?}",
+                                    endp_desc.address,
+                                    endp_desc.ty(),
+                                    endp_desc.direction()
+                                );
+                            }
                         }
-                    });
+                    }
                     let hid_desc_opt = if_desc.unknown_descs.iter().find_map(|unknown_desc| {
                         //TODO: should we do any filtering?
                         HidDescriptor::from_bytes(&unknown_desc.all_bytes).ok()
                     });
-                    Some((if_desc.clone(), endp_desc_opt, hid_desc_opt))
+                    Some((
+                        if_desc.clone(),
+                        endp_int_in_opt,
+                        endp_int_out_opt,
+                        hid_desc_opt,
+                    ))
                 } else {
                     endp_count += if_desc.endpoints.len();
                     None
@@ -329,7 +350,7 @@ fn main() -> Result<()> {
     let mut handler =
         ReportHandler::new(&report_desc_bytes).expect("failed to parse report descriptor");
 
-    let report_len = match endp_desc_opt {
+    let report_len = match endp_int_in_opt {
         Some((_endp_num, endp_desc)) => endp_desc.max_packet_size as usize,
         None => handler.total_byte_length as usize,
     };
@@ -352,7 +373,39 @@ fn main() -> Result<()> {
     }
 
     let mut display = ProducerHandle::new().context("Failed to open input socket")?;
-    let mut endpoint_opt = match endp_desc_opt {
+
+    // Set LEDs on xbox 360 controller
+    //TODO: set based on controller ID
+    if override_name_opt.as_ref().map(|x| x.as_str()) == Some("xbox-360") {
+        match endp_int_out_opt {
+            Some((endp_num, _endp_desc)) => {
+                log::debug!("opening endpoint {}", endp_num);
+                match handle.open_endpoint(endp_num as u8) {
+                    Ok(mut endpoint) => {
+                        // First LED solid = 0x06
+                        let cmd = [0x01, 0x03, 0x06];
+                        log::debug!("sending LED packet {:X?}", cmd);
+                        match endpoint.transfer_write(&cmd) {
+                            Ok(status) => {
+                                log::debug!("sent LED packet: {:?}", status);
+                            }
+                            Err(err) => {
+                                log::warn!("failed to send LED packet: {}", err);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        log::warn!("failed to open endpoint {endp_num}: {err}");
+                    }
+                }
+            }
+            None => {
+                log::warn!("no endpoint to send LED packet");
+            }
+        }
+    }
+
+    let mut endpoint_opt = match endp_int_in_opt {
         Some((endp_num, _endp_desc)) => match handle.open_endpoint(endp_num as u8) {
             Ok(ok) => Some(ok),
             Err(err) => {
