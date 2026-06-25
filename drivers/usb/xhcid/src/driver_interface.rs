@@ -156,6 +156,15 @@ impl EndpDesc {
             _ => return Err(Error::new(EINVAL)),
         })
     }
+    pub fn xhci_dci(&self) -> u8 {
+        if self.is_control() || self.direction() == EndpDirection::In {
+            (self.address & 0x7F) * 2 + 1
+        } else if self.direction() == EndpDirection::Out {
+            (self.address & 0x7F) * 2
+        } else {
+            unreachable!()
+        }
+    }
     pub fn is_superspeed(&self) -> bool {
         self.ssc.is_some()
     }

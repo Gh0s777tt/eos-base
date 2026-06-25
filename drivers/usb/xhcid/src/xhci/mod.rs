@@ -66,6 +66,23 @@ use crate::driver_interface::*;
 use crate::xhci::device_enumerator::{DeviceEnumerationRequest, DeviceEnumerator};
 use crate::xhci::port::PortFlags;
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct EndpNum(u8);
+
+impl EndpNum {
+    pub const fn new(value: u8) -> Self {
+        Self(value)
+    }
+
+    pub fn get(&self) -> u8 {
+        self.0
+    }
+
+    pub fn index(&self) -> Option<usize> {
+        usize::from(self.0).checked_sub(1)
+    }
+}
+
 /// Specifies the configurable interrupt mechanism used by the xhci subsystem for registering
 /// device state change notifications.
 pub enum InterruptMethod {
@@ -109,7 +126,7 @@ impl<const N: usize> Xhci<N> {
             let mut port_state = self.port_states.get_mut(&port).ok_or(Error::new(ENOENT))?;
             let ring = port_state
                 .endpoint_states
-                .get_mut(&0)
+                .get_mut(&EndpNum::new(0))
                 .ok_or(Error::new(EIO))?
                 .ring()
                 .expect("no ring for the default control pipe");
@@ -313,12 +330,11 @@ struct PortState<const N: usize> {
     cfg_idx: Option<u8>,
     input_context: Mutex<Dma<InputContext<N>>>,
     dev_desc: Option<DevDesc>,
-    endpoint_states: BTreeMap<u8, EndpointState>,
+    endpoint_states: BTreeMap<EndpNum, EndpointState>,
 }
 
 impl<const N: usize> PortState<N> {
-    //TODO: fetch using endpoint number instead
-    fn get_endp_desc(&self, endp_idx: u8) -> Option<&EndpDesc> {
+    fn get_endp_desc(&self, endp_num: EndpNum) -> Option<&EndpDesc> {
         let cfg_idx = self.cfg_idx?;
         let config_desc = self
             .dev_desc
@@ -329,10 +345,10 @@ impl<const N: usize> PortState<N> {
         let mut endp_count = 0;
         for if_desc in config_desc.interface_descs.iter() {
             for endp_desc in if_desc.endpoints.iter() {
-                if endp_idx == endp_count {
+                endp_count += 1;
+                if endp_num.get() == endp_count {
                     return Some(endp_desc);
                 }
-                endp_count += 1;
             }
         }
         None
@@ -882,7 +898,7 @@ impl<const N: usize> Xhci<N> {
                 dev_desc: None,
                 cfg_idx: None,
                 endpoint_states: std::iter::once((
-                    0,
+                    EndpNum::new(0),
                     EndpointState {
                         transfer: RingOrStreams::Ring(ring),
                         driver_if_state: EndpIfState::Init,

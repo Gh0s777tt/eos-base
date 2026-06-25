@@ -14,7 +14,7 @@ use super::doorbell::Doorbell;
 use super::event::EventRing;
 use super::ring::Ring;
 use super::trb::{Trb, TrbCompletionCode, TrbType};
-use super::{PortId, Xhci};
+use super::{EndpNum, PortId, Xhci};
 use crate::xhci::device_enumerator::DeviceEnumerationRequest;
 use crate::xhci::port::PortFlags;
 use common::io::Io as _;
@@ -49,14 +49,14 @@ pub struct NextEventTrb {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RingId {
     pub port: PortId,
-    pub endpoint_num: u8,
+    pub endpoint_num: EndpNum,
     pub stream_id: u16,
 }
 impl RingId {
     pub const fn default_control_pipe(port: PortId) -> Self {
         Self {
             port,
-            endpoint_num: 0,
+            endpoint_num: EndpNum::new(0),
             stream_id: 0,
         }
     }
