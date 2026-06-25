@@ -900,14 +900,36 @@ impl<const N: usize> Xhci<N> {
 
                 let mut input = port_state.input_context.lock().unwrap();
 
-                self.update_max_packet_size(&mut *input, slot, dev_desc_8_byte)
-                    .await?;
+                match self
+                    .update_max_packet_size(&mut *input, slot, dev_desc_8_byte)
+                    .await
+                {
+                    Ok(()) => {}
+                    Err(err) => {
+                        error!(
+                            "Failed to update max packet size for port {}: `{}`",
+                            port_id, err
+                        );
+                        return Err(err);
+                    }
+                }
             }
 
             debug!("Got the 8 byte dev descriptor: {:X?}", dev_desc_8_byte);
 
-            let dev_desc = self.get_desc(port_id, slot).await?;
-            debug!("Got the full device descriptor!");
+            let dev_desc = match self.get_desc(port_id, slot).await {
+                Ok(ok) => {
+                    debug!("Got the full device descriptor!");
+                    ok
+                }
+                Err(err) => {
+                    error!(
+                        "Failed to get full device descriptor for port {}: `{}`",
+                        port_id, err
+                    );
+                    return Err(err);
+                }
+            };
             self.port_states.get_mut(&port_id).unwrap().dev_desc = Some(dev_desc);
 
             debug!("Got the port states again!");
@@ -1015,6 +1037,10 @@ impl<const N: usize> Xhci<N> {
             // For later USB versions, packet_size is the shift
             1u32 << dev_desc.packet_size
         };
+        debug!(
+            "Setting new packet size of slot {} to {}",
+            slot_id, new_max_packet_size
+        );
         let mut b = input_context.device.endpoints[0].b.read();
         b &= 0x0000_FFFF;
         b |= (new_max_packet_size) << 16;

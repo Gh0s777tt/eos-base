@@ -134,7 +134,10 @@ impl<const N: usize> DeviceEnumerator<N> {
                         }
                     }
                     Err(err) => {
-                        warn!("processing of device attach request failed! Error: {}", err);
+                        warn!(
+                            "processing of device dettach request failed! Error: {}",
+                            err
+                        );
                     }
                 }
             }

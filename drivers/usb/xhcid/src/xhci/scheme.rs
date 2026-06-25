@@ -552,10 +552,13 @@ impl<const N: usize> Xhci<N> {
             alternate_setting: desc.alternate_setting,
             class: desc.class,
             interface_str: if desc.interface_str > 0 {
+                /*TODO: broken on some devices
                 Some(
                     self.fetch_string_desc(port_id, slot, desc.interface_str, lang_id)
                         .await?,
                 )
+                */
+                None
             } else {
                 None
             },
