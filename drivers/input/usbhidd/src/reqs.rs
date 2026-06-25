@@ -43,7 +43,7 @@ pub fn set_report(
         PortReqTy::Class,
         PortReqRecipient::Interface,
         SET_REPORT_REQ,
-        concat(report_id, report_ty as u8),
+        concat(report_ty as u8, report_id),
         if_num,
         DeviceReqData::Out(buffer),
     )
