@@ -80,8 +80,8 @@ impl<'a> SchemeSocket for RawSocket<'a> {
             vec![0; Router::MTU * Smolnetd::SOCKET_BUFFER_SIZE],
         );
         let ip_socket = RawSocket::new(
-            IpVersion::Ipv4,
-            IpProtocol::from(proto),
+            Some(IpVersion::Ipv4),
+            Some(IpProtocol::from(proto)),
             rx_buffer,
             tx_buffer,
         );
@@ -139,7 +139,7 @@ impl<'a> SchemeSocket for RawSocket<'a> {
 
     fn fpath(&self, _file: &SchemeFile<Self>, buf: &mut [u8]) -> SyscallResult<usize> {
         FpathWriter::with(buf, "ip", |w| {
-            write!(w, "{}", self.ip_protocol()).unwrap();
+            write!(w, "{}", self.ip_protocol().unwrap()).unwrap();
             Ok(())
         })
     }

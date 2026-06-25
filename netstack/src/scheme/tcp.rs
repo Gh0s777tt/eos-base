@@ -162,8 +162,7 @@ impl<'a> SchemeSocket for TcpSocket<'a> {
         } else if !self.is_active() {
             Err(SyscallError::new(syscall::ENOTCONN))
         } else if self.can_send() {
-            self.send_slice(buf).expect("Can't send slice");
-            Ok(buf.len())
+            Ok(self.send_slice(buf).expect("Can't send slice"))
         } else if file.flags & syscall::O_NONBLOCK == syscall::O_NONBLOCK {
             Err(SyscallError::new(syscall::EAGAIN))
         } else {
