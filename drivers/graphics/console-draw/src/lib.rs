@@ -9,7 +9,6 @@ use graphics_ipc::{CpuBackedBuffer, V2GraphicsHandle};
 use orbclient::FONT;
 
 #[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
 pub struct Damage {
     pub x: u32,
     pub y: u32,

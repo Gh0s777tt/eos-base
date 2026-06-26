@@ -26,7 +26,6 @@ mod ioctl;
 pub mod kms;
 
 #[derive(Debug, Copy, Clone)]
-#[repr(C, packed)]
 pub struct Damage {
     pub x: u32,
     pub y: u32,
