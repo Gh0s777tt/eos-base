@@ -29,6 +29,7 @@ struct InitConfig {
     log_debug: bool,
     skip_cmd: Vec<String>,
     envs: BTreeMap<String, OsString>,
+    cwd: OsString,
 }
 
 impl InitConfig {
@@ -44,11 +45,18 @@ impl InitConfig {
             log_debug,
             skip_cmd,
             envs: BTreeMap::from([("RUST_BACKTRACE".to_owned(), "1".into())]),
+            cwd: "/scheme/initfs".into(),
         }
     }
 }
 
-fn switch_root(unit_store: &mut UnitStore, config: &mut InitConfig, prefix: &Path, etcdir: &Path) {
+fn switch_root(
+    unit_store: &mut UnitStore,
+    config: &mut InitConfig,
+    prefix: &Path,
+    etcdir: &Path,
+    cwd: &Path,
+) {
     eprintln!(
         "init: switchroot to {} {}",
         prefix.display(),
@@ -62,6 +70,7 @@ fn switch_root(unit_store: &mut UnitStore, config: &mut InitConfig, prefix: &Pat
         "LD_LIBRARY_PATH".to_owned(),
         prefix.join("lib").into_os_string(),
     );
+    config.cwd = cwd.to_path_buf().into_os_string();
 
     unit_store.config_dirs = vec![prefix.join("lib").join("init.d"), etcdir.join("init.d")];
 
@@ -122,6 +131,7 @@ fn main() {
         &mut init_config,
         Path::new("/scheme/initfs"),
         Path::new("/scheme/initfs/etc"),
+        Path::new("/scheme/initfs"),
     );
 
     // Start logd first such that we can pass /scheme/log as stdio to all other services
@@ -145,6 +155,7 @@ fn main() {
         &mut init_config,
         Path::new("/usr"),
         Path::new("/etc"),
+        Path::new("/"),
     );
     {
         // FIXME introduce multi-user.target unit and replace the config dir iteration
