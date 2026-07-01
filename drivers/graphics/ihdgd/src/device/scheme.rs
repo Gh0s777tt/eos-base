@@ -121,7 +121,7 @@ impl GraphicsAdapter for Device {
 
         let buffer = new_plane_state
             .fb_id
-            .map(|fb_id| objects.get_framebuffer(fb_id))
+            .map(|fb_id| objects.get_framebuffer_maybe_closed(fb_id))
             .transpose()?;
 
         plane.state = new_plane_state;

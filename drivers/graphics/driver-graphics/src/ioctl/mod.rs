@@ -4,10 +4,10 @@ use std::mem;
 use std::sync::Arc;
 
 use drm_fourcc::DrmFourcc;
-use syscall::{Error, EINVAL, ENOENT};
+use syscall::{EINVAL, ENOENT, Error};
 
 use crate::kms::objects::{KmsObjectId, KmsObjects, KmsRect};
-use crate::{Buffer, Damage, DrmHandle, GraphicsAdapter, VtState, MAP_FAKE_OFFSET_MULTIPLIER};
+use crate::{Buffer, Damage, DrmHandle, GraphicsAdapter, MAP_FAKE_OFFSET_MULTIPLIER, VtState};
 
 mod cursor;
 mod framebuffer;
@@ -144,7 +144,9 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
                 .map(|&id| KmsObjectId(id))
                 .collect();
             let fb_id = if data.fb_id() != 0 {
-                Some(KmsObjectId(data.fb_id()))
+                let fb_id = KmsObjectId(data.fb_id());
+                objects.get_framebuffer(fb_id)?;
+                Some(fb_id)
             } else {
                 None
             };
@@ -159,6 +161,7 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
             let mut new_crtc_state = crtc.lock().unwrap().state.clone();
             new_crtc_state.mode = mode;
             let mut new_plane_state = plane.lock().unwrap().state.clone();
+            let old_fb_id = new_plane_state.fb_id;
             new_plane_state.fb_id = fb_id;
             new_plane_state.crtc_id = Some(crtc_id);
             if handle.vt == active_vt {
@@ -189,6 +192,13 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
                 new_crtc_state;
             vts.get_mut(&handle.vt).unwrap().plane_state
                 [plane.lock().unwrap().plane_index as usize] = new_plane_state;
+
+            if let Some(old_fb_id) = old_fb_id {
+                if !VtState::fb_has_any_use(vts, old_fb_id) {
+                    objects.remove_framebuffer_if_closed(old_fb_id);
+                }
+            }
+
             Ok(0)
         }),
         ipc::MODE_CURSOR => ipc::DrmModeCursor::with(payload, |data| {
@@ -305,11 +315,14 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
                 plane.state.clone()
             };
             let fb_id = if data.fb_id() != 0 {
-                KmsObjectId(data.fb_id())
+                let fb_id = KmsObjectId(data.fb_id());
+                objects.get_framebuffer(fb_id)?;
+                Some(fb_id)
             } else {
-                KmsObjectId::INVALID
+                None
             };
-            new_state.fb_id = Some(fb_id);
+            let old_fb_id = new_state.fb_id;
+            new_state.fb_id = fb_id;
             new_state.crtc_id = Some(crtc_id);
             new_state.src_rect = KmsRect {
                 x: data.src_x(),
@@ -339,6 +352,13 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
             }
             vts.get_mut(&handle.vt).unwrap().plane_state
                 [plane.lock().unwrap().plane_index as usize] = new_state;
+
+            if let Some(old_fb_id) = old_fb_id {
+                if !VtState::fb_has_any_use(vts, old_fb_id) {
+                    objects.remove_framebuffer_if_closed(old_fb_id);
+                }
+            }
+
             Ok(0)
         }),
         ipc::MODE_GET_PLANE => ipc::DrmModeGetPlane::with(payload, |mut data| {
@@ -364,6 +384,9 @@ pub(crate) fn call_ioctl<T: GraphicsAdapter>(
         }),
         ipc::MODE_GET_FB2 => ipc::DrmModeFbCmd2::with(payload, |data| {
             framebuffer::mode_get_fb2(objects, handle, data)
+        }),
+        ipc::MODE_CLOSE_FB => ipc::DrmModeClosefb::with(payload, |data| {
+            framebuffer::mode_close_fb(objects, vts, data)
         }),
         _ => return Err(Error::new(EINVAL)),
     }

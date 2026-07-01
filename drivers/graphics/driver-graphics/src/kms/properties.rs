@@ -7,10 +7,10 @@ use drm_sys::{
     DRM_MODE_OBJECT_CRTC, DRM_MODE_OBJECT_FB, DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY,
     DRM_PLANE_TYPE_PRIMARY, DRM_PROP_NAME_LEN,
 };
-use syscall::{Error, Result, ENOENT};
+use syscall::{ENOENT, Error, Result};
 
-use crate::kms::objects::{KmsObject, KmsObjectId, KmsObjects};
 use crate::GraphicsAdapter;
+use crate::kms::objects::{KmsObject, KmsObjectId, KmsObjects};
 
 impl<T: GraphicsAdapter> KmsObjects<T> {
     pub fn add_property(

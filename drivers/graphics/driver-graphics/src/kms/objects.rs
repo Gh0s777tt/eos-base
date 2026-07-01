@@ -1,22 +1,23 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use drm_fourcc::DrmFourcc;
 use drm_sys::{
-    drm_mode_modeinfo, DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC,
-    DRM_MODE_OBJECT_ENCODER, DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PLANE, DRM_MODE_OBJECT_PROPERTY,
-    DRM_PLANE_TYPE_CURSOR, DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY,
+    DRM_MODE_OBJECT_BLOB, DRM_MODE_OBJECT_CONNECTOR, DRM_MODE_OBJECT_CRTC, DRM_MODE_OBJECT_ENCODER,
+    DRM_MODE_OBJECT_FB, DRM_MODE_OBJECT_PLANE, DRM_MODE_OBJECT_PROPERTY, DRM_PLANE_TYPE_CURSOR,
+    DRM_PLANE_TYPE_OVERLAY, DRM_PLANE_TYPE_PRIMARY, drm_mode_modeinfo,
 };
-use syscall::{Error, Result, ENOENT};
+use syscall::{ENOENT, Error, Result};
 
+use crate::GraphicsAdapter;
 use crate::kms::connector::{KmsConnector, KmsEncoder};
 use crate::kms::properties::{
-    define_object_props, init_standard_props, type_, KmsBlob, KmsProperty, KmsPropertyData, ACTIVE,
-    CRTC_H, CRTC_ID, CRTC_W, CRTC_X, CRTC_Y, FB_ID, SRC_H, SRC_W, SRC_X, SRC_Y,
+    ACTIVE, CRTC_H, CRTC_ID, CRTC_W, CRTC_X, CRTC_Y, FB_ID, KmsBlob, KmsProperty, KmsPropertyData,
+    SRC_H, SRC_W, SRC_X, SRC_Y, define_object_props, init_standard_props, type_,
 };
-use crate::GraphicsAdapter;
 
 #[derive(Debug)]
 pub struct KmsObjects<T: GraphicsAdapter> {
@@ -192,12 +193,31 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         self.remove::<KmsFramebuffer<T>>(id)
     }
 
+    pub fn remove_framebuffer_if_closed(&mut self, id: KmsObjectId) {
+        if self
+            .get_framebuffer_maybe_closed(id)
+            .unwrap()
+            .closed
+            .load(Ordering::SeqCst)
+        {
+            self.remove::<KmsFramebuffer<T>>(id).unwrap();
+        }
+    }
+
     pub fn fb_ids(&self) -> &[KmsObjectId] {
         &self.framebuffers
     }
 
     pub fn get_framebuffer(&self, id: KmsObjectId) -> Result<&KmsFramebuffer<T>> {
-        self.get(id)
+        let fb = self.get::<KmsFramebuffer<T>>(id)?;
+        if fb.closed.load(Ordering::SeqCst) {
+            return Err(Error::new(ENOENT));
+        }
+        Ok(fb)
+    }
+
+    pub fn get_framebuffer_maybe_closed(&self, id: KmsObjectId) -> Result<&KmsFramebuffer<T>> {
+        self.get::<KmsFramebuffer<T>>(id)
     }
 }
 
@@ -395,6 +415,15 @@ pub struct KmsRect<T> {
 
 #[derive(Debug)]
 pub struct KmsFramebuffer<T: GraphicsAdapter> {
+    /// Was this framebuffer closed using the CLOSEFB ioctl or implicitly
+    /// created by the CURSOR or CURSOR2 ioctls or similar?
+    ///
+    /// A closed framebuffer will be destroyed as soon as the last plane that
+    /// uses it switches to a different framebuffer. In the mean time the GETFB
+    /// and GETFB2 ioctls still function on it, but anything else will result
+    /// in ENOENT, including another CLOSEFB call.
+    pub closed: AtomicBool,
+
     pub width: u32,
     pub height: u32,
     pub pixel_format: DrmFourcc,
