@@ -11,7 +11,15 @@ use redox_scheme::Socket;
 use redox_scheme::scheme::{SchemeAsync, SchemeSync};
 
 unsafe fn get_fd(var: &str) -> RawFd {
-    let fd: RawFd = std::env::var(var).unwrap().parse().unwrap();
+    let fd: RawFd = std::env::var(var)
+        .unwrap_or_else(|_| {
+            panic!(
+                "Daemons can't be started manually. \
+            Add a service config to make init start this daemon instead."
+            )
+        })
+        .parse()
+        .unwrap();
     if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
         panic!(
             "daemon: failed to set CLOEXEC flag for {var} fd: {}",
