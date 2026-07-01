@@ -7,8 +7,8 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 use libredox::Fd;
-use redox_scheme::scheme::{SchemeAsync, SchemeSync};
 use redox_scheme::Socket;
+use redox_scheme::scheme::{SchemeAsync, SchemeSync};
 
 unsafe fn get_fd(var: &str) -> RawFd {
     let fd: RawFd = std::env::var(var).unwrap().parse().unwrap();
