@@ -13,6 +13,7 @@ pico-args.workspace = true
 redox_syscall.workspace = true
 serde.workspace = true
 toml.workspace = true
+libredox.workspace = true
 
 config = { path = "../../config" }
 common = { path = "../common" }

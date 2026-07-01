@@ -65,7 +65,7 @@ pub fn run(write_fd: FdGuard, socket: Socket, auth: FdGuard, event: FdGuard) -> 
         .expect("failed to issue procmgr root fd");
 
     log::debug!("process manager started");
-    let _ = syscall::call_wo(
+    let _ = redox_rt::sys::sys_call_wo(
         write_fd.as_raw_fd(),
         &cap_fd.to_ne_bytes(),
         CallFlags::FD,
@@ -549,7 +549,7 @@ enum WaitpidTarget {
 struct RawEventQueue(FdGuard);
 impl RawEventQueue {
     pub fn new(cap_fd: usize) -> Result<Self> {
-        syscall::openat(cap_fd, "", O_CREAT, 0)
+        redox_rt::sys::openat(cap_fd, "", O_CREAT, 0)
             .map(FdGuard::new)
             .map(Self)
     }
@@ -2541,8 +2541,8 @@ impl<'a> ProcScheme<'a> {
 
         // Useful for debugging memory leaks.
         log::trace!("NEXT FD: {}", {
-            let nextfd = syscall::dup(0, &[]).unwrap();
-            let _ = syscall::close(nextfd);
+            let nextfd = redox_rt::sys::dup(0, &[]).unwrap();
+            let _ = redox_rt::sys::close(nextfd);
             nextfd
         });
         log::trace!("{} processes", self.processes.len());

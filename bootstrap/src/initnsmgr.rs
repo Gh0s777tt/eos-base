@@ -10,14 +10,14 @@ use libredox::protocol::{NsDup, NsPermissions};
 use log::{error, warn};
 use redox_path::RedoxPath;
 use redox_path::RedoxScheme;
-use redox_rt::proc::FdGuard;
+use redox_rt::proc::{FdGuard, FdGuardUpper};
 use redox_scheme::{
-    CallerCtx, OpenResult, RequestKind, Response, SendFdRequest, SignalBehavior, Socket,
     scheme::{SchemeState, SchemeSync},
+    CallerCtx, OpenResult, RequestKind, Response, SendFdRequest, SignalBehavior, Socket,
 };
-use syscall::Stat;
 use syscall::dirent::{DirEntry, DirentBuf, DirentKind};
-use syscall::{CallFlags, FobtainFdFlags, error::*, schemev2::NewFdFlags};
+use syscall::Stat;
+use syscall::{error::*, schemev2::NewFdFlags, CallFlags, FobtainFdFlags};
 
 #[derive(Debug, Clone)]
 struct Namespace {
@@ -92,6 +92,7 @@ impl SchemeRegister {
 enum Handle {
     Access(NamespaceAccess),
     Register(SchemeRegister),
+    OtherScheme { name: String, fd: Rc<FdGuard> },
     List(NamespaceAccess),
 }
 
@@ -100,7 +101,7 @@ pub struct NamespaceScheme<'sock> {
     handles: HashMap<usize, Handle>,
     root_namespace: Namespace,
     next_id: usize,
-    scheme_creation_cap: FdGuard,
+    scheme_creation_cap: Rc<FdGuardUpper>,
 }
 
 const HIGH_PERMISSIONS: NsPermissions = NsPermissions::SCHEME_CREATE;
@@ -109,14 +110,14 @@ impl<'sock> NamespaceScheme<'sock> {
     pub fn new(
         socket: &'sock Socket,
         schemes: HashMap<String, Arc<FdGuard>>,
-        scheme_creation_cap: FdGuard,
+        scheme_creation_cap: FdGuardUpper,
     ) -> Self {
         Self {
             socket,
             handles: HashMap::new(),
             root_namespace: Namespace { schemes },
             next_id: 0,
-            scheme_creation_cap,
+            scheme_creation_cap: Rc::new(scheme_creation_cap),
         }
     }
 
@@ -137,23 +138,55 @@ impl<'sock> NamespaceScheme<'sock> {
     }
 
     fn open_namespace_resource(
-        &self,
+        &mut self,
         ns_access: &NamespaceAccess,
-        reference: &str,
+        redox_path: RedoxPath<'_>,
         _flags: usize,
         _fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
-        match reference {
+        let (_scheme, reference) = redox_path.as_parts().ok_or(Error::new(EINVAL))?;
+
+        match reference.as_ref() {
             "scheme-creation-cap" => {
                 if !ns_access.has_permission(NsPermissions::SCHEME_CREATE) {
                     error!("Permission denied to get scheme creation capability");
                     return Err(Error::new(EACCES));
                 }
-                Ok(syscall::dup(self.scheme_creation_cap.as_raw_fd(), &[])?)
+
+                let new_id = self.next_id;
+                self.next_id += 1;
+                self.handles.insert(new_id, Handle::List(ns_access.clone()));
+
+                let resource_id = self.next_id;
+                self.next_id += 1;
+
+                let dup_fd = self.scheme_creation_cap.dup(&[])?;
+
+                self.handles.insert(
+                    resource_id,
+                    Handle::OtherScheme {
+                        name: redox_path.to_string(),
+                        fd: Rc::new(dup_fd),
+                    },
+                );
+                Ok(resource_id)
+            }
+            "" => {
+                if !ns_access.has_permission(NsPermissions::LIST) {
+                    error!("Permission denied to list schemes in namespace root");
+                    return Err(Error::new(EACCES));
+                }
+
+                let new_id = self.next_id;
+                self.next_id += 1;
+
+                self.handles.insert(new_id, Handle::List(ns_access.clone()));
+
+                Ok(new_id)
             }
             _ => {
-                error!("Unknown special reference: {}", reference);
+                error!("Unknown special reference: {}", reference.as_ref());
                 return Err(Error::new(EINVAL));
             }
         }
@@ -163,26 +196,19 @@ impl<'sock> NamespaceScheme<'sock> {
         &self,
         ns: &Namespace,
         scheme: &str,
-        reference: &str,
         flags: usize,
-        fcntl_flags: u32,
-        ctx: &CallerCtx,
-    ) -> Result<usize> {
+        _ctx: &CallerCtx,
+    ) -> Result<FdGuard> {
         let Some(cap_fd) = ns.get_scheme_fd(scheme) else {
             log::info!("Scheme {:?} not found in namespace", scheme);
             return Err(Error::new(ENODEV));
         };
 
-        let scheme_fd = syscall::openat_with_filter(
-            cap_fd.as_raw_fd(),
-            reference,
-            flags,
-            fcntl_flags as usize,
-            ctx.uid,
-            ctx.gid,
-        )?;
+        if flags & syscall::O_DIRECTORY == 0 {
+            return Err(Error::new(EISDIR));
+        }
 
-        Ok(scheme_fd)
+        cap_fd.dup(&[])
     }
 
     fn fork_namespace(&mut self, namespace: Rc<RefCell<Namespace>>, names: &[u8]) -> Result<usize> {
@@ -211,6 +237,10 @@ impl<'sock> NamespaceScheme<'sock> {
         self.next_id += 1;
         Ok(next_id)
     }
+
+    fn on_close(&mut self, id: usize) {
+        let _ = self.handles.remove(&id);
+    }
 }
 
 impl<'sock> SchemeSync for NamespaceScheme<'sock> {
@@ -222,55 +252,83 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
         fcntl_flags: u32,
         ctx: &CallerCtx,
     ) -> Result<OpenResult> {
-        let ns_access = {
-            let handle = self.handles.get(&fd);
-            match handle {
-                Some(Handle::Access(access)) => Some(access),
-                _ => None,
-            }
-        }
-        .ok_or_else(|| {
-            error!("Namespace with ID {} not found", fd);
+        let handle = self.handles.get(&fd).cloned().ok_or_else(|| {
+            error!("Handle with ID {} not found", fd);
             Error::new(ENOENT)
         })?;
-        let redox_path = RedoxPath::from_absolute(path).ok_or(Error::new(EINVAL))?;
-        let (scheme, reference) = redox_path.as_parts().ok_or(Error::new(EINVAL))?;
 
-        let res_fd = match scheme.as_ref() {
-            "namespace" => self.open_namespace_resource(
-                ns_access,
-                reference.as_ref(),
-                flags,
-                fcntl_flags,
-                ctx,
-            )?,
-            "" => {
-                if !ns_access.has_permission(NsPermissions::LIST) {
-                    error!("Permission denied to list schemes in namespace {}", fd);
-                    return Err(Error::new(EACCES));
+        match handle {
+            Handle::Access(ns_access) => {
+                let redox_path = RedoxPath::from_absolute(path).ok_or(Error::new(EINVAL))?;
+                let (scheme, _reference) = redox_path.as_parts().ok_or(Error::new(EINVAL))?;
+
+                match scheme.as_ref() {
+                    "namespace" | "" => {
+                        let new_id = self.open_namespace_resource(
+                            &ns_access,
+                            redox_path,
+                            flags,
+                            fcntl_flags,
+                            ctx,
+                        )?;
+                        Ok(OpenResult::ThisScheme {
+                            number: new_id,
+                            flags: NewFdFlags::empty(),
+                        })
+                    }
+                    _ => {
+                        let res_fd = self.open_scheme_resource(
+                            &ns_access.namespace.borrow(),
+                            scheme.as_ref(),
+                            flags,
+                            ctx,
+                        )?;
+                        Ok(OpenResult::OtherScheme { fd: res_fd.take() })
+                    }
                 }
-
-                let new_id = self.next_id;
-                self.next_id += 1;
-
-                self.handles.insert(new_id, Handle::List(ns_access.clone()));
-
-                return Ok(OpenResult::ThisScheme {
-                    number: new_id,
-                    flags: NewFdFlags::empty(),
-                });
             }
-            _ => self.open_scheme_resource(
-                &ns_access.namespace.borrow(),
-                scheme.as_ref(),
-                reference.as_ref(),
-                flags,
-                fcntl_flags,
-                ctx,
-            )?,
-        };
+            Handle::List(ns_access) => {
+                if path.is_empty() || path == "." {
+                    let new_id = self.next_id;
+                    self.next_id += 1;
 
-        Ok(OpenResult::OtherScheme { fd: res_fd })
+                    self.handles.insert(new_id, Handle::List(ns_access.clone()));
+                    Ok(OpenResult::ThisScheme {
+                        number: new_id,
+                        flags: NewFdFlags::empty(),
+                    })
+                } else {
+                    error!("Cannot open a path under List handle: {}", path);
+                    Err(Error::new(EINVAL))
+                }
+            }
+            Handle::OtherScheme {
+                name: saved_path_str,
+                fd: target_fd,
+            } => {
+                let saved_path =
+                    RedoxPath::from_absolute(&saved_path_str).ok_or(Error::new(syscall::EPROTO))?;
+                let (_scheme, reference) =
+                    saved_path.as_parts().ok_or(Error::new(syscall::EPROTO))?;
+
+                if reference.as_ref() == path {
+                    Ok(OpenResult::OtherScheme {
+                        fd: target_fd.dup(&[])?.take(),
+                    })
+                } else {
+                    error!(
+                        "Resource path mismatch: expected {}, got {}",
+                        reference.as_ref(),
+                        path,
+                    );
+                    Err(Error::new(EINVAL))
+                }
+            }
+            _ => {
+                error!("Handle {} is not accessible for openat", fd);
+                Err(Error::new(EBADF))
+            }
+        }
     }
 
     fn dup(&mut self, id: usize, buf: &[u8], _ctx: &CallerCtx) -> Result<OpenResult> {
@@ -288,7 +346,6 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
         let new_id = match kind {
             NsDup::ForkNs => {
                 let ns = ns_access.namespace.clone();
-                let _ = ns_access;
                 self.fork_namespace(ns, payload)?
             }
             NsDup::ShrinkPermissions => self.shrink_permissions(
@@ -326,7 +383,7 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
         })
     }
 
-    fn unlinkat(&mut self, fd: usize, path: &str, flags: usize, ctx: &CallerCtx) -> Result<()> {
+    fn unlinkat(&mut self, fd: usize, path: &str, _flags: usize, _ctx: &CallerCtx) -> Result<()> {
         let ns_access = self.get_ns_access(fd).ok_or_else(|| {
             error!("Namespace with ID {} not found", fd);
             Error::new(ENOENT)
@@ -335,31 +392,20 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
 
         let redox_path = RedoxPath::from_absolute(path).ok_or(Error::new(EINVAL))?;
         let (scheme, reference) = redox_path.as_parts().ok_or(Error::new(EINVAL))?;
-        if reference.as_ref().is_empty() {
-            if !ns_access.has_permission(NsPermissions::DELETE) {
-                error!("Permission denied to remove scheme for namespace {}", fd);
-                return Err(Error::new(EACCES));
-            }
-            match ns.remove_scheme(scheme.as_ref()) {
-                Some(_) => return Ok(()),
-                None => {
-                    error!("Scheme {} not found in namespace", scheme);
-                    return Err(Error::new(ENODEV));
-                }
+        if !reference.as_ref().is_empty() {
+            return Err(Error::new(EXDEV));
+        }
+        if !ns_access.has_permission(NsPermissions::DELETE) {
+            error!("Permission denied to remove scheme for namespace {}", fd);
+            return Err(Error::new(EACCES));
+        }
+        match ns.remove_scheme(scheme.as_ref()) {
+            Some(_) => Ok(()),
+            None => {
+                error!("Scheme {} not found in namespace", scheme);
+                Err(Error::new(ENODEV))
             }
         }
-        let Some(cap_fd) = ns.get_scheme_fd(scheme.as_ref()) else {
-            error!("Scheme {} not found in namespace", scheme);
-            return Err(Error::new(ENODEV));
-        };
-
-        syscall::unlinkat_with_filter(cap_fd.as_raw_fd(), reference, flags, ctx.uid, ctx.gid)?;
-
-        Ok(())
-    }
-
-    fn on_close(&mut self, id: usize) {
-        self.handles.remove(&id);
     }
 
     fn on_sendfd(&mut self, sendfd_request: &SendFdRequest) -> Result<usize> {
@@ -387,7 +433,7 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
         }
         let mut new_fd = usize::MAX;
         if let Err(e) = sendfd_request.obtain_fd(
-            &self.socket,
+            self.socket,
             FobtainFdFlags::UPPER_TBL,
             core::slice::from_mut(&mut new_fd),
         ) {
@@ -422,12 +468,11 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
             }
             if let Err(err) = buf.entry(DirEntry {
                 kind: DirentKind::Unspecified,
-                name: &name.clone(),
+                name: name,
                 inode: 0,
                 next_opaque_id: i as u64 + 1,
             }) {
                 if err.errno == EINVAL && i > opaque_offset {
-                    // POSIX allows partial result of getdents
                     break;
                 } else {
                     return Err(err);
@@ -440,7 +485,7 @@ impl<'sock> SchemeSync for NamespaceScheme<'sock> {
 
     fn fstat(&mut self, id: usize, stat: &mut Stat, _ctx: &CallerCtx) -> Result<()> {
         let resource_stat = match self.handles.get(&id).ok_or(Error::new(EBADF))? {
-            Handle::List(_) => Stat {
+            Handle::List(_) | Handle::OtherScheme { .. } => Stat {
                 st_mode: 0o444 | syscall::MODE_DIR,
                 st_uid: 0,
                 st_gid: 0,
@@ -502,6 +547,9 @@ pub fn run(
     schemes: HashMap<String, Arc<FdGuard>>,
     scheme_creation_cap: FdGuard,
 ) -> ! {
+    let scheme_creation_cap = scheme_creation_cap
+        .to_upper()
+        .expect("Failed to move scheme creation cap into upper");
     let mut state = SchemeState::new();
     let mut scheme = NamespaceScheme::new(&socket, schemes, scheme_creation_cap);
 
@@ -513,7 +561,7 @@ pub fn run(
         .socket
         .create_this_scheme_fd(0, new_id, 0, 0)
         .expect("nsmgr: failed to create namespace fd");
-    let _ = syscall::call_wo(
+    let _ = redox_rt::sys::sys_call_wo(
         sync_pipe.as_raw_fd(),
         &cap_fd.to_ne_bytes(),
         CallFlags::FD,
@@ -551,7 +599,6 @@ pub fn run(
                     break;
                 }
             }
-
             _ => (),
         }
     }

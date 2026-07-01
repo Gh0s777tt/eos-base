@@ -85,19 +85,19 @@ edid = "0.3.0" #TODO: edid is abandoned, fork it and maintain?
 fdt = "0.1.5"
 libc = "0.2.181"
 log = "0.4"
-libredox = "0.1.17"
+libredox = "0.1.18"
 orbclient = "0.4.1"
 psf-rs = "2.2.0"
 parking_lot = "0.12"
 pico-args = "0.5"
 plain = "0.2.3"
 ransid = "0.4"
-redox_event = "0.4.7"
+redox_event = "0.4.8"
 redox-ioctl = { git = "https://gitlab.redox-os.org/redox-os/relibc.git" }
 redox-log = { git = "https://gitlab.redox-os.org/redox-os/redox-log.git" }
 redox-rt = { git = "https://gitlab.redox-os.org/redox-os/relibc.git", default-features = false }
-redox-scheme = "0.11.1"
-redox_syscall = { version = "0.8.1",  features = ["std"] }
+redox-scheme = { version = "0.11.2", default-features = false }
+redox_syscall = { version = "0.9.0",  features = ["std"] }
 redox_termios = "0.1.3"
 ron = "0.8.1"
 serde = { version = "1", features = ["derive"] }
@@ -116,9 +116,6 @@ missing_docs = "allow" #TODO: set to deny when all public functions are document
 missing_safety_doc = "warn" #TODO: set to deny when all safety documentation is completed
 precedence = "deny"
 unused_io_amount = "deny"
-
-[patch.crates-io]
-redox_syscall = { git = "https://gitlab.redox-os.org/redox-os/syscall.git" }
 
 [patch."https://gitlab.redox-os.org/redox-os/relibc.git"]
 #redox-ioctl = { path = "../../relibc/source/redox-ioctl" }
