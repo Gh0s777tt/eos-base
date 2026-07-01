@@ -1,6 +1,5 @@
 TARGET ?= x86_64-unknown-redox
 LINKER ?= $(shell redoxer env which $(shell redoxer env printenv LD))
-BOARD ?=
 BUILD_TYPE ?= release
 BUILD_FLAGS ?= --release
 CARGO ?= redoxer
@@ -28,9 +27,7 @@ ifneq (,$(filter i586-unknown-redox i686-unknown-redox x86_64-unknown-redox,$(TA
 endif
 
 ifeq ($(TARGET),aarch64-unknown-redox)
-    ifeq ($(BOARD),raspi3b)
-        INITFS_BINS += bcm2835-sdhcid
-    endif
+	INITFS_BINS += bcm2835-sdhcid
 endif
 
 INITFS_CARGO_ARGS = $(foreach bin,$(INITFS_BINS),-p $(bin))
