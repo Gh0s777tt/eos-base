@@ -10,12 +10,11 @@ use redox_initfs::{InitFs, Inode, InodeDir, InodeKind, InodeStruct};
 
 use redox_rt::proc::FdGuard;
 use redox_scheme::{
-    CallerCtx, OpenResult, RequestKind,
     scheme::{SchemeState, SchemeSync},
+    CallerCtx, OpenResult, RequestKind,
 };
 
 use redox_scheme::{SignalBehavior, Socket};
-use syscall::PAGE_SIZE;
 use syscall::data::Stat;
 use syscall::dirent::DirEntry;
 use syscall::dirent::DirentBuf;
@@ -23,6 +22,7 @@ use syscall::dirent::DirentKind;
 use syscall::error::*;
 use syscall::flag::*;
 use syscall::schemev2::NewFdFlags;
+use syscall::PAGE_SIZE;
 
 enum Handle {
     Node(Node),
@@ -391,9 +391,9 @@ pub fn run(bytes: &'static [u8], sync_pipe: FdGuard, socket: Socket) -> ! {
     let cap_fd = socket
         .create_this_scheme_fd(0, new_id, 0, 0)
         .expect("failed to issue initfs root fd");
-    let _ = syscall::call_rw(
+    let _ = redox_rt::sys::sys_call_wo(
         sync_pipe.as_raw_fd(),
-        &mut cap_fd.to_ne_bytes(),
+        &cap_fd.to_ne_bytes(),
         CallFlags::FD,
         &[],
     );
@@ -446,14 +446,19 @@ pub unsafe extern "C" fn redox_write_v1(fd: usize, ptr: *const u8, len: usize) -
 
 #[unsafe(no_mangle)]
 pub unsafe fn redox_dup_v1(fd: usize, buf: *const u8, len: usize) -> isize {
-    Error::mux(syscall::dup(fd, unsafe {
+    Error::mux(redox_rt::sys::dup(fd, unsafe {
         core::slice::from_raw_parts(buf, len)
     })) as isize
 }
 
 #[unsafe(no_mangle)]
+pub unsafe fn redox_fcntl_v0(fd: usize, cmd: usize, arg: usize) -> isize {
+    Error::mux(redox_rt::sys::fcntl(fd, cmd, arg)) as isize
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn redox_close_v1(fd: usize) -> isize {
-    Error::mux(syscall::close(fd)) as isize
+    Error::mux(redox_rt::sys::close(fd)) as isize
 }
 
 #[unsafe(no_mangle)]
@@ -466,20 +471,15 @@ pub unsafe extern "C" fn redox_sys_call_v0(
     metadata_len: usize,
 ) -> isize {
     let flags = CallFlags::from_bits_retain(flags);
-
+    let read = flags.contains(syscall::CallFlags::READ);
+    let write = flags.contains(syscall::CallFlags::WRITE);
+    let payload = unsafe { core::slice::from_raw_parts_mut(payload, payload_len) };
     let metadata = unsafe { core::slice::from_raw_parts(metadata, metadata_len) };
 
-    let result = if flags.contains(CallFlags::READ) {
-        let payload = unsafe { core::slice::from_raw_parts_mut(payload, payload_len) };
-        if flags.contains(CallFlags::WRITE) {
-            syscall::call_rw(fd, payload, flags, metadata)
-        } else {
-            syscall::call_ro(fd, payload, flags, metadata)
-        }
-    } else {
-        let payload = unsafe { core::slice::from_raw_parts(payload, payload_len) };
-        syscall::call_wo(fd, payload, flags, metadata)
-    };
-
-    Error::mux(result) as isize
+    Error::mux(match (read, write) {
+        (true, true) => redox_rt::sys::sys_call_rw(fd, payload, flags, metadata),
+        (true, false) => redox_rt::sys::sys_call_ro(fd, payload, flags, metadata),
+        (false, true) => redox_rt::sys::sys_call_wo(fd, payload, flags, metadata),
+        (false, false) => redox_rt::sys::sys_call(fd, payload, flags, metadata),
+    }) as isize
 }

@@ -229,7 +229,8 @@ impl RandScheme {
 }
 #[test]
 fn test_scheme_perms() {
-    use syscall::{O_CLOEXEC, O_STAT};
+    use libredox::protocol::O_CLOEXEC;
+    use syscall::O_STAT;
 
     let mut ctx = CallerCtx {
         pid: 0,

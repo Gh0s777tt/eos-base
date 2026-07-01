@@ -70,16 +70,15 @@ impl Service {
             },
             ServiceType::Scheme(scheme) => {
                 let mut new_fd = usize::MAX;
+
                 loop {
-                    match syscall::call_ro(
+                    match libredox::call::call_ro(
                         read_pipe.as_raw_fd() as usize,
                         unsafe { plain::as_mut_bytes(&mut new_fd) },
                         syscall::CallFlags::FD | syscall::CallFlags::FD_UPPER,
                         &[],
                     ) {
-                        Err(syscall::Error {
-                            errno: syscall::EINTR,
-                        }) => continue,
+                        Err(err) if err.is_interrupt() => continue,
                         Ok(0) => {
                             eprintln!("init: {command:?} exited without notifying readiness");
                             return;

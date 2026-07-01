@@ -48,9 +48,9 @@ pub unsafe extern "C" fn start() -> ! {
 
     // NOTE: Assuming the debug scheme root fd is always placed at this position
     let debug_fd = syscall::UPPER_FDTBL_TAG + syscall::data::GlobalSchemes::Debug as usize;
-    let _ = syscall::openat(debug_fd, "", syscall::O_RDONLY, 0); // stdin
-    let _ = syscall::openat(debug_fd, "", syscall::O_WRONLY, 0); // stdout
-    let _ = syscall::openat(debug_fd, "", syscall::O_WRONLY, 0); // stderr
+    let _ = syscall::openat_into(debug_fd, 0, "", syscall::O_RDONLY, 0); // stdin
+    let _ = syscall::openat_into(debug_fd, 1, "", syscall::O_WRONLY, 0); // stdout
+    let _ = syscall::openat_into(debug_fd, 2, "", syscall::O_WRONLY, 0); // stderr
 
     unsafe {
         let _ = syscall::mprotect(4096, 4096, MapFlags::PROT_READ | MapFlags::MAP_PRIVATE)

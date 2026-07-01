@@ -94,7 +94,7 @@ fn main() -> Result<()> {
 
         #[allow(deprecated, reason = "we can't yet move this to init")]
         daemon::Daemon::spawn(command);
-        syscall::close(channel_fd as usize).unwrap();
+        libredox::call::close(channel_fd as usize).unwrap();
     }
 
     Ok(())

@@ -7,8 +7,8 @@ use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 use libredox::Fd;
-use redox_scheme::Socket;
 use redox_scheme::scheme::{SchemeAsync, SchemeSync};
+use redox_scheme::Socket;
 
 unsafe fn get_fd(var: &str) -> RawFd {
     let fd: RawFd = std::env::var(var).unwrap().parse().unwrap();
@@ -98,7 +98,7 @@ impl SchemeDaemon {
 
     /// Notify the process that the scheme daemon is ready to accept requests.
     pub fn ready_with_fd(self, cap_fd: Fd) -> syscall::Result<()> {
-        syscall::call_wo(
+        libredox::call::call_wo(
             self.write_pipe.as_raw_fd() as usize,
             &cap_fd.into_raw().to_ne_bytes(),
             syscall::CallFlags::FD,

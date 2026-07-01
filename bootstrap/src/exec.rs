@@ -6,10 +6,11 @@ use core::str::FromStr;
 use hashbrown::HashMap;
 use redox_scheme::Socket;
 
-use syscall::CallFlags;
+use libredox::protocol::O_CLOEXEC;
 use syscall::data::{GlobalSchemes, KernelSchemeInfo};
-use syscall::flag::{O_CLOEXEC, O_RDONLY, O_STAT};
-use syscall::{EINTR, Error};
+use syscall::flag::{O_DIRECTORY, O_RDONLY, O_STAT};
+use syscall::CallFlags;
+use syscall::{Error, EINTR};
 
 use redox_rt::proc::*;
 
@@ -53,6 +54,8 @@ pub fn main() -> ! {
         FdGuard::new(*(base_ptr as *const usize))
     };
 
+    let cur_context_idx = scheme_creation_cap.as_raw_fd() + 1;
+
     let mut kernel_schemes = KernelSchemeMap::new(kernel_scheme_infos);
 
     let auth = kernel_schemes
@@ -60,8 +63,8 @@ pub fn main() -> ! {
         .remove(&GlobalSchemes::Proc)
         .expect("failed to get proc fd");
 
-    let this_thr_fd = auth
-        .dup(b"cur-context")
+    let this_thr_fd = syscall::dup_into(auth.as_raw_fd(), cur_context_idx, b"cur-context")
+        .map(FdGuard::new)
         .expect("failed to open open_via_dup")
         .to_upper()
         .unwrap();
@@ -70,7 +73,7 @@ pub fn main() -> ! {
     let mut env_bytes = [0_u8; 4096];
     let mut envs = {
         let fd = FdGuard::new(
-            syscall::openat(
+            redox_rt::sys::openat(
                 kernel_schemes
                     .get(GlobalSchemes::Sys)
                     .expect("failed to get sys fd")
@@ -205,12 +208,16 @@ pub fn main() -> ! {
     // from this point, this_thr_fd is no longer valid
 
     const CWD: &[u8] = b"/scheme/initfs";
-    let cwd_fd = FdGuard::new(
-        syscall::openat(initns_fd.as_raw_fd(), "/scheme/initfs", O_STAT, 0)
-            .expect("failed to open cwd fd"),
-    )
-    .to_upper()
-    .unwrap();
+
+    let initfs_root_fd = initns_fd
+        .openat_into_upper("/scheme/initfs", O_DIRECTORY, 0)
+        .expect("failed to open initfs root fd");
+    let cwd_fd = initfs_root_fd
+        .openat_into_upper("", O_STAT, 0)
+        .expect("failed to open cwd fd");
+    let filetable_binary_fd = init_thr_fd
+        .dup_into_upper(b"filetable-binary")
+        .expect("faild to create filetable-binary fd");
     let extrainfo = ExtraInfo {
         cwd: Some(CWD),
         sigprocmask: 0,
@@ -220,16 +227,18 @@ pub fn main() -> ! {
         proc_fd: init_proc_fd.as_raw_fd(),
         ns_fd: Some(initns_fd.take()),
         cwd_fd: Some(cwd_fd.as_raw_fd()),
+        filetable_fd: Some(filetable_binary_fd.as_raw_fd()),
+        same_process: true,
     };
 
     let exe_path = "/scheme/initfs/bin/init";
+    let exe_reference = "bin/init";
 
-    let image_file = FdGuard::new(
-        syscall::openat(extrainfo.ns_fd.unwrap(), exe_path, O_RDONLY | O_CLOEXEC, 0)
-            .expect("failed to open init"),
-    )
-    .to_upper()
-    .unwrap();
+    let image_file = initfs_root_fd
+        .openat_into_upper(exe_reference, O_RDONLY | O_CLOEXEC, 0)
+        .expect("failed to open init");
+
+    drop(initfs_root_fd);
 
     let FexecResult::Interp {
         path: interp_path,
@@ -244,22 +253,33 @@ pub fn main() -> ! {
         &extrainfo,
         None,
     )
+    .ok()
+    .flatten()
     .expect("failed to execute init");
 
     // According to elf(5), PT_INTERP requires that the interpreter path be
     // null-terminated. Violating this should therefore give the "format error" ENOEXEC.
     let interp_cstr = CStr::from_bytes_with_nul(&interp_path).expect("interpreter not valid C str");
-    let interp_file = FdGuard::new(
-        syscall::openat(
+    let interp_path = interp_cstr.to_str().expect("interpreter not UTF-8");
+    let root_fd = FdGuard::new(
+        redox_rt::sys::openat_into_upper(
             extrainfo.ns_fd.unwrap(), // initns, not initfs!
-            interp_cstr.to_str().expect("interpreter not UTF-8"),
+            interp_path,
             O_RDONLY | O_CLOEXEC,
             0,
         )
-        .expect("failed to open dynamic linker"),
+        .expect("failed to open root fd"),
     )
     .to_upper()
     .unwrap();
+    let redox_path = redox_path::RedoxPath::from_absolute(interp_path)
+        .expect("interpreter path is not a Scheme-rooted path");
+    let (_, reference) = redox_path
+        .as_parts()
+        .expect("redox_path is not scheme root path");
+    let interp_file = root_fd
+        .openat_into_upper(reference.as_ref(), O_RDONLY | O_CLOEXEC, 0)
+        .expect("failed to open dynamic linker");
 
     fexec_impl(
         interp_file,
@@ -286,7 +306,7 @@ pub(crate) fn spawn(
     inner: impl FnOnce(FdGuard, Socket, FdGuard, KernelSchemeMap) -> !,
 ) -> (FdGuard, FdGuard, KernelSchemeMap, FdGuard) {
     let read = FdGuard::new(
-        syscall::openat(
+        redox_rt::sys::openat(
             kernel_schemes
                 .get(GlobalSchemes::Pipe)
                 .expect("failed to get pipe fd")
@@ -300,7 +320,7 @@ pub(crate) fn spawn(
 
     // The write pipe will not inherit O_CLOEXEC, but is closed by the daemon later.
     let write = FdGuard::new(
-        syscall::dup(read.as_raw_fd(), b"write").expect("failed to open sync write pipe"),
+        redox_rt::sys::dup(read.as_raw_fd(), b"write").expect("failed to open sync write pipe"),
     );
 
     match fork_impl(&ForkArgs::Init {
@@ -332,7 +352,7 @@ pub(crate) fn spawn(
                 )
             };
             loop {
-                match syscall::call_ro(
+                match redox_rt::sys::sys_call_ro(
                     read.as_raw_fd(),
                     fd_bytes,
                     CallFlags::FD | CallFlags::FD_UPPER,

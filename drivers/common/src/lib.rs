@@ -295,14 +295,14 @@ pub fn acquire_port_io_rights() -> Result<()> {
     extern "C" {
         fn redox_cur_thrfd_v0() -> usize;
     }
-    let kernel_fd = syscall::dup(unsafe { redox_cur_thrfd_v0() }, b"open_via_dup")?;
+    let kernel_fd = libredox::call::dup(unsafe { redox_cur_thrfd_v0() }, b"open_via_dup")?;
     let res = libredox::call::call_wo(
         kernel_fd,
         &[],
         syscall::CallFlags::empty(),
         &[ProcSchemeVerb::Iopl as u64],
     );
-    let _ = syscall::close(kernel_fd);
+    let _ = libredox::call::close(kernel_fd);
     res?;
     Ok(())
 }
