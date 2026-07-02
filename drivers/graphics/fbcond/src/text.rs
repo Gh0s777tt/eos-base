@@ -40,6 +40,10 @@ impl TextScreen {
                             // Backspace
                             buf.extend_from_slice(b"\x7F");
                         }
+                        0x1C => {
+                            // Newline
+                            buf.extend_from_slice(b"\n");
+                        }
                         0x47 => {
                             // Home
                             buf.extend_from_slice(b"\x1B[H");
@@ -98,9 +102,7 @@ impl TextScreen {
             _ => (), //TODO: Mouse in terminal
         }
 
-        for &b in buf.iter() {
-            self.input.push_back(b);
-        }
+        self.input.extend(buf);
     }
 
     pub fn can_read(&self) -> bool {
