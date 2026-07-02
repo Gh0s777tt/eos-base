@@ -88,8 +88,13 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         plane_data: T::Plane,
         plane_data_state: <T::Plane as KmsPlaneDriver>::State,
     ) -> (KmsObjectId, KmsObjectId) {
-        let primary_plane =
-            self.add_plane(&[], KmsPlaneType::Primary, plane_data, plane_data_state);
+        let primary_plane = self.add_plane(
+            &[],
+            KmsPlaneType::Primary,
+            false,
+            plane_data,
+            plane_data_state,
+        );
 
         let crtc_index = self.crtcs.len() as u32;
         let id = self.add(Mutex::new(KmsCrtc {
@@ -97,6 +102,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
             gamma_size: 0,
             properties: KmsCrtc::base_properties(),
             primary_plane,
+            cursor_plane: None,
             state: KmsCrtcState {
                 mode: None,
                 driver_data: driver_data_state,
@@ -132,9 +138,14 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
         &mut self,
         crtcs: &[KmsObjectId],
         plane_type: KmsPlaneType,
+        has_hotspot: bool,
         driver_data: T::Plane,
         driver_data_state: <T::Plane as KmsPlaneDriver>::State,
     ) -> KmsObjectId {
+        if has_hotspot {
+            assert_eq!(plane_type, KmsPlaneType::Cursor);
+        }
+
         let mut possible_crtcs = 0u32;
         for &crtc in crtcs {
             possible_crtcs |= 1 << self.get_crtc(crtc).unwrap().lock().unwrap().crtc_index
@@ -160,6 +171,7 @@ impl<T: GraphicsAdapter> KmsObjects<T> {
                     width: 0,
                     height: 0,
                 },
+                hotspot: has_hotspot.then_some((0, 0)),
                 driver_data: driver_data_state,
             },
             driver_data,
@@ -297,6 +309,7 @@ pub struct KmsCrtc<T: GraphicsAdapter> {
     pub gamma_size: u32,
     pub properties: Vec<KmsPropertyData<Self>>,
     pub primary_plane: KmsObjectId,
+    pub cursor_plane: Option<KmsObjectId>,
     pub state: KmsCrtcState<T>,
     pub driver_data: T::Crtc,
 }
@@ -346,6 +359,7 @@ pub struct KmsPlaneState<T: GraphicsAdapter> {
     pub crtc_id: Option<KmsObjectId>,
     pub src_rect: KmsRect<u32>,
     pub crtc_rect: KmsRect<i32>,
+    pub hotspot: Option<(i32, i32)>,
     pub driver_data: <T::Plane as KmsPlaneDriver>::State,
 }
 
@@ -356,6 +370,7 @@ impl<T: GraphicsAdapter> Clone for KmsPlaneState<T> {
             crtc_id: self.crtc_id.clone(),
             src_rect: self.src_rect.clone(),
             crtc_rect: self.crtc_rect.clone(),
+            hotspot: self.hotspot,
             driver_data: self.driver_data.clone(),
         }
     }
@@ -395,6 +410,7 @@ define_object_props!(object, KmsPlane<T: GraphicsAdapter> {
     SRC_H {
         get => u64::from(object.state.src_rect.height),
     }
+    // FIXME HOTSPOT_X and HOTSPOT_Y if supported by graphics card
 });
 
 #[derive(Copy, Clone, Debug, PartialEq)]

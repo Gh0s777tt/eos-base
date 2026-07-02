@@ -460,6 +460,8 @@ impl Device {
             (),
         );
 
+        // FIXME add cursor plane
+
         let (width, height) = (fb.width, fb.height);
 
         let fb_id = objects.add_framebuffer(fb);

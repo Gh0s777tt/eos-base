@@ -7,7 +7,7 @@ use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
 use driver_graphics::kms::objects::{
     KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneState,
 };
-use driver_graphics::{Buffer, CursorPlane, Damage, GraphicsAdapter};
+use driver_graphics::{Buffer, Damage, GraphicsAdapter};
 use drm_sys::{
     DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFERRED_DEPTH, DRM_CAP_DUMB_PREFER_SHADOW,
     DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT,
@@ -162,14 +162,6 @@ impl GraphicsAdapter for FbAdapter {
         }
 
         Ok(())
-    }
-
-    fn has_cursor_plane(&self) -> bool {
-        false
-    }
-
-    fn handle_cursor(&mut self, _cursor: &CursorPlane<Self::Buffer>, _dirty_fb: bool) {
-        unimplemented!("Vesad does not support this function");
     }
 }
 

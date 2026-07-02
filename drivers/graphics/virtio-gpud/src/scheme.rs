@@ -4,9 +4,10 @@ use std::sync::{Arc, Mutex};
 use common::{dma::Dma, sgl};
 use driver_graphics::kms::connector::{KmsConnectorDriver, KmsConnectorStatus};
 use driver_graphics::kms::objects::{
-    KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneState,
+    KmsCrtc, KmsCrtcState, KmsObjectId, KmsObjects, KmsPlane, KmsPlaneDriver, KmsPlaneState,
+    KmsPlaneType,
 };
-use driver_graphics::{Buffer as DrmBuffer, CursorPlane, Damage, GraphicsAdapter, GraphicsScheme};
+use driver_graphics::{Buffer as DrmBuffer, Damage, GraphicsAdapter, GraphicsScheme};
 use drm_sys::{
     DRM_CAP_CURSOR_HEIGHT, DRM_CAP_CURSOR_WIDTH, DRM_CAP_DUMB_BUFFER, DRM_CAP_DUMB_PREFERRED_DEPTH,
     DRM_CAP_DUMB_PREFER_SHADOW, DRM_CLIENT_CAP_CURSOR_PLANE_HOTSPOT,
@@ -36,6 +37,15 @@ pub struct VirtGpuConnector {
 }
 
 impl KmsConnectorDriver for VirtGpuConnector {
+    type State = ();
+}
+
+#[derive(Debug)]
+pub struct VirtGpuPlane {
+    is_cursor: bool,
+}
+
+impl KmsPlaneDriver for VirtGpuPlane {
     type State = ();
 }
 
@@ -343,7 +353,7 @@ impl<'a> VirtGpuAdapter<'a> {
 impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
     type Connector = VirtGpuConnector;
     type Crtc = ();
-    type Plane = ();
+    type Plane = VirtGpuPlane;
 
     type Buffer = VirtGpuFramebuffer<'a>;
     type Framebuffer = ();
@@ -362,7 +372,18 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         });
 
         for display_id in 0..self.config.num_scanouts.get() {
-            let (crtc, _primary_plane_id) = objects.add_crtc((), (), (), ());
+            let (crtc, _primary_plane_id) =
+                objects.add_crtc((), (), VirtGpuPlane { is_cursor: false }, ());
+
+            let cursor_plane = objects.add_plane(
+                &[crtc],
+                KmsPlaneType::Cursor,
+                true,
+                VirtGpuPlane { is_cursor: true },
+                (),
+            );
+
+            objects.get_crtc(crtc).unwrap().lock().unwrap().cursor_plane = Some(cursor_plane);
 
             objects.add_connector(VirtGpuConnector { display_id }, (), &[crtc]);
         }
@@ -444,16 +465,43 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
         damage: Damage,
     ) -> syscall::Result<()> {
         futures::executor::block_on(async {
-            let Some(crtc_id) = new_plane_state.crtc_id else {
-                return Ok(());
-            };
-            let crtc = objects.get_crtc(crtc_id).unwrap().lock().unwrap();
             let mut plane = plane.lock().unwrap();
 
             let framebuffer = new_plane_state
                 .fb_id
                 .map(|fb_id| objects.get_framebuffer_maybe_closed(fb_id))
                 .transpose()?;
+
+            if plane.driver_data.is_cursor {
+                if let Some(framebuffer) = framebuffer {
+                    if damage.width != 0 || damage.height != 0 {
+                        self.update_cursor(
+                            &framebuffer.buffer,
+                            new_plane_state.crtc_rect.x,
+                            new_plane_state.crtc_rect.y,
+                            new_plane_state.hotspot.unwrap().0,
+                            new_plane_state.hotspot.unwrap().1,
+                        )
+                        .await;
+                    } else {
+                        self.move_cursor(new_plane_state.crtc_rect.x, new_plane_state.crtc_rect.y)
+                            .await;
+                    }
+                } else {
+                    if plane.state.fb_id.is_some() {
+                        self.disable_cursor().await;
+                    }
+                }
+
+                plane.state = new_plane_state;
+
+                return Ok(());
+            }
+
+            let Some(crtc_id) = new_plane_state.crtc_id else {
+                return Ok(());
+            };
+            let crtc = objects.get_crtc(crtc_id).unwrap().lock().unwrap();
 
             plane.state = new_plane_state;
 
@@ -518,27 +566,6 @@ impl<'a> GraphicsAdapter for VirtGpuAdapter<'a> {
 
             Ok(())
         })
-    }
-
-    fn has_cursor_plane(&self) -> bool {
-        true
-    }
-
-    fn handle_cursor(&mut self, cursor: &CursorPlane<Self::Buffer>, dirty_fb: bool) {
-        futures::executor::block_on(async {
-            if let Some(buffer) = &cursor.buffer {
-                if dirty_fb {
-                    self.update_cursor(buffer, cursor.x, cursor.y, cursor.hot_x, cursor.hot_y)
-                        .await;
-                } else {
-                    self.move_cursor(cursor.x, cursor.y).await;
-                }
-            } else {
-                if dirty_fb {
-                    self.disable_cursor().await;
-                }
-            }
-        });
     }
 }
 
