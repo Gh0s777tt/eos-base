@@ -25,7 +25,7 @@ dependencies = [
  "log",
  "plain",
  "redox-initfs",
- "redox-path",
+ "redox-path 0.4.0",
  "redox-rt",
  "redox-scheme",
  "redox_syscall",
@@ -149,6 +149,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "436d45c2b6a5b159d43da708e62b25be3a4a3d5550d654b72216ade4c4bfd717"
 
 [[package]]
+name = "redox-path"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54ec1b67c01c63545205ea6d218b336751399f0d8974c1a635c28604bedb81bc"
+
+[[package]]
 name = "redox-rt"
 version = "0.1.0"
 source = "git+https://gitlab.redox-os.org/redox-os/relibc.git#e8d4ce4822d721d4dafaafa8c04dcbfe626622e7"
@@ -159,7 +165,7 @@ dependencies = [
  "ioslice",
  "libredox",
  "plain",
- "redox-path",
+ "redox-path 0.3.1",
  "redox_syscall",
 ]
 
