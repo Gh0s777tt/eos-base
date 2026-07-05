@@ -58,11 +58,12 @@ fn create_rdrand_seed() -> [u8; SEED_BYTES] {
     {
         fn is_cpu_feature_detected(feature: &str) -> bool {
             if let Ok(cpu) = std::fs::read_to_string("/scheme/sys/cpu") {
-                return cpu
+                let found = cpu
                     .lines()
                     .find_map(|s| s.strip_prefix("Features:"))
-                    .map(|s| s.split(" ").find(|s| s == &feature))
+                    .and_then(|s| s.split(" ").find(|s| s == &feature))
                     .is_some();
+                return found;
             }
             false
         }
