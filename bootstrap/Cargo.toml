@@ -18,7 +18,7 @@ plain = "0.2"
 redox-initfs = { path = "../initfs", default-features = false }
 redox_syscall = "0.9.0"
 redox-scheme = { version = "0.11.2", default-features = false }
-redox-path = "0.3.1"
+redox-path = "0.4.0"
 slab = { version = "0.4.9", default-features = false }
 arrayvec = { version = "0.7.6", default-features = false }
 
