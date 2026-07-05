@@ -26,6 +26,7 @@ fn main() {
 }
 
 fn daemon(daemon: daemon::Daemon) -> ! {
+    common::init();
     let dtb_data = get_dtb();
     println!("read from OS, len = {}", dtb_data.len());
     if dtb_data.len() == 0 {
