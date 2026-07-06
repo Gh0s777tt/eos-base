@@ -97,6 +97,7 @@ impl Command {
         command.args(process.args.iter().map(|arg| subst_env(arg)));
         command.env_clear();
         command.envs(&config.envs).envs(&process.envs);
+        command.current_dir(&config.cwd);
 
         let mut child = match command.spawn() {
             Ok(child) => child,
