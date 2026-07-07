@@ -7,8 +7,11 @@ use syscall::data::TimeSpec;
 
 mod controlterm;
 mod pgrp;
+mod ptflow;
+mod ptflush;
 mod ptlock;
 mod ptname;
+mod ptsendbreak;
 mod pty;
 mod resource;
 mod scheme;

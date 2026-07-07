@@ -1658,6 +1658,7 @@ name = "ptyd"
 version = "0.1.0"
 dependencies = [
  "daemon",
+ "libc",
  "libredox",
  "redox-scheme",
  "redox_event",

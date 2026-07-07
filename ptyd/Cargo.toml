@@ -12,6 +12,7 @@ scheme-utils = { path = "../scheme-utils" }
 redox_event.workspace = true
 redox_syscall.workspace = true
 redox_termios.workspace = true
+libc.workspace = true
 
 [lints]
 workspace = true

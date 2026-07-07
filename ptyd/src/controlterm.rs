@@ -6,7 +6,6 @@ use syscall::flag::{EventFlags, F_GETFL, F_SETFL, O_ACCMODE, O_NONBLOCK};
 
 use crate::pty::Pty;
 use crate::resource::Resource;
-use scheme_utils::FpathWriter;
 
 /// Read side of a pipe
 pub struct PtyControlTerm {
@@ -106,6 +105,11 @@ impl Resource for PtyControlTerm {
         let mut events = EventFlags::empty();
 
         let pty = self.pty.borrow();
+        // If pty is stopped (e.g. `tcflush(fd, TCOOFF)`), do not send the event
+        // to the terminal to write the characters to the screen.
+        if pty.stopped {
+            return EventFlags::empty();
+        }
         if pty.miso.front().is_some() {
             if !self.notified_read {
                 self.notified_read = true;
