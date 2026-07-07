@@ -12,8 +12,11 @@ use syscall::schemev2::NewFdFlags;
 
 use crate::controlterm::PtyControlTerm;
 use crate::pgrp::PtyPgrp;
+use crate::ptflow::PtFlow;
+use crate::ptflush::PtFlush;
 use crate::ptlock::PtyLock;
 use crate::ptname::PtsName;
+use crate::ptsendbreak::PtSendbreak;
 use crate::pty::Pty;
 use crate::resource::Resource;
 use crate::subterm::PtySubTerm;
@@ -130,6 +133,12 @@ impl SchemeSync for PtyScheme {
                 Box::new(PtyLock::new(old_resource.pty(), old_resource.flags()))
             } else if buf == b"ptsname" {
                 Box::new(PtsName::new(old_resource.pty(), old_resource.flags()))
+            } else if buf == b"flush" {
+                Box::new(PtFlush::new(old_resource.pty(), old_resource.flags()))
+            } else if buf == b"sendbreak" {
+                Box::new(PtSendbreak::new(old_resource.pty(), old_resource.flags()))
+            } else if buf == b"flow" {
+                Box::new(PtFlow::new(old_resource.pty(), old_resource.flags()))
             } else {
                 return Err(Error::new(EINVAL));
             }
