@@ -1,3 +1,5 @@
+//! "sendbreak" resource for the `pty' scheme.
+//! For a PTY, this simply means to sleep for a short amount of time.
 use std::cell::RefCell;
 use std::rc::Weak;
 
@@ -19,8 +21,9 @@ impl PtSendbreak {
         PtSendbreak { pty, flags }
     }
 
+    // The actual hardware break doesn't get sent here because
+    // that is a tty feature, not a pty feature.
     fn sendbreak(&mut self, _duration: c_int) -> Result<usize> {
-        // TODO: send break here
         let _ = unsafe {
             // POSIX specifies that we need to sleep for 0.25 to 0.5 seconds.
             // FreeBSD uses 0.4, and that seems reasonable.
@@ -30,8 +33,6 @@ impl PtSendbreak {
             };
             nanosleep(&tm, core::ptr::null_mut())
         };
-        // TODO: end break here
-
         Ok(4)
     }
 }

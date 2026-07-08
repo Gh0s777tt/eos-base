@@ -1,3 +1,4 @@
+//! Control/manager side of a pseudoterminal (PTY).
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 

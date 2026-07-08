@@ -1,3 +1,5 @@
+//! "flow" resource for the `pty' scheme.
+//! Allows PTY flow control -- stop or restart PTY output.
 use core::ops::DerefMut;
 use std::cell::RefCell;
 use std::rc::Weak;
