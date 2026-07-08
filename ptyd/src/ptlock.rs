@@ -1,3 +1,7 @@
+//! "ptlock" resource for the `pty' scheme.
+//! Lock and unlock the PTY.
+//! All the lock does currently is prevent terminals from being opened without first being
+//! unlocked.
 use std::cell::RefCell;
 use std::rc::Weak;
 
@@ -36,7 +40,7 @@ impl Resource for PtyLock {
         }
     }
 
-    // FIXME assuming c_int has same size as u32
+    // FIXME: assuming c_int (input) has same size as u32 (output)
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if let Some(pty_lock) = self.pty.upgrade() {
             let pty = pty_lock.borrow();

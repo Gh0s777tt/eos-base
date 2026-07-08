@@ -1,3 +1,5 @@
+//! "flush" resource for the `pty' scheme.
+//! Clear the pending output for the input, output, or both.
 use std::cell::RefCell;
 use std::rc::Weak;
 
