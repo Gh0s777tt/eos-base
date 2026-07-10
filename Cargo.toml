@@ -51,7 +51,6 @@ members = [
     "drivers/net/rtl8139d",
     "drivers/net/rtl8168d",
     "drivers/net/virtio-netd",
-    "drivers/rng/virtio-rngd",
 
     "drivers/redoxerd",
 
