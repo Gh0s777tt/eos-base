@@ -10,7 +10,7 @@ use libredox::Fd;
 use redox_scheme::Socket;
 use redox_scheme::scheme::{SchemeAsync, SchemeSync};
 
-unsafe fn get_fd(var: &str) -> RawFd {
+unsafe fn get_fd(var: &str) -> Option<RawFd> {
     let fd: RawFd = std::env::var(var)
         .unwrap_or_else(|_| {
             panic!(
@@ -21,12 +21,20 @@ unsafe fn get_fd(var: &str) -> RawFd {
         .parse()
         .unwrap();
     if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
+        // E-OS: a daemon spawned by *another* daemon (e.g. a USB class driver spawned by
+        // xhcid) rather than by init inherits the parent's INIT_NOTIFY env var but not a
+        // valid notify-pipe fd -- the parent's fd is CLOEXEC / already consumed -- so
+        // fcntl fails with EBADF. Treat that as "no readiness pipe" (skip the notification)
+        // instead of aborting the whole driver, which is why usbscsid used to crash.
+        if io::Error::last_os_error().raw_os_error() == Some(libc::EBADF) {
+            return None;
+        }
         panic!(
             "daemon: failed to set CLOEXEC flag for {var} fd: {}",
             io::Error::last_os_error()
         );
     }
-    fd
+    Some(fd)
 }
 
 unsafe fn pass_fd(cmd: &mut Command, env: &str, fd: RawFd) {
@@ -46,20 +54,23 @@ unsafe fn pass_fd(cmd: &mut Command, env: &str, fd: RawFd) {
 /// A long running background process that handles requests.
 #[must_use = "Daemon::ready must be called"]
 pub struct Daemon {
-    write_pipe: PipeWriter,
+    write_pipe: Option<PipeWriter>,
 }
 
 impl Daemon {
     /// Create a new daemon.
     pub fn new(f: impl FnOnce(Self) -> !) -> ! {
-        let write_pipe = unsafe { io::PipeWriter::from_raw_fd(get_fd("INIT_NOTIFY")) };
+        let write_pipe =
+            unsafe { get_fd("INIT_NOTIFY").map(|fd| io::PipeWriter::from_raw_fd(fd)) };
 
         f(Daemon { write_pipe })
     }
 
     /// Notify the process that the daemon is ready to accept requests.
     pub fn ready(mut self) {
-        self.write_pipe.write_all(&[0]).unwrap();
+        if let Some(pipe) = self.write_pipe.as_mut() {
+            let _ = pipe.write_all(&[0]);
+        }
     }
 
     /// Executes `Command` as a child process.
@@ -92,22 +103,27 @@ impl Daemon {
 /// A long running background process that handles requests using schemes.
 #[must_use = "SchemeDaemon::ready must be called"]
 pub struct SchemeDaemon {
-    write_pipe: PipeWriter,
+    write_pipe: Option<PipeWriter>,
 }
 
 impl SchemeDaemon {
     /// Create a new daemon for use with schemes.
     #[expect(clippy::new_ret_no_self)]
     pub fn new(f: impl FnOnce(SchemeDaemon) -> !) -> ! {
-        let write_pipe = unsafe { io::PipeWriter::from_raw_fd(get_fd("INIT_NOTIFY")) };
+        let write_pipe =
+            unsafe { get_fd("INIT_NOTIFY").map(|fd| io::PipeWriter::from_raw_fd(fd)) };
 
         f(SchemeDaemon { write_pipe })
     }
 
     /// Notify the process that the scheme daemon is ready to accept requests.
     pub fn ready_with_fd(self, cap_fd: Fd) -> syscall::Result<()> {
+        let Some(write_pipe) = self.write_pipe.as_ref() else {
+            // No init notify pipe (spawned as a subdriver) -- nothing to notify.
+            return Ok(());
+        };
         libredox::call::call_wo(
-            self.write_pipe.as_raw_fd() as usize,
+            write_pipe.as_raw_fd() as usize,
             &cap_fd.into_raw().to_ne_bytes(),
             syscall::CallFlags::FD,
             &[],
