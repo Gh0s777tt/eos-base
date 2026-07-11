@@ -118,3 +118,9 @@ unused_io_amount = "deny"
 
 [patch."https://gitlab.redox-os.org/redox-os/relibc.git"]
 #redox-ioctl = { path = "../../relibc/source/redox-ioctl" }
+
+# E-OS hardening: abort on unintended integer overflow in the release drivers/
+# daemons (they parse untrusted input -- disk, network, USB). Intentional wrapping
+# uses wrapping_*/Wrapping, so this only fires on genuine bugs.
+[profile.release]
+overflow-checks = true
