@@ -82,10 +82,10 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     // TODO: Let all of the USB drivers fork or be managed externally, and xhcid won't have to keep
     // track of all the drivers.
     let mut scsi = Scsi::new(&mut *protocol).expect("usbscsid: failed to setup SCSI");
-    println!("SCSI initialized");
-    let mut buffer = [0u8; 512];
-    scsi.read(&mut *protocol, 0, &mut buffer).unwrap();
-    println!("DISK CONTENT: {}", base64::encode(&buffer[..]));
+    println!("usbscsid: SCSI initialized");
+    // (Removed a debug read+dump of block 0 to the console -- it leaked disk contents to
+    // the serial log and panicked on a not-yet-ready device. The DiskScheme below serves
+    // reads/writes on demand.)
 
     let event_queue = event::EventQueue::new().unwrap();
 
