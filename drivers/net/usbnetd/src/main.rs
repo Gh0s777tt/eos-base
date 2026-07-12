@@ -10,6 +10,16 @@
 //! SET) runs over EP0 class requests (SEND/GET_ENCAPSULATED_*) to the Communications
 //! interface. Receive uses a background thread + queue because the xHCI transfer API is
 //! synchronous, so the NetworkScheme event loop never blocks on RX.
+//!
+//! KNOWN LIMITATION (xhcid transfer model): xhcid serves its scheme with a single-threaded
+//! `block_on` per transfer, so a blocking bulk-IN read outstanding on the RX thread stalls
+//! any concurrent bulk-OUT write (TX). A steady bidirectional flow therefore needs xhcid to
+//! grow non-blocking / event-completed transfers (return EAGAIN + post a completion fevent
+//! when the fd is O_NONBLOCK). Until then usbnetd enumerates, runs the RNDIS handshake,
+//! reads the MAC and registers its `network.*` scheme, and single half-duplex exchanges
+//! work (verified: an ARP request egressed and its reply was received and unwrapped), but a
+//! continuous DHCP/ping flow deadlocks against that serialization. Tracked in
+//! docs/roadmap-connectivity.md.
 
 use std::collections::VecDeque;
 use std::env;
@@ -75,37 +85,19 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         .get_standard_descs()
         .expect("usbnetd: get_standard_descs");
 
-    // --- DESC DUMP (diagnostic): ground-truth of what the device presents so we pick the
-    // right config/interface/endpoints. Remove once selection is confirmed.
-    for c in &desc.config_descs {
-        println!("usbnetd: DUMP config cfgval={} ifaces={}", c.configuration_value, c.interface_descs.len());
-        for i in &c.interface_descs {
-            println!(
-                "usbnetd: DUMP   if num={} alt={} class={:#x} sub={:#x} proto={:#x} neps={}",
-                i.number, i.alternate_setting, i.class, i.sub_class, i.protocol, i.endpoints.len()
-            );
-            for e in &i.endpoints {
-                println!(
-                    "usbnetd: DUMP     ep addr={:#04x} attr={:#04x} bulk={} intr={} dir={:?}",
-                    e.address, e.attributes, e.is_bulk(), e.is_interrupt(), e.direction()
-                );
-            }
-        }
-    }
-
-    // Find the configuration + the CDC-Data interface (class 0x0A) that carries the two
-    // bulk endpoints, and the Communications control interface (class 0x02) for RNDIS.
-    // The xHCI subdriver numbers endpoints by their 1-based position within the
-    // interface's endpoint list (not the raw bEndpointAddress) — same convention usbscsid
-    // uses. The CDC-Data interface has exactly the two bulk endpoints.
+    // Pick the configuration + the CDC-Data interface (class 0x0A) that carries the two bulk
+    // endpoints, plus the Communications control interface (class 0x02) for the RNDIS channel.
+    //
+    // IMPORTANT — endpoint numbering: xhcid's `endpoints/<n>` handle numbers endpoints by a
+    // 1-based counter that runs across EVERY interface of the chosen config, in descriptor
+    // order (see xhcid `get_endp_desc`), NOT the position within a single interface. RNDIS
+    // places a Communications control interface (1 interrupt endpoint) *before* the CDC-Data
+    // interface, so the data interface's bulk IN/OUT land at global indices 2/3, not 1/2. We
+    // therefore mirror that exact global walk here. (usbscsid gets away with position+1 only
+    // because its mass-storage interface is the first interface, where the two coincide.)
     let mut chosen: Option<(u8, u8, u8, u8)> = None; // (config_value, data_if_num, alt, ctrl_if_num)
     let mut bulk_in_num = 0u8;
     let mut bulk_out_num = 0u8;
-    // xhcid's `endpoints/<n>` numbers endpoints by a 1-based counter that runs across
-    // EVERY interface of the chosen config (see `get_endp_desc`), NOT the position within
-    // a single interface. RNDIS has a Communications control interface (1 interrupt EP)
-    // *before* the CDC-Data interface, so the data interface's bulk IN/OUT land at global
-    // indices 2/3, not 1/2. We therefore mirror that exact global walk here.
     for config in &desc.config_descs {
         let ctrl_if = config
             .interface_descs
@@ -173,45 +165,18 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     );
     rndis_set_filter(&handle, ctrl, RNDIS_PACKET_FILTER).expect("usbnetd: RNDIS SET filter failed");
 
-    let mut bulk_in = handle
+    let bulk_in = handle
         .open_endpoint(bulk_in_num)
         .expect("usbnetd: open bulk in");
-    let mut bulk_out = handle
+    let bulk_out = handle
         .open_endpoint(bulk_out_num)
         .expect("usbnetd: open bulk out");
 
-    // --- SELFTEST (diagnostic): SYNCHRONOUS TX on the main thread BEFORE the background RX
-    // thread exists. Isolates whether concurrent transfers on different endpoints of the same
-    // device deadlock (a blocked RX read holding a per-device lock would stall TX). If this
-    // logs "tx ok" and the pcap shows the ARP request+reply, TX works and the RX must be made
-    // non-blocking-relative-to-TX. Remove once RX is confirmed.
-    {
-        let mut arp = Vec::with_capacity(42);
-        arp.extend_from_slice(&[0xff; 6]);
-        arp.extend_from_slice(&mac);
-        arp.extend_from_slice(&[0x08, 0x06, 0x00, 0x01, 0x08, 0x00, 6, 4, 0x00, 0x01]);
-        arp.extend_from_slice(&mac);
-        arp.extend_from_slice(&[10, 0, 2, 15]);
-        arp.extend_from_slice(&[0x00; 6]);
-        arp.extend_from_slice(&[10, 0, 2, 2]);
-        let mut msg = Vec::with_capacity(RNDIS_HDR_LEN + arp.len());
-        push32(&mut msg, RNDIS_PACKET_MSG);
-        push32(&mut msg, (RNDIS_HDR_LEN + arp.len()) as u32);
-        push32(&mut msg, 36);
-        push32(&mut msg, arp.len() as u32);
-        msg.extend_from_slice(&[0u8; 28]);
-        msg.extend_from_slice(&arp);
-        println!("usbnetd: SELFTEST sync TX ARP ({} eth bytes, {} rndis)", arp.len(), msg.len());
-        match bulk_out.transfer_write(&msg) {
-            Ok(st) => println!("usbnetd: SELFTEST sync TX ok {st:?}"),
-            Err(e) => println!("usbnetd: SELFTEST sync TX ERR {e:?}"),
-        }
-    }
-
-    // Background RX: block on bulk-in, unwrap RNDIS, queue the Ethernet frame, then poke
-    // a notify pipe so the (otherwise scheme-driven) event loop wakes and delivers a READ
+    // Background RX: block on bulk-in, unwrap RNDIS, queue the Ethernet frame, then poke a
+    // notify pipe so the (otherwise scheme-driven) event loop wakes and delivers a READ
     // fevent to the netstack — without this, asynchronously-received frames (e.g. DHCP
-    // OFFER/ACK) would sit in the queue until the next unrelated scheme op.
+    // OFFER/ACK) would sit in the queue until the next unrelated scheme op. (See the module
+    // note on the xhcid serialization limit that bounds continuous bidirectional flow.)
     let rx_queue: Arc<Mutex<VecDeque<Vec<u8>>>> = Arc::new(Mutex::new(VecDeque::new()));
     let (mut rx_notify_r, rx_notify_w) = std::io::pipe().expect("usbnetd: rx notify pipe");
     {
@@ -219,33 +184,15 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         let mut rx_notify_w = rx_notify_w;
         let mut bulk_in = bulk_in;
         thread::spawn(move || {
-            println!("usbnetd: RX thread started");
             let mut buf = vec![0u8; 2048];
-            let mut rx_count: u32 = 0;
-            let mut attempts: u32 = 0;
             loop {
-                let r = bulk_in.transfer_read(&mut buf);
-                if attempts < 8 {
-                    match &r {
-                        Ok(s) => println!(
-                            "usbnetd: RX read#{attempts} Ok status={:?} first4={:02x}{:02x}{:02x}{:02x}",
-                            s, buf[0], buf[1], buf[2], buf[3]
-                        ),
-                        Err(e) => println!("usbnetd: RX read#{attempts} Err={e:?}"),
-                    }
-                    attempts += 1;
-                }
-                match r {
+                match bulk_in.transfer_read(&mut buf) {
                     Ok(_) => {
                         if buf.len() >= 16 && le32(&buf[0..4]) == RNDIS_PACKET_MSG {
                             let data_off = le32(&buf[8..12]) as usize + 8;
                             let data_len = le32(&buf[12..16]) as usize;
                             if data_len > 0 && data_off + data_len <= buf.len() {
                                 let frame = buf[data_off..data_off + data_len].to_vec();
-                                if rx_count < 4 {
-                                    println!("usbnetd: RX frame #{rx_count} ({data_len} bytes)");
-                                    rx_count += 1;
-                                }
                                 if let Ok(mut q) = rx_queue.lock() {
                                     q.push_back(frame);
                                 }
@@ -266,7 +213,6 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         mac,
         bulk_out,
         rx_queue,
-        tx_count: 0,
     };
 
     let name = format!("usb-{scheme}+{port}");
@@ -385,7 +331,6 @@ struct UsbNet {
     mac: [u8; 6],
     bulk_out: XhciEndpHandle,
     rx_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
-    tx_count: u32,
 }
 
 impl NetworkAdapter for UsbNet {
@@ -417,21 +362,9 @@ impl NetworkAdapter for UsbNet {
         push32(&mut msg, buf.len() as u32); // DataLength
         msg.extend_from_slice(&[0u8; 28]); // OOB/PerPacket/Reserved fields
         msg.extend_from_slice(buf);
-        let res = self.bulk_out.transfer_write(&msg);
-        if self.tx_count < 4 {
-            match &res {
-                Ok(st) => println!(
-                    "usbnetd: TX frame #{} ({} bytes) -> ok {st:?}",
-                    self.tx_count, buf.len()
-                ),
-                Err(e) => println!(
-                    "usbnetd: TX frame #{} ({} bytes) -> ERR {e:?}",
-                    self.tx_count, buf.len()
-                ),
-            }
-            self.tx_count += 1;
-        }
-        res.map_err(|_| Error::new(EIO))?;
+        self.bulk_out
+            .transfer_write(&msg)
+            .map_err(|_| Error::new(EIO))?;
         Ok(buf.len())
     }
 }
