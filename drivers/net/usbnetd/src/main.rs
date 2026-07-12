@@ -216,12 +216,33 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         });
     }
 
-    let adapter = UsbNet {
+    let mut adapter = UsbNet {
         mac,
         bulk_out,
         rx_queue,
         tx_count: 0,
     };
+
+    // --- SELFTEST (diagnostic): emit one broadcast ARP request for the slirp gateway
+    // (10.0.2.2). QEMU user-net answers ARP, so a working TX->RX path makes the RX thread
+    // log the reply. Deterministically exercises both bulk endpoints without depending on
+    // netstack/dhcpd/an interactive login. Remove once RX is confirmed.
+    {
+        let mut arp = Vec::with_capacity(42);
+        arp.extend_from_slice(&[0xff; 6]); // dst broadcast
+        arp.extend_from_slice(&mac); // src our MAC
+        arp.extend_from_slice(&[0x08, 0x06]); // ethertype ARP
+        arp.extend_from_slice(&[0x00, 0x01, 0x08, 0x00, 6, 4, 0x00, 0x01]); // htype/ptype/hlen/plen/oper=req
+        arp.extend_from_slice(&mac); // sender HW
+        arp.extend_from_slice(&[10, 0, 2, 15]); // sender IP 10.0.2.15
+        arp.extend_from_slice(&[0x00; 6]); // target HW unknown
+        arp.extend_from_slice(&[10, 0, 2, 2]); // target IP = gateway
+        println!("usbnetd: SELFTEST ARP request -> 10.0.2.2 ({} bytes)", arp.len());
+        match adapter.write_packet(&arp) {
+            Ok(n) => println!("usbnetd: SELFTEST write ok ({n})"),
+            Err(e) => println!("usbnetd: SELFTEST write ERR {e:?}"),
+        }
+    }
 
     let name = format!("usb-{scheme}+{port}");
     let mut scheme_obj = NetworkScheme::new(move || adapter, daemon, format!("network.{name}"));
