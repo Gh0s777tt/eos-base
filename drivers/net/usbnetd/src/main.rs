@@ -83,32 +83,51 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let mut chosen: Option<(u8, u8, u8, u8)> = None; // (config_value, data_if_num, alt, ctrl_if_num)
     let mut bulk_in_num = 0u8;
     let mut bulk_out_num = 0u8;
+    // xhcid's `endpoints/<n>` numbers endpoints by a 1-based counter that runs across
+    // EVERY interface of the chosen config (see `get_endp_desc`), NOT the position within
+    // a single interface. RNDIS has a Communications control interface (1 interrupt EP)
+    // *before* the CDC-Data interface, so the data interface's bulk IN/OUT land at global
+    // indices 2/3, not 1/2. We therefore mirror that exact global walk here.
     for config in &desc.config_descs {
         let ctrl_if = config
             .interface_descs
             .iter()
             .find(|i| i.class == 0x02)
             .map(|i| i.number);
-        if let Some(ifd) = config.interface_descs.iter().find(|i| i.class == 0x0A) {
-            let bin = ifd
-                .endpoints
-                .iter()
-                .position(|e| e.is_bulk() && e.direction() == EndpDirection::In);
-            let bout = ifd
-                .endpoints
-                .iter()
-                .position(|e| e.is_bulk() && e.direction() == EndpDirection::Out);
-            if let (Some(bin), Some(bout)) = (bin, bout) {
-                bulk_in_num = (bin + 1) as u8;
-                bulk_out_num = (bout + 1) as u8;
-                chosen = Some((
-                    config.configuration_value,
-                    ifd.number,
-                    ifd.alternate_setting,
-                    ctrl_if.unwrap_or(ifd.number.saturating_sub(1)),
-                ));
-                break;
+        let mut global = 0u8;
+        let mut found_in = 0u8;
+        let mut found_out = 0u8;
+        let mut data_num_alt: Option<(u8, u8)> = None;
+        for ifd in &config.interface_descs {
+            for ep in &ifd.endpoints {
+                global += 1;
+                if ifd.class == 0x0A && ep.is_bulk() {
+                    match ep.direction() {
+                        EndpDirection::In if found_in == 0 => {
+                            found_in = global;
+                            data_num_alt.get_or_insert((ifd.number, ifd.alternate_setting));
+                        }
+                        EndpDirection::Out if found_out == 0 => {
+                            found_out = global;
+                            data_num_alt.get_or_insert((ifd.number, ifd.alternate_setting));
+                        }
+                        _ => {}
+                    }
+                }
             }
+        }
+        if let (Some((num, alt_s)), true, true) =
+            (data_num_alt, found_in != 0, found_out != 0)
+        {
+            bulk_in_num = found_in;
+            bulk_out_num = found_out;
+            chosen = Some((
+                config.configuration_value,
+                num,
+                alt_s,
+                ctrl_if.unwrap_or(num.saturating_sub(1)),
+            ));
+            break;
         }
     }
     let (config_value, data_if_num, alt, ctrl_if) =
@@ -345,10 +364,6 @@ impl NetworkAdapter for UsbNet {
     }
 
     fn write_packet(&mut self, buf: &[u8]) -> Result<usize> {
-        if self.tx_count < 4 {
-            println!("usbnetd: TX frame #{} ({} bytes)", self.tx_count, buf.len());
-            self.tx_count += 1;
-        }
         let mut msg = Vec::with_capacity(RNDIS_HDR_LEN + buf.len());
         push32(&mut msg, RNDIS_PACKET_MSG);
         push32(&mut msg, (RNDIS_HDR_LEN + buf.len()) as u32); // MessageLength
@@ -356,9 +371,21 @@ impl NetworkAdapter for UsbNet {
         push32(&mut msg, buf.len() as u32); // DataLength
         msg.extend_from_slice(&[0u8; 28]); // OOB/PerPacket/Reserved fields
         msg.extend_from_slice(buf);
-        self.bulk_out
-            .transfer_write(&msg)
-            .map_err(|_| Error::new(EIO))?;
+        let res = self.bulk_out.transfer_write(&msg);
+        if self.tx_count < 4 {
+            match &res {
+                Ok(st) => println!(
+                    "usbnetd: TX frame #{} ({} bytes) -> ok {st:?}",
+                    self.tx_count, buf.len()
+                ),
+                Err(e) => println!(
+                    "usbnetd: TX frame #{} ({} bytes) -> ERR {e:?}",
+                    self.tx_count, buf.len()
+                ),
+            }
+            self.tx_count += 1;
+        }
+        res.map_err(|_| Error::new(EIO))?;
         Ok(buf.len())
     }
 }
