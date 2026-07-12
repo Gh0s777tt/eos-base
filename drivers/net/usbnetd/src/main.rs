@@ -8,18 +8,15 @@
 //! Endpoint model: the CDC-Data interface's two BULK endpoints carry Ethernet frames
 //! wrapped in RNDIS_PACKET_MSG headers; the RNDIS control channel (INITIALIZE / QUERY /
 //! SET) runs over EP0 class requests (SEND/GET_ENCAPSULATED_*) to the Communications
-//! interface. Receive uses a background thread + queue because the xHCI transfer API is
-//! synchronous, so the NetworkScheme event loop never blocks on RX.
+//! interface.
 //!
-//! KNOWN LIMITATION (xhcid transfer model): xhcid serves its scheme with a single-threaded
-//! `block_on` per transfer, so a blocking bulk-IN read outstanding on the RX thread stalls
-//! any concurrent bulk-OUT write (TX). A steady bidirectional flow therefore needs xhcid to
-//! grow non-blocking / event-completed transfers (return EAGAIN + post a completion fevent
-//! when the fd is O_NONBLOCK). Until then usbnetd enumerates, runs the RNDIS handshake,
-//! reads the MAC and registers its `network.*` scheme, and single half-duplex exchanges
-//! work (verified: an ARP request egressed and its reply was received and unwrapped), but a
-//! continuous DHCP/ping flow deadlocks against that serialization. Tracked in
-//! docs/roadmap-connectivity.md.
+//! Full-duplex without deadlock: the bulk-IN (RX) endpoint is opened `O_NONBLOCK` and driven
+//! with `arm_read` / `poll_read` (a background thread + queue), so a receive in flight never
+//! blocks xhcid's single-threaded scheme loop — which is what would otherwise stall a
+//! concurrent bulk-OUT write (TX) or another USB device on the controller. TX stays blocking
+//! (a write completes as soon as the device accepts it). Verified end-to-end under QEMU
+//! `usb-net`: a full DHCP handshake (DISCOVER/OFFER/REQUEST/ACK) flows both ways and the
+//! netstack takes its lease, concurrently with a `usb-storage` device on the same xHCI.
 
 use std::collections::VecDeque;
 use std::env;
@@ -172,7 +169,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let bulk_in = handle
         .open_endpoint_nonblock(bulk_in_num)
         .expect("usbnetd: open bulk in");
-    let mut bulk_out = handle
+    let bulk_out = handle
         .open_endpoint(bulk_out_num)
         .expect("usbnetd: open bulk out");
 
@@ -188,7 +185,6 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         let mut bulk_in = bulk_in;
         thread::spawn(move || {
             let mut buf = vec![0u8; 2048];
-            let mut rx_count: u32 = 0;
             loop {
                 if bulk_in.arm_read(buf.len() as u32).is_err() {
                     thread::sleep(std::time::Duration::from_millis(5));
@@ -211,10 +207,6 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                     let data_len = le32(&buf[12..16]) as usize;
                     if data_len > 0 && data_off + data_len <= buf.len() {
                         let frame = buf[data_off..data_off + data_len].to_vec();
-                        if rx_count < 4 {
-                            println!("usbnetd: RX frame #{rx_count} ({data_len} bytes)");
-                            rx_count += 1;
-                        }
                         if let Ok(mut q) = rx_queue.lock() {
                             q.push_back(frame);
                         }
@@ -223,28 +215,6 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                 }
             }
         });
-    }
-
-    {
-        let mut arp = Vec::with_capacity(42);
-        arp.extend_from_slice(&[0xff; 6]);
-        arp.extend_from_slice(&mac);
-        arp.extend_from_slice(&[0x08, 0x06, 0x00, 0x01, 0x08, 0x00, 6, 4, 0x00, 0x01]);
-        arp.extend_from_slice(&mac);
-        arp.extend_from_slice(&[10, 0, 2, 15]);
-        arp.extend_from_slice(&[0x00; 6]);
-        arp.extend_from_slice(&[10, 0, 2, 2]);
-        let mut msg = Vec::with_capacity(RNDIS_HDR_LEN + arp.len());
-        push32(&mut msg, RNDIS_PACKET_MSG);
-        push32(&mut msg, (RNDIS_HDR_LEN + arp.len()) as u32);
-        push32(&mut msg, 36);
-        push32(&mut msg, arp.len() as u32);
-        msg.extend_from_slice(&[0u8; 28]);
-        msg.extend_from_slice(&arp);
-        match bulk_out.transfer_write(&msg) {
-            Ok(st) => println!("usbnetd: SELFTEST TX ARP ok {st:?}"),
-            Err(e) => println!("usbnetd: SELFTEST TX ARP ERR {e:?}"),
-        }
     }
 
     let adapter = UsbNet {
