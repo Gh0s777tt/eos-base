@@ -94,7 +94,8 @@ fn scan_disk_paths() -> Vec<String> {
         return out;
     };
     for scheme in schemes.flatten() {
-        let name = scheme.file_name().to_string_lossy().to_string();
+        let raw_name = scheme.file_name().to_string_lossy().to_string();
+        let name = raw_name.trim();
         if !name.starts_with("disk.") || name == "disk.raid1" || name == "disk.live" {
             continue;
         }
@@ -277,7 +278,10 @@ fn cmd_status() {
         }
     }
     if !found {
-        println!("raid1d: no RAID members found");
+        println!("raid1d: no RAID members found; scanned:");
+        for path in scan_disk_paths() {
+            println!("  {}", path);
+        }
     }
 }
 
