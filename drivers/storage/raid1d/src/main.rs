@@ -76,7 +76,8 @@ fn read_superblock(file: &File) -> Option<(Superblock, u64)> {
         return None;
     }
     let off = sb_offset(size);
-    let mut buf = [0u8; 64];
+    // disk schemes only accept block-multiple I/O, so read the whole 4 KiB
+    let mut buf = vec![0u8; SB_SIZE as usize];
     file.read_exact_at(&mut buf, off).ok()?;
     Superblock::from_bytes(&buf).map(|sb| (sb, size))
 }
