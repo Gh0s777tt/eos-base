@@ -188,6 +188,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         mac,
         bulk_out,
         rx_queue,
+        tx_count: 0,
     };
 
     let name = format!("usb-{scheme}+{port}");
@@ -306,6 +307,7 @@ struct UsbNet {
     mac: [u8; 6],
     bulk_out: XhciEndpHandle,
     rx_queue: Arc<Mutex<VecDeque<Vec<u8>>>>,
+    tx_count: u32,
 }
 
 impl NetworkAdapter for UsbNet {
@@ -330,6 +332,10 @@ impl NetworkAdapter for UsbNet {
     }
 
     fn write_packet(&mut self, buf: &[u8]) -> Result<usize> {
+        if self.tx_count < 4 {
+            println!("usbnetd: TX frame #{} ({} bytes)", self.tx_count, buf.len());
+            self.tx_count += 1;
+        }
         let mut msg = Vec::with_capacity(RNDIS_HDR_LEN + buf.len());
         push32(&mut msg, RNDIS_PACKET_MSG);
         push32(&mut msg, (RNDIS_HDR_LEN + buf.len()) as u32); // MessageLength
