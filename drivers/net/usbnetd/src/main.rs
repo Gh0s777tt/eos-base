@@ -75,6 +75,24 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         .get_standard_descs()
         .expect("usbnetd: get_standard_descs");
 
+    // --- DESC DUMP (diagnostic): ground-truth of what the device presents so we pick the
+    // right config/interface/endpoints. Remove once selection is confirmed.
+    for c in &desc.config_descs {
+        println!("usbnetd: DUMP config cfgval={} ifaces={}", c.configuration_value, c.interface_descs.len());
+        for i in &c.interface_descs {
+            println!(
+                "usbnetd: DUMP   if num={} alt={} class={:#x} sub={:#x} proto={:#x} neps={}",
+                i.number, i.alternate_setting, i.class, i.sub_class, i.protocol, i.endpoints.len()
+            );
+            for e in &i.endpoints {
+                println!(
+                    "usbnetd: DUMP     ep addr={:#04x} attr={:#04x} bulk={} intr={} dir={:?}",
+                    e.address, e.attributes, e.is_bulk(), e.is_interrupt(), e.direction()
+                );
+            }
+        }
+    }
+
     // Find the configuration + the CDC-Data interface (class 0x0A) that carries the two
     // bulk endpoints, and the Communications control interface (class 0x02) for RNDIS.
     // The xHCI subdriver numbers endpoints by their 1-based position within the
