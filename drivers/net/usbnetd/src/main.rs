@@ -13,6 +13,8 @@
 
 use std::collections::VecDeque;
 use std::env;
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -141,13 +143,19 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         .open_endpoint(bulk_out_num)
         .expect("usbnetd: open bulk out");
 
-    // Background RX: block on bulk-in, unwrap RNDIS, queue the Ethernet frame.
+    // Background RX: block on bulk-in, unwrap RNDIS, queue the Ethernet frame, then poke
+    // a notify pipe so the (otherwise scheme-driven) event loop wakes and delivers a READ
+    // fevent to the netstack — without this, asynchronously-received frames (e.g. DHCP
+    // OFFER/ACK) would sit in the queue until the next unrelated scheme op.
     let rx_queue: Arc<Mutex<VecDeque<Vec<u8>>>> = Arc::new(Mutex::new(VecDeque::new()));
+    let (mut rx_notify_r, rx_notify_w) = std::io::pipe().expect("usbnetd: rx notify pipe");
     {
         let rx_queue = Arc::clone(&rx_queue);
+        let mut rx_notify_w = rx_notify_w;
         let mut bulk_in = bulk_in;
         thread::spawn(move || {
             let mut buf = vec![0u8; 2048];
+            let mut rx_count: u32 = 0;
             loop {
                 match bulk_in.transfer_read(&mut buf) {
                     Ok(_) => {
@@ -156,9 +164,14 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                             let data_len = le32(&buf[12..16]) as usize;
                             if data_len > 0 && data_off + data_len <= buf.len() {
                                 let frame = buf[data_off..data_off + data_len].to_vec();
+                                if rx_count < 4 {
+                                    println!("usbnetd: RX frame #{rx_count} ({data_len} bytes)");
+                                    rx_count += 1;
+                                }
                                 if let Ok(mut q) = rx_queue.lock() {
                                     q.push_back(frame);
                                 }
+                                let _ = rx_notify_w.write(&[0u8]);
                             }
                         }
                     }
@@ -180,15 +193,23 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let name = format!("usb-{scheme}+{port}");
     let mut scheme_obj = NetworkScheme::new(move || adapter, daemon, format!("network.{name}"));
 
-    user_data! { enum Src { Scheme } }
+    user_data! { enum Src { Scheme, Rx } }
     let event_queue = EventQueue::<Src>::new().expect("usbnetd: event queue");
     event_queue
         .subscribe(scheme_obj.event_handle().raw(), Src::Scheme, event::EventFlags::READ)
         .expect("usbnetd: subscribe scheme");
+    event_queue
+        .subscribe(rx_notify_r.as_raw_fd() as usize, Src::Rx, event::EventFlags::READ)
+        .expect("usbnetd: subscribe rx");
     scheme_obj.tick().unwrap();
     for event in event_queue.map(|e| e.expect("usbnetd: event")) {
         match event.user_data {
             Src::Scheme => scheme_obj.tick().expect("usbnetd: scheme tick"),
+            Src::Rx => {
+                let mut drain = [0u8; 64];
+                let _ = rx_notify_r.read(&mut drain);
+                scheme_obj.tick().expect("usbnetd: rx tick");
+            }
         }
     }
     std::process::exit(0);
