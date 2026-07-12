@@ -154,10 +154,23 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         let mut rx_notify_w = rx_notify_w;
         let mut bulk_in = bulk_in;
         thread::spawn(move || {
+            println!("usbnetd: RX thread started");
             let mut buf = vec![0u8; 2048];
             let mut rx_count: u32 = 0;
+            let mut attempts: u32 = 0;
             loop {
-                match bulk_in.transfer_read(&mut buf) {
+                let r = bulk_in.transfer_read(&mut buf);
+                if attempts < 8 {
+                    match &r {
+                        Ok(s) => println!(
+                            "usbnetd: RX read#{attempts} Ok status={:?} first4={:02x}{:02x}{:02x}{:02x}",
+                            s, buf[0], buf[1], buf[2], buf[3]
+                        ),
+                        Err(e) => println!("usbnetd: RX read#{attempts} Err={e:?}"),
+                    }
+                    attempts += 1;
+                }
+                match r {
                     Ok(_) => {
                         if buf.len() >= 16 && le32(&buf[0..4]) == RNDIS_PACKET_MSG {
                             let data_off = le32(&buf[8..12]) as usize + 8;
