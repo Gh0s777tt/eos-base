@@ -1,0 +1,19 @@
+[package]
+name = "usbnetd"
+description = "USB CDC/RNDIS network driver"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+libredox.workspace = true
+driver-network = { path = "../driver-network" }
+daemon = { path = "../../../daemon" }
+redox_event.workspace = true
+redox_syscall = { workspace = true, features = ["std"] }
+log.workspace = true
+common = { path = "../../common" }
+xhcid = { path = "../../usb/xhcid" }
+
+[lints]
+workspace = true

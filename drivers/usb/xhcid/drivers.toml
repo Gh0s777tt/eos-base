@@ -27,3 +27,9 @@ ids = { 0x045e = [
     0x028e # Xbox 360 controller
 ] }
 command = ["usbhidd", "$SCHEME", "$PORT", "$IF_NUM", "xbox-360"]
+
+[[drivers]]
+name = "USB RNDIS/CDC network"
+class = 10 # CDC-Data class (bulk endpoints carry RNDIS-wrapped Ethernet)
+subclass = -1
+command = ["usbnetd", "$SCHEME", "$PORT", "$IF_NUM"]
