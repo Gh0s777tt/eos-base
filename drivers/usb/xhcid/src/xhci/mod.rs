@@ -292,6 +292,10 @@ pub struct Xhci<const N: usize> {
     cmd: Mutex<Ring>,
     primary_event_ring: Mutex<EventRing>,
 
+    /// Armed-but-incomplete non-blocking endpoint IN transfers (the `O_NONBLOCK` read path),
+    /// keyed by (port, endpoint). Off the per-port lock so a poll never contends with an arm.
+    pending_reads: Mutex<std::collections::HashMap<(PortId, EndpNum), PendingRead>>,
+
     // immutable
     dev_ctx: DeviceContextList<N>,
     scratchpad_buf_arr: Option<ScratchpadBufferArray>,
@@ -358,6 +362,41 @@ impl<const N: usize> PortState<N> {
 pub(crate) enum RingOrStreams {
     Ring(Ring),
     Streams(StreamContextArray),
+}
+
+/// A waker that just records that it was woken, so the non-blocking transfer path can cheaply
+/// check completion (`is_ready`) and only re-poll — and thus only re-register with the IRQ
+/// reactor — once the reactor has actually delivered the transfer event.
+pub(crate) struct FlagWaker {
+    ready: std::sync::atomic::AtomicBool,
+}
+impl FlagWaker {
+    pub(crate) fn new() -> Self {
+        Self {
+            ready: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+    pub(crate) fn is_ready(&self) -> bool {
+        self.ready.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+impl std::task::Wake for FlagWaker {
+    fn wake(self: Arc<Self>) {
+        self.ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// An armed-but-not-yet-complete non-blocking endpoint IN transfer (the `O_NONBLOCK` read path).
+/// Holds the `\'static` completion future (already ticking in the IRQ reactor), the DMA buffer it
+/// will fill (kept alive until completion), and the flag its waker sets on completion.
+pub(crate) struct PendingRead {
+    pub(crate) fut:
+        core::pin::Pin<Box<dyn core::future::Future<Output = irq_reactor::NextEventTrb> + Send>>,
+    pub(crate) dma: Dma<[u8]>,
+    pub(crate) flag: Arc<FlagWaker>,
 }
 
 pub(crate) struct EndpointState {
@@ -498,6 +537,7 @@ impl<const N: usize> Xhci<N> {
 
             cmd: Mutex::new(cmd),
             primary_event_ring: Mutex::new(EventRing::new::<N>(cap.ac64())?),
+            pending_reads: Mutex::new(std::collections::HashMap::new()),
             drivers_config,
             handles: CHashMap::new(),
             next_handle: AtomicUsize::new(0),

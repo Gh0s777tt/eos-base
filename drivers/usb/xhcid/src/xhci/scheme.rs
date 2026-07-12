@@ -34,9 +34,11 @@ use redox_scheme::{CallerCtx, OpenResult};
 use syscall::schemev2::NewFdFlags;
 use syscall::{
     Error, Result, Stat, EACCES, EBADF, EBADFD, EBADMSG, EINVAL, EIO, EISDIR, ENOENT, ENOSYS,
-    ENOTDIR, EOPNOTSUPP, EPROTO, ESPIPE, MODE_CHR, MODE_DIR, MODE_FILE, O_DIRECTORY, O_RDWR,
+    ENOTDIR, EOPNOTSUPP, EPROTO, ESPIPE, EWOULDBLOCK, MODE_CHR, MODE_DIR, MODE_FILE, O_DIRECTORY, O_RDWR,
     O_STAT, O_WRONLY, SEEK_CUR, SEEK_END, SEEK_SET,
 };
+
+use core::future::Future as _;
 
 use super::{port, usb};
 use super::{EndpNum, EndpointState, PortId, Xhci};
@@ -686,14 +688,16 @@ impl<const N: usize> Xhci<N> {
     /// TRB (it could be a NO-OP in the worst case).
     /// The function is also required to set the Interrupt on Completion flag, or this function
     /// will never complete.
-    pub async fn execute_transfer<D>(
+    /// Arms a transfer: builds the TRB(s) via `d` and rings the doorbell, then returns the
+    /// (already-`'static`) completion future WITHOUT awaiting it. Callers either await it (the
+    /// blocking `execute_transfer` path) or store and poll it (the non-blocking read path).
+    fn execute_transfer_arm<D>(
         &self,
         port_num: PortId,
         endp_num: EndpNum,
         stream_id: u16,
-        name: &str,
         mut d: D,
-    ) -> Result<Trb>
+    ) -> Result<impl core::future::Future<Output = super::irq_reactor::NextEventTrb> + Send + Sync + 'static>
     where
         D: FnMut(&mut Trb, bool) -> ControlFlow,
     {
@@ -767,8 +771,11 @@ impl<const N: usize> Xhci<N> {
         };
 
         drop(port_state);
+        Ok(future)
+    }
 
-        let trbs = future.await;
+    /// Validates a completed transfer event TRB. Shared by the blocking and non-blocking paths.
+    fn finish_transfer_event(trbs: super::irq_reactor::NextEventTrb) -> Result<Trb> {
         let event_trb = trbs.event_trb;
         let transfer_trb = trbs.src_trb.ok_or(Error::new(EIO))?;
 
@@ -786,6 +793,21 @@ impl<const N: usize> Xhci<N> {
         trace!("EVENT DATA: {:?}", event_trb.event_data());
 
         Ok(event_trb)
+    }
+
+    pub async fn execute_transfer<D>(
+        &self,
+        port_num: PortId,
+        endp_num: EndpNum,
+        stream_id: u16,
+        _name: &str,
+        d: D,
+    ) -> Result<Trb>
+    where
+        D: FnMut(&mut Trb, bool) -> ControlFlow,
+    {
+        let future = self.execute_transfer_arm(port_num, endp_num, stream_id, d)?;
+        Self::finish_transfer_event(future.await)
     }
     async fn device_req_no_data(&self, port: PortId, req: usb::Setup) -> Result<()> {
         trace!("DEVICE_REQ_NO_DATA port {}, req: {:?}", port, req);
@@ -1298,13 +1320,19 @@ impl<const N: usize> Xhci<N> {
         (u32::from(db_task_id) << 16) | u32::from(db_target)
     }
     // TODO: Rename DeviceReqData to something more general.
-    async fn transfer(
+    /// Arms a custom (bulk/interrupt) transfer and returns the (already-`'static`) completion
+    /// future plus the DMA buffer (which the caller must keep alive until completion). The
+    /// blocking `transfer` awaits it; the non-blocking read path stores and polls it.
+    fn transfer_arm(
         &self,
         port_num: PortId,
         endp_num: EndpNum,
         dma_buf: Option<Dma<[u8]>>,
         direction: PortReqDirection,
-    ) -> Result<(u8, u32, Option<Dma<[u8]>>)> {
+    ) -> Result<(
+        impl core::future::Future<Output = super::irq_reactor::NextEventTrb> + Send + Sync + 'static,
+        Option<Dma<[u8]>>,
+    )> {
         let mut port_state = self
             .port_states
             .get_mut(&port_num)
@@ -1366,48 +1394,57 @@ impl<const N: usize> Xhci<N> {
 
         drop(port_state);
 
-        let event = self
-            .execute_transfer(
-                port_num,
-                endp_num,
-                stream_id,
-                "CUSTOM_TRANSFER",
-                |trb, cycle| {
-                    let len = cmp::min(bytes_left, max_transfer_size as usize) as u32;
+        let future = self.execute_transfer_arm(
+            port_num,
+            endp_num,
+            stream_id,
+            move |trb, cycle| {
+                let len = cmp::min(bytes_left, max_transfer_size as usize) as u32;
 
-                    // set the interrupt on completion (IOC) flag for the last trb.
-                    let ioc = bytes_left <= max_transfer_size as usize;
-                    let chain = !ioc;
+                // set the interrupt on completion (IOC) flag for the last trb.
+                let ioc = bytes_left <= max_transfer_size as usize;
+                let chain = !ioc;
 
-                    let interrupter = 0;
-                    let ent = false;
-                    let isp = true;
-                    let bei = false;
-                    trb.normal(
-                        buffer,
-                        len,
-                        cycle,
-                        estimated_td_size,
-                        interrupter,
-                        ent,
-                        isp,
-                        chain,
-                        ioc,
-                        idt,
-                        bei,
-                    );
+                let interrupter = 0;
+                let ent = false;
+                let isp = true;
+                let bei = false;
+                trb.normal(
+                    buffer,
+                    len,
+                    cycle,
+                    estimated_td_size,
+                    interrupter,
+                    ent,
+                    isp,
+                    chain,
+                    ioc,
+                    idt,
+                    bei,
+                );
 
-                    bytes_left -= len as usize;
+                bytes_left -= len as usize;
 
-                    if bytes_left != 0 {
-                        ControlFlow::Continue
-                    } else {
-                        ControlFlow::Break
-                    }
-                },
-            )
-            .await?;
-        //self.event_handler_finished();
+                if bytes_left != 0 {
+                    ControlFlow::Continue
+                } else {
+                    ControlFlow::Break
+                }
+            },
+        )?;
+
+        Ok((future, dma_buf))
+    }
+
+    async fn transfer(
+        &self,
+        port_num: PortId,
+        endp_num: EndpNum,
+        dma_buf: Option<Dma<[u8]>>,
+        direction: PortReqDirection,
+    ) -> Result<(u8, u32, Option<Dma<[u8]>>)> {
+        let (future, dma_buf) = self.transfer_arm(port_num, endp_num, dma_buf, direction)?;
+        let event = Self::finish_transfer_event(future.await)?;
 
         let bytes_transferred = dma_buf
             .as_ref()
@@ -2252,7 +2289,7 @@ impl<const N: usize> SchemeSync for &Xhci<N> {
         fd: usize,
         buf: &mut [u8],
         offset: u64,
-        _fcntl_flags: u32,
+        fcntl_flags: u32,
         _ctx: &CallerCtx,
     ) -> Result<usize> {
         let offset = offset as usize;
@@ -2284,7 +2321,12 @@ impl<const N: usize> SchemeSync for &Xhci<N> {
 
             &mut Handle::Endpoint(port_num, endp_num, ref mut st) => match st {
                 EndpointHandleTy::Ctl => self.on_read_endp_ctl(port_num, endp_num, buf),
-                EndpointHandleTy::Data => block_on(self.on_read_endp_data(port_num, endp_num, buf)),
+                EndpointHandleTy::Data => block_on(self.on_read_endp_data(
+                    port_num,
+                    endp_num,
+                    buf,
+                    fcntl_flags & (syscall::flag::O_NONBLOCK as u32) != 0,
+                )),
                 EndpointHandleTy::Root(_) => Err(Error::new(EBADF)),
             },
             &mut Handle::PortState(port_num) => {
@@ -2752,69 +2794,175 @@ impl<const N: usize> Xhci<N> {
         port_num: PortId,
         endp_num: EndpNum,
         buf: &mut [u8],
+        nonblock: bool,
     ) -> Result<usize> {
+        // Validate that an IN data pipe is armed and the request fits within it.
+        {
+            let port_state = self.port_states.get(&port_num).ok_or(Error::new(EBADF))?;
+            let ep_if_state = &port_state
+                .endpoint_states
+                .get(&endp_num)
+                .ok_or(Error::new(EBADF))?
+                .driver_if_state;
+            match ep_if_state {
+                EndpIfState::WaitingForDataPipe {
+                    direction: XhciEndpCtlDirection::In,
+                    bytes_transferred,
+                    bytes_to_transfer: total_bytes_to_transfer,
+                } => {
+                    if buf.len() > *total_bytes_to_transfer as usize - *bytes_transferred as usize {
+                        return Err(Error::new(EINVAL));
+                    }
+                }
+                _ => return Err(Error::new(EBADF)),
+            }
+        }
+
+        if nonblock {
+            return self.on_read_endp_data_nonblock(port_num, endp_num, buf);
+        }
+
+        let (completion_code, some_bytes_transferred) =
+            self.transfer_read(port_num, endp_num, buf).await?;
+
+        // Just as with on_write_endp_data, a client issuing multiple reads must always stop
+        // reading if one read returns fewer bytes than expected.
+        let result = Self::transfer_result(completion_code, some_bytes_transferred);
+        self.record_endp_read_result(
+            port_num,
+            endp_num,
+            completion_code,
+            some_bytes_transferred,
+            result,
+        )?;
+        Ok(some_bytes_transferred as usize)
+    }
+
+    /// Applies the post-read state transition, shared by the blocking and non-blocking read paths.
+    fn record_endp_read_result(
+        &self,
+        port_num: PortId,
+        endp_num: EndpNum,
+        completion_code: u8,
+        some_bytes_transferred: u32,
+        result: PortTransferStatus,
+    ) -> Result<()> {
         let mut port_state = self
             .port_states
             .get_mut(&port_num)
             .ok_or(Error::new(EBADF))?;
-
-        let mut ep_if_state = &mut port_state
+        let mut ep_state = port_state
             .endpoint_states
             .get_mut(&endp_num)
-            .ok_or(Error::new(EBADF))?
-            .driver_if_state;
-
-        match ep_if_state {
-            &mut EndpIfState::WaitingForDataPipe {
-                direction: XhciEndpCtlDirection::In,
-                bytes_transferred,
-                bytes_to_transfer: total_bytes_to_transfer,
-            } => {
-                if buf.len() > total_bytes_to_transfer as usize - bytes_transferred as usize {
-                    return Err(Error::new(EINVAL));
-                }
-
-                drop(port_state);
-                let (completion_code, some_bytes_transferred) =
-                    self.transfer_read(port_num, endp_num, buf).await?;
-
-                // Just as with on_write_endp_data, a client issuing multiple reads must always
-                // stop reading if one read returns fewer bytes than expected.
-
-                let result = Self::transfer_result(completion_code, some_bytes_transferred);
-
-                let mut port_state = self
-                    .port_states
-                    .get_mut(&port_num)
-                    .ok_or(Error::new(EBADF))?;
-
-                let mut ep_state = port_state
-                    .endpoint_states
-                    .get_mut(&endp_num)
-                    .ok_or(Error::new(EBADF))?;
-
-                let ep_if_state = &mut ep_state.driver_if_state;
-
-                if let &mut EndpIfState::WaitingForDataPipe {
-                    direction: XhciEndpCtlDirection::In,
-                    bytes_to_transfer,
-                    ref mut bytes_transferred,
-                } = ep_if_state
-                {
-                    if *bytes_transferred + some_bytes_transferred == bytes_to_transfer
-                        || completion_code != TrbCompletionCode::Success as u8
-                    {
-                        *ep_if_state = EndpIfState::WaitingForTransferResult(result);
-                    } else {
-                        *bytes_transferred += some_bytes_transferred;
-                    }
-                } else {
-                    unreachable!()
-                }
-                Ok(some_bytes_transferred as usize)
+            .ok_or(Error::new(EBADF))?;
+        let ep_if_state = &mut ep_state.driver_if_state;
+        if let &mut EndpIfState::WaitingForDataPipe {
+            direction: XhciEndpCtlDirection::In,
+            bytes_to_transfer,
+            ref mut bytes_transferred,
+        } = ep_if_state
+        {
+            if *bytes_transferred + some_bytes_transferred == bytes_to_transfer
+                || completion_code != TrbCompletionCode::Success as u8
+            {
+                *ep_if_state = EndpIfState::WaitingForTransferResult(result);
+            } else {
+                *bytes_transferred += some_bytes_transferred;
             }
-            _ => return Err(Error::new(EBADF)),
+        } else {
+            unreachable!()
         }
+        Ok(())
+    }
+
+    /// Non-blocking bulk-IN read (the `O_NONBLOCK` path). Arms the transfer on the first call and
+    /// returns `EWOULDBLOCK`; on later calls it checks the waker flag and only re-polls once the
+    /// IRQ reactor has delivered the event — so a pending read never blocks the single-threaded
+    /// scheme loop, and therefore never blocks a concurrent TX (or another device) on the bus.
+    fn on_read_endp_data_nonblock(
+        &self,
+        port_num: PortId,
+        endp_num: EndpNum,
+        buf: &mut [u8],
+    ) -> Result<usize> {
+        let key = (port_num, endp_num);
+        let has_pending = self.pending_reads.lock().unwrap().contains_key(&key);
+
+        if !has_pending {
+            // Arm: allocate the DMA buffer, submit the TRB, and poll once (which registers the
+            // waker with the reactor and rings the doorbell). A synchronous completion is finished
+            // immediately; otherwise the transfer is stashed and we report EWOULDBLOCK.
+            let dma = unsafe { self.alloc_dma_zeroed_unsized(buf.len())? };
+            let (fut, dma) =
+                self.transfer_arm(port_num, endp_num, Some(dma), PortReqDirection::DeviceToHost)?;
+            let dma = dma.ok_or(Error::new(EIO))?;
+            let flag = std::sync::Arc::new(super::FlagWaker::new());
+            let mut fut: core::pin::Pin<
+                Box<dyn core::future::Future<Output = super::irq_reactor::NextEventTrb> + Send>,
+            > = Box::pin(fut);
+
+            let waker = std::task::Waker::from(flag.clone());
+            let mut cx = std::task::Context::from_waker(&waker);
+            match fut.as_mut().poll(&mut cx) {
+                core::task::Poll::Ready(nevt) => {
+                    let event = Self::finish_transfer_event(nevt)?;
+                    self.finish_endp_read(port_num, endp_num, &dma, &event, buf)
+                }
+                core::task::Poll::Pending => {
+                    self.pending_reads
+                        .lock()
+                        .unwrap()
+                        .insert(key, super::PendingRead { fut, dma, flag });
+                    Err(Error::new(EWOULDBLOCK))
+                }
+            }
+        } else {
+            let mut map = self.pending_reads.lock().unwrap();
+            let ready = map.get(&key).map(|p| p.flag.is_ready()).unwrap_or(false);
+            if !ready {
+                return Err(Error::new(EWOULDBLOCK));
+            }
+            let poll_res = {
+                let pending = map.get_mut(&key).ok_or(Error::new(EBADF))?;
+                let waker = std::task::Waker::from(pending.flag.clone());
+                let mut cx = std::task::Context::from_waker(&waker);
+                pending.fut.as_mut().poll(&mut cx)
+            };
+            match poll_res {
+                core::task::Poll::Ready(nevt) => {
+                    let pending = map.remove(&key).ok_or(Error::new(EBADF))?;
+                    drop(map);
+                    let event = Self::finish_transfer_event(nevt)?;
+                    self.finish_endp_read(port_num, endp_num, &pending.dma, &event, buf)
+                }
+                core::task::Poll::Pending => Err(Error::new(EWOULDBLOCK)),
+            }
+        }
+    }
+
+    /// Copies a completed non-blocking IN transfer's DMA buffer into the client buffer and applies
+    /// the same post-read state transition as the blocking path.
+    fn finish_endp_read(
+        &self,
+        port_num: PortId,
+        endp_num: EndpNum,
+        dma: &Dma<[u8]>,
+        event: &Trb,
+        buf: &mut [u8],
+    ) -> Result<usize> {
+        let completion_code = event.completion_code();
+        let some_bytes_transferred = dma.len() as u32 - event.transfer_length();
+        let n = core::cmp::min(dma.len(), buf.len());
+        buf[..n].copy_from_slice(&dma[..n]);
+        let result = Self::transfer_result(completion_code, some_bytes_transferred);
+        self.record_endp_read_result(
+            port_num,
+            endp_num,
+            completion_code,
+            some_bytes_transferred,
+            result,
+        )?;
+        Ok(some_bytes_transferred as usize)
     }
     /// Notifies the xHC that the current event handler has finished, so that new interrupts can be
     /// sent. This is required after each invocation of `Self::execute_command`.

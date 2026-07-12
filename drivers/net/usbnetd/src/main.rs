@@ -165,18 +165,21 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     );
     rndis_set_filter(&handle, ctrl, RNDIS_PACKET_FILTER).expect("usbnetd: RNDIS SET filter failed");
 
+    // The bulk-IN (RX) endpoint is opened non-blocking so a receive in flight never blocks the
+    // single-threaded xhcid scheme loop — which is what would otherwise deadlock a concurrent TX
+    // (or another USB device) on the same controller. The bulk-OUT (TX) endpoint stays blocking:
+    // a write completes as soon as the device accepts it.
     let bulk_in = handle
-        .open_endpoint(bulk_in_num)
+        .open_endpoint_nonblock(bulk_in_num)
         .expect("usbnetd: open bulk in");
-    let bulk_out = handle
+    let mut bulk_out = handle
         .open_endpoint(bulk_out_num)
         .expect("usbnetd: open bulk out");
 
-    // Background RX: block on bulk-in, unwrap RNDIS, queue the Ethernet frame, then poke a
-    // notify pipe so the (otherwise scheme-driven) event loop wakes and delivers a READ
-    // fevent to the netstack — without this, asynchronously-received frames (e.g. DHCP
-    // OFFER/ACK) would sit in the queue until the next unrelated scheme op. (See the module
-    // note on the xhcid serialization limit that bounds continuous bidirectional flow.)
+    // Background RX: arm a non-blocking bulk-IN read and poll it (yielding between polls so TX and
+    // other devices keep running); on each received RNDIS packet, unwrap the Ethernet frame, queue
+    // it, and poke a notify pipe so the (otherwise scheme-driven) event loop wakes and delivers a
+    // READ fevent to the netstack.
     let rx_queue: Arc<Mutex<VecDeque<Vec<u8>>>> = Arc::new(Mutex::new(VecDeque::new()));
     let (mut rx_notify_r, rx_notify_w) = std::io::pipe().expect("usbnetd: rx notify pipe");
     {
@@ -185,28 +188,63 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         let mut bulk_in = bulk_in;
         thread::spawn(move || {
             let mut buf = vec![0u8; 2048];
+            let mut rx_count: u32 = 0;
             loop {
-                match bulk_in.transfer_read(&mut buf) {
-                    Ok(_) => {
-                        if buf.len() >= 16 && le32(&buf[0..4]) == RNDIS_PACKET_MSG {
-                            let data_off = le32(&buf[8..12]) as usize + 8;
-                            let data_len = le32(&buf[12..16]) as usize;
-                            if data_len > 0 && data_off + data_len <= buf.len() {
-                                let frame = buf[data_off..data_off + data_len].to_vec();
-                                if let Ok(mut q) = rx_queue.lock() {
-                                    q.push_back(frame);
-                                }
-                                let _ = rx_notify_w.write(&[0u8]);
-                            }
-                        }
+                if bulk_in.arm_read(buf.len() as u32).is_err() {
+                    thread::sleep(std::time::Duration::from_millis(5));
+                    continue;
+                }
+                let completed = loop {
+                    match bulk_in.poll_read(&mut buf) {
+                        Ok(Some(_status)) => break true,
+                        Ok(None) => thread::sleep(std::time::Duration::from_millis(1)),
+                        Err(_) => break false,
                     }
-                    Err(_) => {
-                        // transient (short-packet mismatch, etc.) — back off briefly
-                        thread::sleep(std::time::Duration::from_millis(2));
+                };
+                if !completed {
+                    // transient error (short-packet mismatch, etc.) — re-arm after a short pause
+                    thread::sleep(std::time::Duration::from_millis(5));
+                    continue;
+                }
+                if buf.len() >= 16 && le32(&buf[0..4]) == RNDIS_PACKET_MSG {
+                    let data_off = le32(&buf[8..12]) as usize + 8;
+                    let data_len = le32(&buf[12..16]) as usize;
+                    if data_len > 0 && data_off + data_len <= buf.len() {
+                        let frame = buf[data_off..data_off + data_len].to_vec();
+                        if rx_count < 4 {
+                            println!("usbnetd: RX frame #{rx_count} ({data_len} bytes)");
+                            rx_count += 1;
+                        }
+                        if let Ok(mut q) = rx_queue.lock() {
+                            q.push_back(frame);
+                        }
+                        let _ = rx_notify_w.write(&[0u8]);
                     }
                 }
             }
         });
+    }
+
+    {
+        let mut arp = Vec::with_capacity(42);
+        arp.extend_from_slice(&[0xff; 6]);
+        arp.extend_from_slice(&mac);
+        arp.extend_from_slice(&[0x08, 0x06, 0x00, 0x01, 0x08, 0x00, 6, 4, 0x00, 0x01]);
+        arp.extend_from_slice(&mac);
+        arp.extend_from_slice(&[10, 0, 2, 15]);
+        arp.extend_from_slice(&[0x00; 6]);
+        arp.extend_from_slice(&[10, 0, 2, 2]);
+        let mut msg = Vec::with_capacity(RNDIS_HDR_LEN + arp.len());
+        push32(&mut msg, RNDIS_PACKET_MSG);
+        push32(&mut msg, (RNDIS_HDR_LEN + arp.len()) as u32);
+        push32(&mut msg, 36);
+        push32(&mut msg, arp.len() as u32);
+        msg.extend_from_slice(&[0u8; 28]);
+        msg.extend_from_slice(&arp);
+        match bulk_out.transfer_write(&msg) {
+            Ok(st) => println!("usbnetd: SELFTEST TX ARP ok {st:?}"),
+            Err(e) => println!("usbnetd: SELFTEST TX ARP ERR {e:?}"),
+        }
     }
 
     let adapter = UsbNet {

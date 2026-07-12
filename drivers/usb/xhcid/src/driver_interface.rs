@@ -603,6 +603,33 @@ impl XhciClientHandle {
             data: self.open_endpoint_data(num)?,
         })
     }
+    /// Like `open_endpoint_data`, but opens the Data interface file `O_NONBLOCK`, so reads on it
+    /// return `EWOULDBLOCK` instead of blocking while a transfer is in flight. Pair with
+    /// `XhciEndpHandle::arm_read` / `poll_read`.
+    pub fn open_endpoint_data_nonblock(
+        &self,
+        num: u8,
+    ) -> result::Result<File, XhciClientHandleError> {
+        let path = format!("endpoints/{}/data", num);
+        let fd = self.fd.openat(
+            &path,
+            libredox::flag::O_RDWR | libredox::flag::O_NONBLOCK,
+            0,
+        )?;
+        Ok(unsafe { File::from_raw_fd(fd.into_raw() as RawFd) })
+    }
+    /// Like `open_endpoint`, but the Data interface file is opened `O_NONBLOCK` (the Ctl file stays
+    /// blocking). Use `arm_read` + `poll_read` for a receive path that never blocks the xhcid
+    /// scheme loop (and thus never stalls a concurrent transmit on the same device).
+    pub fn open_endpoint_nonblock(
+        &self,
+        num: u8,
+    ) -> result::Result<XhciEndpHandle, XhciClientHandleError> {
+        Ok(XhciEndpHandle {
+            ctl: self.open_endpoint_ctl(num)?,
+            data: self.open_endpoint_data_nonblock(num)?,
+        })
+    }
     pub fn device_request<'a>(
         &self,
         req_type: PortReqTy,
@@ -829,6 +856,31 @@ impl XhciEndpHandle {
     ) -> result::Result<PortTransferStatus, XhciClientHandleError> {
         let len = buf.len() as u32;
         self.generic_transfer(XhciEndpCtlDirection::In, |data| data.read(buf), len)
+    }
+    /// Arms a non-blocking IN transfer of `count` bytes on a handle whose Data file was opened
+    /// `O_NONBLOCK` (see `XhciClientHandle::open_endpoint_nonblock`). Follow with `poll_read`.
+    pub fn arm_read(&mut self, count: u32) -> result::Result<(), XhciClientHandleError> {
+        self.ctl_req(&XhciEndpCtlReq::Transfer {
+            direction: XhciEndpCtlDirection::In,
+            count,
+        })
+    }
+    /// Polls an IN transfer armed with `arm_read`. Returns `Ok(None)` while it is still in flight
+    /// (the poll returns immediately — xhcid does not spin), or `Ok(Some(status))` once it
+    /// completes, at which point `buf` has been filled. `buf.len()` should match the `count`
+    /// passed to `arm_read`.
+    pub fn poll_read(
+        &mut self,
+        buf: &mut [u8],
+    ) -> result::Result<Option<PortTransferStatus>, XhciClientHandleError> {
+        match self.data.read(buf) {
+            Ok(_) => match self.ctl_res()? {
+                XhciEndpCtlRes::TransferResult(r) => Ok(Some(r)),
+                _ => Err(Invalid("expected transfer result").into()),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
     pub fn transfer_nodata(&mut self) -> result::Result<PortTransferStatus, XhciClientHandleError> {
         self.generic_transfer(XhciEndpCtlDirection::NoData, |_| Ok(0), 0)
