@@ -173,12 +173,40 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     );
     rndis_set_filter(&handle, ctrl, RNDIS_PACKET_FILTER).expect("usbnetd: RNDIS SET filter failed");
 
-    let bulk_in = handle
+    let mut bulk_in = handle
         .open_endpoint(bulk_in_num)
         .expect("usbnetd: open bulk in");
-    let bulk_out = handle
+    let mut bulk_out = handle
         .open_endpoint(bulk_out_num)
         .expect("usbnetd: open bulk out");
+
+    // --- SELFTEST (diagnostic): SYNCHRONOUS TX on the main thread BEFORE the background RX
+    // thread exists. Isolates whether concurrent transfers on different endpoints of the same
+    // device deadlock (a blocked RX read holding a per-device lock would stall TX). If this
+    // logs "tx ok" and the pcap shows the ARP request+reply, TX works and the RX must be made
+    // non-blocking-relative-to-TX. Remove once RX is confirmed.
+    {
+        let mut arp = Vec::with_capacity(42);
+        arp.extend_from_slice(&[0xff; 6]);
+        arp.extend_from_slice(&mac);
+        arp.extend_from_slice(&[0x08, 0x06, 0x00, 0x01, 0x08, 0x00, 6, 4, 0x00, 0x01]);
+        arp.extend_from_slice(&mac);
+        arp.extend_from_slice(&[10, 0, 2, 15]);
+        arp.extend_from_slice(&[0x00; 6]);
+        arp.extend_from_slice(&[10, 0, 2, 2]);
+        let mut msg = Vec::with_capacity(RNDIS_HDR_LEN + arp.len());
+        push32(&mut msg, RNDIS_PACKET_MSG);
+        push32(&mut msg, (RNDIS_HDR_LEN + arp.len()) as u32);
+        push32(&mut msg, 36);
+        push32(&mut msg, arp.len() as u32);
+        msg.extend_from_slice(&[0u8; 28]);
+        msg.extend_from_slice(&arp);
+        println!("usbnetd: SELFTEST sync TX ARP ({} eth bytes, {} rndis)", arp.len(), msg.len());
+        match bulk_out.transfer_write(&msg) {
+            Ok(st) => println!("usbnetd: SELFTEST sync TX ok {st:?}"),
+            Err(e) => println!("usbnetd: SELFTEST sync TX ERR {e:?}"),
+        }
+    }
 
     // Background RX: block on bulk-in, unwrap RNDIS, queue the Ethernet frame, then poke
     // a notify pipe so the (otherwise scheme-driven) event loop wakes and delivers a READ
@@ -234,33 +262,12 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         });
     }
 
-    let mut adapter = UsbNet {
+    let adapter = UsbNet {
         mac,
         bulk_out,
         rx_queue,
         tx_count: 0,
     };
-
-    // --- SELFTEST (diagnostic): emit one broadcast ARP request for the slirp gateway
-    // (10.0.2.2). QEMU user-net answers ARP, so a working TX->RX path makes the RX thread
-    // log the reply. Deterministically exercises both bulk endpoints without depending on
-    // netstack/dhcpd/an interactive login. Remove once RX is confirmed.
-    {
-        let mut arp = Vec::with_capacity(42);
-        arp.extend_from_slice(&[0xff; 6]); // dst broadcast
-        arp.extend_from_slice(&mac); // src our MAC
-        arp.extend_from_slice(&[0x08, 0x06]); // ethertype ARP
-        arp.extend_from_slice(&[0x00, 0x01, 0x08, 0x00, 6, 4, 0x00, 0x01]); // htype/ptype/hlen/plen/oper=req
-        arp.extend_from_slice(&mac); // sender HW
-        arp.extend_from_slice(&[10, 0, 2, 15]); // sender IP 10.0.2.15
-        arp.extend_from_slice(&[0x00; 6]); // target HW unknown
-        arp.extend_from_slice(&[10, 0, 2, 2]); // target IP = gateway
-        println!("usbnetd: SELFTEST ARP request -> 10.0.2.2 ({} bytes)", arp.len());
-        match adapter.write_packet(&arp) {
-            Ok(n) => println!("usbnetd: SELFTEST write ok ({n})"),
-            Err(e) => println!("usbnetd: SELFTEST write ERR {e:?}"),
-        }
-    }
 
     let name = format!("usb-{scheme}+{port}");
     let mut scheme_obj = NetworkScheme::new(move || adapter, daemon, format!("network.{name}"));
