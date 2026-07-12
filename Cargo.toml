@@ -59,7 +59,8 @@ members = [
     "drivers/storage/bcm2835-sdhcid",
     "drivers/storage/driver-block",
     "drivers/storage/ided",
-    "drivers/storage/lived",          # TODO: not really a driver...
+    "drivers/storage/lived",
+    "drivers/storage/raid1d",          # TODO: not really a driver...
     "drivers/storage/nvmed",
     "drivers/storage/usbscsid",
     "drivers/storage/virtio-blkd",

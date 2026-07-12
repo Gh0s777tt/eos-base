@@ -16,7 +16,7 @@ INITFS_BINS = init logd ramfs randd zerod \
 	acpid fbbootlogd hwd inputd lived \
 	pcid pcid-spawner rtcd vesad
 INITFS_DRIVERS_BINS = nvmed virtio-blkd  virtio-gpud
-BASE_BINS = fbcond inputd pcid pcid-spawner redoxerd audiod dhcpd ipcd ptyd netstack
+BASE_BINS = raid1d fbcond inputd pcid pcid-spawner redoxerd audiod dhcpd ipcd ptyd netstack
 DRIVERS_BINS = usbnetd e1000d ihdad ihdgd ixgbed rtl8139d rtl8168d \
 	usbctl usbhidd usbhubd usbscsid virtio-netd xhcid
 

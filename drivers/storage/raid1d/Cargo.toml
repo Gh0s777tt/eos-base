@@ -1,0 +1,16 @@
+[package]
+name = "raid1d"
+description = "E-OS RAID-1 mirror block daemon (R-501)"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+libredox.workspace = true
+daemon = { path = "../../../daemon" }
+redox_syscall = { workspace = true, features = ["std"] }
+redox_event.workspace = true
+driver-block = { path = "../driver-block" }
+
+[lints]
+workspace = true
