@@ -102,8 +102,10 @@ fn scan_disk_paths() -> Vec<String> {
             continue;
         };
         for entry in entries.flatten() {
-            let e = entry.file_name().to_string_lossy().to_string();
-            if !e.contains('p') {
+            // scheme getdents may hand back names with a trailing newline
+            let raw = entry.file_name().to_string_lossy().to_string();
+            let e = raw.trim();
+            if !e.is_empty() && !e.contains('p') {
                 out.push(format!("/scheme/{}/{}", name, e));
             }
         }
