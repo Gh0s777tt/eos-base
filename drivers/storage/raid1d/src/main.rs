@@ -148,7 +148,10 @@ impl Raid1Disk {
         let off = block
             .checked_mul(self.block_size as u64)
             .ok_or(Error::new(EINVAL))?;
-        if off + len as u64 > self.usable_bytes {
+        // E-OS R-F04: guard `off + len` against a u64 wrap — a wrapped end could
+        // slip past this bounds check and then read/write at a bogus offset.
+        let end = off.checked_add(len as u64).ok_or(Error::new(EINVAL))?;
+        if end > self.usable_bytes {
             return Err(Error::new(EINVAL));
         }
         Ok(off)
@@ -166,8 +169,12 @@ impl Disk for Raid1Disk {
 
     async fn read(&mut self, block: u64, buffer: &mut [u8]) -> syscall::Result<usize> {
         let off = self.byte_off(block, buffer.len())?;
-        let order = [self.primary, 1 - self.primary];
-        for &i in &order {
+        // E-OS R-F04: try the primary first, then every other member in order.
+        // The old `[self.primary, 1 - self.primary]` underflowed (usize) once a
+        // mirror had more than two members.
+        let n = self.members.len();
+        for k in 0..n {
+            let i = (self.primary + k) % n;
             let Some(m) = self.members.get(i) else {
                 continue;
             };
