@@ -60,9 +60,12 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     let bootloader_env = std::fs::read_to_string("/scheme/sys/env")
         .expect("failed to read env")
         .lines()
-        .map(|line| {
-            let (env, value) = line.split_once('=').unwrap();
-            (env.to_owned(), value.to_owned())
+        // E-OS R-F09: skip malformed env lines instead of panicking. The old
+        // `split_once('=').unwrap()` aborted the display driver on any line
+        // without a `=` (observed while debugging R-F08).
+        .filter_map(|line| {
+            let (env, value) = line.split_once('=')?;
+            Some((env.to_owned(), value.to_owned()))
         })
         .collect::<HashMap<String, String>>();
     for i in 1..1024 {
