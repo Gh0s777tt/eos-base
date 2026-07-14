@@ -65,7 +65,7 @@ impl Superblock {
         if u32::from_le_bytes(b[8..12].try_into().ok()?) != SB_VERSION {
             return None;
         }
-        Some(Superblock {
+        let sb = Superblock {
             array_uuid: b[12..28].try_into().ok()?,
             member_index: u32::from_le_bytes(b[28..32].try_into().ok()?),
             generation: u64::from_le_bytes(b[32..40].try_into().ok()?),
@@ -73,7 +73,21 @@ impl Superblock {
             block_size: u32::from_le_bytes(b[48..52].try_into().ok()?),
             last_full_sync: u64::from_le_bytes(b[52..60].try_into().ok()?),
             member_count: u32::from_le_bytes(b[60..64].try_into().ok()?),
-        })
+        };
+        // Validate geometry from the UNTRUSTED on-disk superblock before any
+        // consumer trusts it: a zero/non-pow2 block_size later divides-by-zero in
+        // the shared driver-block DiskScheme (size/block_size, offset%block_size),
+        // and a usable_bytes that is not a block multiple corrupts offset math.
+        if !(512..=65536).contains(&sb.block_size) || !sb.block_size.is_power_of_two() {
+            return None;
+        }
+        if sb.usable_bytes == 0 || sb.usable_bytes % sb.block_size as u64 != 0 {
+            return None;
+        }
+        if sb.member_count == 0 {
+            return None;
+        }
+        Some(sb)
     }
 }
 
