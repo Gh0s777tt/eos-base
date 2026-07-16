@@ -33,25 +33,44 @@ const DEFAULT_PRNG_MODE: u16 = 0o644;
 const SEED_BYTES: usize = 32;
 
 /// Create a true random seed for the RNG if hardware support is present.
-/// On Intel x64 from rdrand instruction.
-/// On AArch64 from RNDRRS system register.
-/// Will seed with a zero (insecure) if getting support is not present.
+/// On Intel x64 from the rdrand instruction, retried while it reports failure
+/// via the carry flag.
+/// On AArch64 from the RNDRRS system register, XOR-mixed with CNTVCT timing
+/// jitter so the seed never depends solely on RNDRRS (K-06); on cores without
+/// FEAT_RNG the kernel emulates RNDRRS rather than falling back to a zero seed.
+/// Falls back to a zero (insecure) seed on x86 when rdrand support is absent.
 fn create_rdrand_seed() -> [u8; SEED_BYTES] {
     let mut rng = [0; SEED_BYTES];
     let mut have_seeded = false;
     #[cfg(target_arch = "x86_64")]
     {
         if CpuId::new().get_feature_info().unwrap().has_rdrand() {
+            let mut failure = false;
             for i in 0..SEED_BYTES / 8 {
-                // We get 8 bytes at a time from rdrand instruction
-                let rand: u64;
-                unsafe {
-                    asm!("rdrand rax", out("rax") rand);
+                // We get 8 bytes at a time from the rdrand instruction.
+                // rdrand reports success in the carry flag (CF=1 on success,
+                // CF=0 on failure, in which case the destination is 0). Intel's
+                // guidance is to retry a bounded number of times before giving
+                // up, so we never blindly trust a value that was not generated.
+                let mut rand: u64 = 0;
+                let mut ok: u8 = 0;
+                for _ in 0..10 {
+                    unsafe {
+                        asm!(
+                            "rdrand {r}",
+                            "setc {c}",
+                            r = out(reg) rand,
+                            c = out(reg_byte) ok,
+                        );
+                    }
+                    if ok != 0 {
+                        break;
+                    }
                 }
-
+                failure |= ok == 0;
                 rng[i * 8..(i * 8 + 8)].copy_from_slice(&rand.to_le_bytes());
             }
-            have_seeded = true;
+            have_seeded = !failure;
         }
     }
     #[cfg(target_arch = "aarch64")]
