@@ -357,10 +357,32 @@ fn resolve_link_gsi(syms: &[String], link: &str) -> Option<u32> {
     let AmlSerdeValue::Buffer(bytes) = node.value else {
         return None;
     };
-    // Extended Interrupt Descriptor: tag 0x89, len(2), flags(1), count(1), GSI(4 LE), ...
-    let pos = bytes.iter().position(|&b| b == 0x89)?;
-    let g = bytes.get(pos + 5..pos + 9)?;
-    Some(u32::from_le_bytes([g[0], g[1], g[2], g[3]]))
+    // Walk the ACPI resource descriptors rather than scanning for a raw 0x89 byte,
+    // which could match payload data inside an earlier descriptor and return a bogus
+    // GSI. Large descriptors (tag bit 7 set) carry a 2-byte length; small ones encode
+    // the length in the low 3 bits. Stop at the End tag (0x79).
+    let mut pos = 0usize;
+    while pos < bytes.len() {
+        let tag = bytes[pos];
+        if tag == 0x79 {
+            break; // End Tag
+        }
+        let (hdr, len) = if tag & 0x80 != 0 {
+            // large: tag(1) len(2 LE) payload(len)
+            let l = u16::from_le_bytes([*bytes.get(pos + 1)?, *bytes.get(pos + 2)?]) as usize;
+            (3usize, l)
+        } else {
+            // small: tag(1) payload(tag & 0x7)
+            (1usize, (tag & 0x07) as usize)
+        };
+        if tag == 0x89 {
+            // Extended Interrupt Descriptor: payload = flags(1) count(1) GSI(4 LE) ...
+            let g = bytes.get(pos + hdr + 2..pos + hdr + 6)?;
+            return Some(u32::from_le_bytes([g[0], g[1], g[2], g[3]]));
+        }
+        pos = pos.checked_add(hdr)?.checked_add(len)?;
+    }
+    None
 }
 
 fn main() {

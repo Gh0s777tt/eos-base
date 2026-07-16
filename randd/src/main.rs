@@ -76,6 +76,25 @@ fn create_rdrand_seed() -> [u8; SEED_BYTES] {
             failure |= rand == 0;
             rng[i * 8..(i * 8 + 8)].copy_from_slice(&rand.to_le_bytes());
         }
+        // Fold in independent CPU-timing jitter (CNTVCT) so the seed never depends
+        // SOLELY on RNDRRS. On cores without FEAT_RNG the kernel emulates RNDRRS from
+        // a timer (R-401b), so this adds a second, differently-timed sample; on real
+        // FEAT_RNG cores it is harmless. virtio-rngd later mixes true entropy in too.
+        for i in 0..SEED_BYTES / 8 {
+            let t: u64;
+            unsafe {
+                asm!("mrs {}, cntvct_el0", out(reg) t);
+            }
+            // splitmix64 diffusion of the raw timer read
+            let mut z = t.wrapping_add(0x9E3779B97F4A7C15);
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+            z ^= z >> 31;
+            let mut b = [0u8; 8];
+            b.copy_from_slice(&rng[i * 8..i * 8 + 8]);
+            let mixed = u64::from_le_bytes(b) ^ z;
+            rng[i * 8..i * 8 + 8].copy_from_slice(&mixed.to_le_bytes());
+        }
         have_seeded = !failure;
     }
     if !have_seeded {
