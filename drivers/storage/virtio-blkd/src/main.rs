@@ -103,7 +103,12 @@ fn main() {
 }
 
 fn daemon_runner(redox_daemon: daemon::Daemon, pcid_handle: PciFunctionHandle) -> ! {
-    daemon(redox_daemon, pcid_handle).unwrap();
+    if let Err(err) = daemon(redox_daemon, pcid_handle) {
+        // A clean exit, not a panic/abort — e.g. virtio-core declines a
+        // legacy-only device (no modern virtio 1.0 capabilities).
+        log::error!("virtio-blkd: exiting: {err}");
+        std::process::exit(1);
+    }
     unreachable!();
 }
 
