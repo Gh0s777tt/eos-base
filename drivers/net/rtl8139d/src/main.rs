@@ -35,7 +35,11 @@ fn map_bar(pcid_handle: &mut PciFunctionHandle) -> *mut u8 {
             },
             // Not a memory BAR — this is expected while searching (RTL8139's MMIO is
             // BAR1 on QEMU, so BAR2 is empty here); only the final `panic!` is an error.
-            other => log::debug!("BAR {} is {:?}, not a memory BAR; trying next candidate", barnum, other),
+            other => log::debug!(
+                "BAR {} is {:?}, not a memory BAR; trying next candidate",
+                barnum,
+                other
+            ),
         }
     }
     panic!("rtl8139d: failed to find BAR");

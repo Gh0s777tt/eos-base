@@ -73,7 +73,11 @@ fn daemon(daemon: daemon::Daemon) -> ! {
         .expect(USAGE)
         .parse::<PortId>()
         .expect("usbnetd: bad port id");
-    let data_if: u16 = args.next().expect(USAGE).parse().expect("usbnetd: bad if_num");
+    let data_if: u16 = args
+        .next()
+        .expect(USAGE)
+        .parse()
+        .expect("usbnetd: bad if_num");
 
     println!("usbnetd: USB net driver on scheme `{scheme}` port {port} data-if {data_if}");
 
@@ -123,9 +127,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
                 }
             }
         }
-        if let (Some((num, alt_s)), true, true) =
-            (data_num_alt, found_in != 0, found_out != 0)
-        {
+        if let (Some((num, alt_s)), true, true) = (data_num_alt, found_in != 0, found_out != 0) {
             bulk_in_num = found_in;
             bulk_out_num = found_out;
             chosen = Some((
@@ -137,8 +139,7 @@ fn daemon(daemon: daemon::Daemon) -> ! {
             break;
         }
     }
-    let (config_value, data_if_num, alt, ctrl_if) =
-        chosen.expect("usbnetd: no CDC-Data interface");
+    let (config_value, data_if_num, alt, ctrl_if) = chosen.expect("usbnetd: no CDC-Data interface");
     println!(
         "usbnetd: config {config_value} data-if {data_if_num} ctrl-if {ctrl_if} bulk in {bulk_in_num} out {bulk_out_num}"
     );
@@ -229,10 +230,18 @@ fn daemon(daemon: daemon::Daemon) -> ! {
     user_data! { enum Src { Scheme, Rx } }
     let event_queue = EventQueue::<Src>::new().expect("usbnetd: event queue");
     event_queue
-        .subscribe(scheme_obj.event_handle().raw(), Src::Scheme, event::EventFlags::READ)
+        .subscribe(
+            scheme_obj.event_handle().raw(),
+            Src::Scheme,
+            event::EventFlags::READ,
+        )
         .expect("usbnetd: subscribe scheme");
     event_queue
-        .subscribe(rx_notify_r.as_raw_fd() as usize, Src::Rx, event::EventFlags::READ)
+        .subscribe(
+            rx_notify_r.as_raw_fd() as usize,
+            Src::Rx,
+            event::EventFlags::READ,
+        )
         .expect("usbnetd: subscribe rx");
     scheme_obj.tick().unwrap();
     for event in event_queue.map(|e| e.expect("usbnetd: event")) {

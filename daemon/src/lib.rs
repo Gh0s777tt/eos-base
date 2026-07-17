@@ -60,8 +60,7 @@ pub struct Daemon {
 impl Daemon {
     /// Create a new daemon.
     pub fn new(f: impl FnOnce(Self) -> !) -> ! {
-        let write_pipe =
-            unsafe { get_fd("INIT_NOTIFY").map(|fd| io::PipeWriter::from_raw_fd(fd)) };
+        let write_pipe = unsafe { get_fd("INIT_NOTIFY").map(|fd| io::PipeWriter::from_raw_fd(fd)) };
 
         f(Daemon { write_pipe })
     }
@@ -110,8 +109,7 @@ impl SchemeDaemon {
     /// Create a new daemon for use with schemes.
     #[expect(clippy::new_ret_no_self)]
     pub fn new(f: impl FnOnce(SchemeDaemon) -> !) -> ! {
-        let write_pipe =
-            unsafe { get_fd("INIT_NOTIFY").map(|fd| io::PipeWriter::from_raw_fd(fd)) };
+        let write_pipe = unsafe { get_fd("INIT_NOTIFY").map(|fd| io::PipeWriter::from_raw_fd(fd)) };
 
         f(SchemeDaemon { write_pipe })
     }

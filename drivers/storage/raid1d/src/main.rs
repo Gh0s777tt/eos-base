@@ -20,7 +20,7 @@ use std::os::unix::fs::FileExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use driver_block::{Disk, DiskScheme, ExecutorTrait, TrivialExecutor};
-use syscall::error::{Error, EIO, EINVAL};
+use syscall::error::{Error, EINVAL, EIO};
 
 const MAGIC: &[u8; 8] = b"EOSRAID1";
 const SB_SIZE: u64 = 4096;
@@ -245,7 +245,10 @@ impl Disk for Raid1Disk {
                 if m.active {
                     m.sb.generation = new_gen;
                     if let Err(err) = write_superblock(&m.file, m.dev_size, &m.sb) {
-                        eprintln!("raid1d: degrade-bump superblock write failed on {}: {}", m.path, err);
+                        eprintln!(
+                            "raid1d: degrade-bump superblock write failed on {}: {}",
+                            m.path, err
+                        );
                     }
                 }
             }
@@ -492,7 +495,10 @@ fn assemble() -> Option<Raid1Disk> {
         .collect();
     for i in rebuild {
         let reason = if members[i].sb.generation < newest {
-            format!("STALE (generation {} < {})", members[i].sb.generation, newest)
+            format!(
+                "STALE (generation {} < {})",
+                members[i].sb.generation, newest
+            )
         } else {
             "SPLIT-BRAIN loser".to_string()
         };
@@ -506,7 +512,9 @@ fn assemble() -> Option<Raid1Disk> {
                 members[i].sb.usable_bytes = usable;
                 members[i].sb.block_size = src_block_size;
                 members[i].sb.last_full_sync = members[src_i].sb.last_full_sync;
-                if let Err(err) = write_superblock(&members[i].file, members[i].dev_size, &members[i].sb) {
+                if let Err(err) =
+                    write_superblock(&members[i].file, members[i].dev_size, &members[i].sb)
+                {
                     eprintln!(
                         "raid1d: rebuild superblock write failed on {}: {} — excluded",
                         members[i].path, err

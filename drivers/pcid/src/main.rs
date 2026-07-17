@@ -350,8 +350,13 @@ fn read_acpi_prt_routing() -> Vec<(u8, u8, u32)> {
 /// by reading the link's `_CRS` and parsing the Extended Interrupt Descriptor (tag 0x89).
 fn resolve_link_gsi(syms: &[String], link: &str) -> Option<u32> {
     use amlserde::{AmlSerde, AmlSerdeValue};
-    let last = link.rsplit(|c: char| c == '.' || c == '\\').next().unwrap_or(link);
-    let crs = syms.iter().find(|n| n.ends_with(&format!("{}._CRS", last)))?;
+    let last = link
+        .rsplit(|c: char| c == '.' || c == '\\')
+        .next()
+        .unwrap_or(link);
+    let crs = syms
+        .iter()
+        .find(|n| n.ends_with(&format!("{}._CRS", last)))?;
     let content = std::fs::read_to_string(format!("/scheme/acpi/symbols/{}", crs)).ok()?;
     let node = ron::from_str::<AmlSerde>(&content).ok()?;
     let AmlSerdeValue::Buffer(bytes) = node.value else {

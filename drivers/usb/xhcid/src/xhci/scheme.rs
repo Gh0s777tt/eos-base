@@ -34,8 +34,8 @@ use redox_scheme::{CallerCtx, OpenResult};
 use syscall::schemev2::NewFdFlags;
 use syscall::{
     Error, Result, Stat, EACCES, EBADF, EBADFD, EBADMSG, EINVAL, EIO, EISDIR, ENOENT, ENOSYS,
-    ENOTDIR, EOPNOTSUPP, EPROTO, ESPIPE, EWOULDBLOCK, MODE_CHR, MODE_DIR, MODE_FILE, O_DIRECTORY, O_RDWR,
-    O_STAT, O_WRONLY, SEEK_CUR, SEEK_END, SEEK_SET,
+    ENOTDIR, EOPNOTSUPP, EPROTO, ESPIPE, EWOULDBLOCK, MODE_CHR, MODE_DIR, MODE_FILE, O_DIRECTORY,
+    O_RDWR, O_STAT, O_WRONLY, SEEK_CUR, SEEK_END, SEEK_SET,
 };
 
 use core::future::Future as _;
@@ -697,7 +697,9 @@ impl<const N: usize> Xhci<N> {
         endp_num: EndpNum,
         stream_id: u16,
         mut d: D,
-    ) -> Result<impl core::future::Future<Output = super::irq_reactor::NextEventTrb> + Send + Sync + 'static>
+    ) -> Result<
+        impl core::future::Future<Output = super::irq_reactor::NextEventTrb> + Send + Sync + 'static,
+    >
     where
         D: FnMut(&mut Trb, bool) -> ControlFlow,
     {
@@ -1394,11 +1396,8 @@ impl<const N: usize> Xhci<N> {
 
         drop(port_state);
 
-        let future = self.execute_transfer_arm(
-            port_num,
-            endp_num,
-            stream_id,
-            move |trb, cycle| {
+        let future =
+            self.execute_transfer_arm(port_num, endp_num, stream_id, move |trb, cycle| {
                 let len = cmp::min(bytes_left, max_transfer_size as usize) as u32;
 
                 // set the interrupt on completion (IOC) flag for the last trb.
@@ -1430,8 +1429,7 @@ impl<const N: usize> Xhci<N> {
                 } else {
                     ControlFlow::Break
                 }
-            },
-        )?;
+            })?;
 
         Ok((future, dma_buf))
     }
@@ -2893,8 +2891,12 @@ impl<const N: usize> Xhci<N> {
             // waker with the reactor and rings the doorbell). A synchronous completion is finished
             // immediately; otherwise the transfer is stashed and we report EWOULDBLOCK.
             let dma = unsafe { self.alloc_dma_zeroed_unsized(buf.len())? };
-            let (fut, dma) =
-                self.transfer_arm(port_num, endp_num, Some(dma), PortReqDirection::DeviceToHost)?;
+            let (fut, dma) = self.transfer_arm(
+                port_num,
+                endp_num,
+                Some(dma),
+                PortReqDirection::DeviceToHost,
+            )?;
             let dma = dma.ok_or(Error::new(EIO))?;
             let flag = std::sync::Arc::new(super::FlagWaker::new());
             let mut fut: core::pin::Pin<

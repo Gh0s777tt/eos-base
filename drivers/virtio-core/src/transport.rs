@@ -666,7 +666,11 @@ impl Transport for StandardTransport<'_> {
             InterruptMethod::MsiX => vector,
             InterruptMethod::Intx => VIRTIO_MSI_NO_VECTOR,
         };
-        self.common.lock().unwrap().config_msix_vector.set(hw_vector);
+        self.common
+            .lock()
+            .unwrap()
+            .config_msix_vector
+            .set(hw_vector);
     }
 
     fn config_generation(&self) -> u32 {
