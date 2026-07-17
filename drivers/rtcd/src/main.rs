@@ -20,7 +20,26 @@ fn main() -> Result<()> {
         std::fs::write("/scheme/sys/update_time_offset", &time_ns.to_ne_bytes())
             .context("failed to write to time offset")?;
     }
-    // TODO: aarch64 is currently handled in the kernel
+    // On aarch64 the kernel only programs the RTC on a Device-Tree boot (rtc::init,
+    // via init_devicetree); on an ACPI/UEFI boot the clock stays at the Unix epoch
+    // (1970), which breaks TLS certificate-validity checks. The bootloader reads the
+    // firmware clock (UEFI GetTime) and passes it as BOOT_TIME=<unix_secs> in the
+    // kernel env, so apply the same offset x86 derives from the CMOS RTC.
+    #[cfg(target_arch = "aarch64")]
+    {
+        let env =
+            std::fs::read_to_string("/scheme/sys/env").context("failed to read /scheme/sys/env")?;
+        if let Some(time_s) = env.lines().find_map(|line| {
+            line.strip_prefix("BOOT_TIME=")
+                .and_then(|v| v.trim().parse::<u64>().ok())
+        }) {
+            let time_ns = u128::from(time_s) * 1_000_000_000;
+            std::fs::write("/scheme/sys/update_time_offset", &time_ns.to_ne_bytes())
+                .context("failed to write to time offset")?;
+        } else {
+            eprintln!("rtcd: no BOOT_TIME in kernel env; clock left at boot default");
+        }
+    }
 
     Ok(())
 }
