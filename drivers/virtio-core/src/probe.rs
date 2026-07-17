@@ -32,6 +32,11 @@ pub const MSIX_PRIMARY_VECTOR: u16 = 0;
 /// * Finally start the device (via [`StandardTransport::run_device`]). At this point, the device
 ///   is alive.
 ///
+/// ## Errors
+/// Returns [`Error::InCapable`] if the device exposes no modern (virtio 1.0)
+/// PCI capabilities — i.e. a legacy-only device — so the calling driver can
+/// exit gracefully instead of aborting.
+///
 /// ## Panics
 /// This function panics if the device is not a virtio device.
 pub fn probe_device(pcid_handle: &mut PciFunctionHandle) -> Result<Device, Error> {
@@ -92,9 +97,21 @@ pub fn probe_device(pcid_handle: &mut PciFunctionHandle) -> Result<Device, Error
         }
     }
 
-    let common_addr = common_addr.expect("virtio common capability missing");
-    let device_addr = device_addr.expect("virtio device capability missing");
-    let (notify_addr, notify_multiplier) = notify_addr.expect("virtio notify capability missing");
+    // A legacy-only (pre-virtio-1.0) device exposes none of the modern PCI
+    // capabilities. Don't panic — report it and let the driver exit cleanly
+    // (QEMU: such a device needs disable-legacy=off,disable-modern=off to be
+    // transitional; pure-legacy is unsupported by this driver stack).
+    if common_addr.is_none() {
+        log::error!(
+            "virtio-core: device {}:{} has no modern (virtio 1.0) PCI capabilities — \
+             legacy-only devices are unsupported",
+            pci_config.func.full_device_id.vendor_id,
+            pci_config.func.full_device_id.device_id
+        );
+    }
+    let common_addr = common_addr.ok_or(Error::InCapable(CfgType::Common))?;
+    let device_addr = device_addr.ok_or(Error::InCapable(CfgType::Device))?;
+    let (notify_addr, notify_multiplier) = notify_addr.ok_or(Error::InCapable(CfgType::Notify))?;
 
     // FIXME this is explicitly allowed by the virtio specification to happen
     assert!(
