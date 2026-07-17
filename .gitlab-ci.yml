@@ -1,6 +1,8 @@
 image: "redoxos/redoxer:latest"
 workflow:
   rules:
+    # E-OS fork: also run pipelines in the e-os namespace (dev branches vary: eos*, master)
+    - if: '$CI_PROJECT_NAMESPACE == "e-os"'
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_PROJECT_NAMESPACE == "redox-os"'
     - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
 
@@ -38,5 +40,7 @@ riscv64gc:
 
 boot:
     stage: test
+    # E-OS: no KVM on gitlab.com shared runners — QEMU-based test is best-effort
+    allow_failure: true
     script:
         - timeout -s KILL 9m ./check.sh --test
